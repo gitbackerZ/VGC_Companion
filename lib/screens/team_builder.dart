@@ -1521,8 +1521,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
     if (panelName == 'details') {
       final abilityOptions = _abilitiesCache[index];
-      final itemController = _itemControllers[index];
-      final itemFocus = _itemFocusNodes[index];
 
       List<DropdownMenuItem<String>> genderItems;
       final itemStyle = TextStyle(color: Theme.of(context).colorScheme.onInverseSurface);
