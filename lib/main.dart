@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'screens/damage_calculator.dart';
 import 'screens/team_builder.dart';
+import 'screens/offline_battle.dart';
 
 void main() {
   runApp(const MyApp());
@@ -73,6 +74,18 @@ class HomeScreen extends StatelessWidget {
                   MaterialPageRoute(builder: (_) => const TeamBuilderScreen()),
                 ),
                 child: const Text('Team Builder'),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Semantics(
+              button: true,
+              label: 'Open Offline Battle Simulator',
+              child: ElevatedButton(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const OfflineBattleScreen()),
+                ),
+                child: const Text('Offline Battle Simulator'),
               ),
             ),
           ],
