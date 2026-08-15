@@ -1086,6 +1086,9 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                   style: TextStyle(
                       color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.92)),
                   cursorColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.85),
+                      color: Theme.of(context).colorScheme.onInverseSurface),
+                  cursorColor: Theme.of(context).colorScheme.inversePrimary,
+
                   decoration: _adaptiveInputDecoration(
                     _searchMode == 'heldItem'
                         ? (_heldItemTargetIndex != null
@@ -1113,6 +1116,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                                   .colorScheme
                                   .onSurface
                                   .withValues(alpha: 0.75),
+                                  .onInverseSurface,
+
                             ),
                           )
                         : (_searchController.text.isNotEmpty
@@ -1128,6 +1133,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                                       .colorScheme
                                       .onSurface
                                       .withValues(alpha: 0.75),
+                                      .onInverseSurface,
+
                                 ),
                               )
                             : null),
@@ -1203,6 +1210,43 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                         textAlign: TextAlign.center,
                         style: const TextStyle(fontSize: 13),
                       ),
+              child: _searchController.text.trim().isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Text(
+                          _searchMode == 'heldItem'
+                              ? 'Type above to search Champions held items.'
+                              : 'Start typing above to search for Pokémon.',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: _filtered.length,
+                      itemBuilder: (context, index) {
+                        final name = _filtered[index];
+                        final isItem = _searchMode == 'heldItem';
+                        return Semantics(
+                          button: true,
+                          label: isItem
+                              ? 'Set held item to $name'
+                              : 'Add $name to team',
+                          child: ListTile(
+                            dense: true,
+                            title: Text(name),
+                            onTap: () {
+                              if (isItem) {
+                                _pickHeldItemFromSearch(name);
+                              } else {
+                                _addToTeam(name);
+                              }
+                            },
+                          ),
+                        );
+                      },
+
                     ),
                   );
                 }
@@ -1683,6 +1727,9 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           style: TextStyle(
               color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.92)),
           cursorColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.85),
+              color: Theme.of(context).colorScheme.onInverseSurface),
+          cursorColor: Theme.of(context).colorScheme.inversePrimary,
+
           decoration: _adaptiveInputDecoration('Held Item').copyWith(
             hintText: 'Type to search items…',
             hintStyle: TextStyle(
@@ -1690,6 +1737,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                   .colorScheme
                   .onSurface
                   .withValues(alpha: 0.55)
+                  .onInverseSurface
+
                   .withValues(alpha: 0.5),
             ),
             suffixIcon: itemController.text.isNotEmpty
@@ -1706,11 +1755,16 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                           .colorScheme
                           .onSurface
                           .withValues(alpha: 0.75),
+                      color:
+                          Theme.of(context).colorScheme.onInverseSurface,
+
                     ),
                   )
                 : Icon(
                     Icons.search,
                     color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.92),
+                    color: Theme.of(context).colorScheme.onInverseSurface,
+
                   ),
           ),
           onTap: () => _enterHeldItemSearch(index),

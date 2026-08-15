@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:flutter/services.dart' show rootBundle;
 
 class PokeApiService {
   static const String baseUrl = 'https://pokeapi.co/api/v2';
@@ -57,7 +58,14 @@ class PokeApiService {
   Future<int> getGenderRate(String name) async {
     // Species-level data applies even to forms; strip common form suffixes first.
     String baseName = name.toLowerCase().trim();
-    for (final suffix in ['-mega-x', '-mega-y', '-mega', '-gmax', '-female', '-male']) {
+    for (final suffix in [
+      '-mega-x',
+      '-mega-y',
+      '-mega',
+      '-gmax',
+      '-female',
+      '-male'
+    ]) {
       if (baseName.endsWith(suffix)) {
         baseName = baseName.substring(0, baseName.length - suffix.length);
         break;
@@ -124,9 +132,34 @@ class PokeApiService {
         .toList();
   }
 
+  /// Champions held-item pool from local JSON (PokeAPI-compatible hyphens).
+  /// Falls back to a broad PokéAPI category scrape only if the asset is missing.
   Future<List<String>> getHeldItemNames() async {
     if (_cachedHeldItems != null) return _cachedHeldItems!;
 
+    // Preferred: curated Champions pool shipped with the app.
+    try {
+      final raw =
+          await rootBundle.loadString('lib/data/champions_held_items.json');
+      final decoded = json.decode(raw);
+      final List<dynamic> list = decoded is Map
+          ? (decoded['allowed_held_items'] as List? ?? const [])
+          : (decoded as List);
+      final items = list
+          .map((e) => (e as String).toLowerCase().trim())
+          .where((e) => e.isNotEmpty)
+          .toSet()
+          .toList()
+        ..sort();
+      if (items.isNotEmpty) {
+        _cachedHeldItems = items;
+        return _cachedHeldItems!;
+      }
+    } catch (_) {
+      // Asset missing or malformed — fall through to network scrape.
+    }
+
+    // Fallback: scrape PokéAPI item categories (broader than Champions).
     final categoriesToFetch = [
       'held-items',
       'choice',
@@ -157,7 +190,8 @@ class PokeApiService {
           final data = json.decode(response.body);
           final items = data['items'] as List;
           for (final item in items) {
-            heldItems.add((item['name'] as String).replaceAll('-', ' '));
+            // Keep PokeAPI slug form (hyphenated) for consistency with JSON.
+            heldItems.add((item['name'] as String).toLowerCase());
           }
         }
       } catch (e) {
