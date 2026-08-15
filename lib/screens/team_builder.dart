@@ -75,6 +75,10 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   List<String> _excludedPokemon = [];
   List<String> _filtered = [];
   List<TeamMember> _team = [];
+
+  /// Top search field mode: species (add to team) or held-item (assign to a member).
+  String _searchMode = 'species'; // 'species' | 'heldItem'
+  int? _heldItemTargetIndex; // which team slot receives the chosen item
   final Map<int, List<String>> _movesCache = {};
   final Map<int, List<Map<String, dynamic>>> _abilitiesCache = {};
 
@@ -234,22 +238,29 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       _cachedValidItems ??= await _service.getHeldItemNames();
       final normalizedSlug = raw.replaceAll(' ', '-');
       final normalizedSpace = raw.replaceAll('-', ' ');
-      final isMatch = _cachedValidItems!.any((item) {
+
+      // Resolve to the canonical name from the Champions pool (hyphenated slug).
+      String? canonical;
+      for (final item in _cachedValidItems!) {
         final clean = item.toLowerCase();
-        return clean == raw ||
+        if (clean == raw ||
             clean == normalizedSlug ||
-            clean == normalizedSpace;
-      });
-      if (isMatch) {
-        await _setHeldItem(index, raw);
-        // Reflect whatever was accepted (may be unchanged on clause violation)
+            clean == normalizedSpace ||
+            clean.replaceAll('-', ' ') == normalizedSpace) {
+          canonical = clean;
+          break;
+        }
+      }
+
+      if (canonical != null) {
+        await _setHeldItem(index, canonical);
         controller.text = _team[index].heldItem ?? '';
       } else {
-        _announce('Not a recognized held item name.');
+        _announce('Not a recognized Champions held item.');
         controller.text = _team[index].heldItem ?? '';
       }
     } catch (_) {
-      _announce('Could not validate held item. Check your connection.');
+      _announce('Could not validate held item.');
       controller.text = _team[index].heldItem ?? '';
     }
   }
@@ -261,9 +272,18 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
   Future<void> _loadData() async {
     try {
-      final rosterJson = await rootBundle.loadString('lib/data/champions_roster.json');
+      final rosterJson =
+          await rootBundle.loadString('lib/data/champions_roster.json');
       final roster = json.decode(rosterJson);
-      final List<String> allowed = List<String>.from(roster['allowed_pokemon']);
+      final List<String> allowed =
+          List<String>.from(roster['allowed_pokemon']);
+
+      // Prefetch Champions held-item pool (curated JSON via PokeApiService).
+      try {
+        _cachedValidItems = await _service.getHeldItemNames();
+      } catch (_) {
+        _cachedValidItems = [];
+      }
 
       await _loadSavedTeam();
 
@@ -300,15 +320,75 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   }
 
   void _filter(String query) {
+    final q = query.trim().toLowerCase();
     setState(() {
-      if (query.trim().isEmpty) {
+      if (q.isEmpty) {
         _filtered = [];
+        return;
+      }
+      if (_searchMode == 'heldItem') {
+        final pool = _cachedValidItems ?? const <String>[];
+        _filtered = pool.where((item) => item.toLowerCase().contains(q)).toList();
       } else {
-        _filtered = _allSpecies
-            .where((p) => p.toLowerCase().contains(query.toLowerCase()))
-            .toList();
+        _filtered =
+            _allSpecies.where((p) => p.toLowerCase().contains(q)).toList();
       }
     });
+  }
+
+  void _enterHeldItemSearch(int teamIndex) {
+    _ensureItemController(teamIndex);
+    setState(() {
+      _searchMode = 'heldItem';
+      _heldItemTargetIndex = teamIndex;
+    });
+    // Filter from whatever is already in the held-item field
+    final existing = _itemControllers[teamIndex]?.text ?? '';
+    _filterHeldItems(existing);
+  }
+
+  void _exitHeldItemSearch() {
+    setState(() {
+      _searchMode = 'species';
+      _heldItemTargetIndex = null;
+      final q = _searchController.text.trim().toLowerCase();
+      _filtered = q.isEmpty
+          ? []
+          : _allSpecies.where((p) => p.toLowerCase().contains(q)).toList();
+    });
+  }
+
+  /// Filter held-item pool on every keystroke (same contains-match as species).
+  void _filterHeldItems(String query) {
+    final q = query.trim().toLowerCase();
+    setState(() {
+      _searchMode = 'heldItem';
+      if (q.isEmpty) {
+        _filtered = [];
+      } else {
+        final pool = _cachedValidItems ?? const <String>[];
+        _filtered =
+            pool.where((item) => item.toLowerCase().contains(q)).toList();
+      }
+    });
+  }
+
+  Future<void> _pickHeldItemFromSearch(String itemName) async {
+    final index = _heldItemTargetIndex;
+    if (index == null || index < 0 || index >= _team.length) {
+      _exitHeldItemSearch();
+      return;
+    }
+    await _setHeldItem(index, itemName);
+    if (_itemControllers.containsKey(index)) {
+      _itemControllers[index]!.text = _team[index].heldItem ?? '';
+    }
+    setState(() {
+      _searchMode = 'species';
+      _heldItemTargetIndex = null;
+      _filtered = [];
+    });
+    _unfocus();
   }
 
   Future<void> _addToTeam(String name) async {
@@ -992,7 +1072,9 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
               child: Semantics(
-                label: 'Search Pokémon by name',
+                label: _searchMode == 'heldItem'
+                    ? 'Search held items by name'
+                    : 'Search Pokémon by name',
                 child: TextField(
                   controller: _searchController,
                   focusNode: _searchFocusNode,
@@ -1000,14 +1082,48 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                   style: TextStyle(
                       color: Theme.of(context).colorScheme.onInverseSurface),
                   cursorColor: Theme.of(context).colorScheme.inversePrimary,
-                  decoration: _adaptiveInputDecoration('Search Pokémon').copyWith(
+                  decoration: _adaptiveInputDecoration(
+                    _searchMode == 'heldItem'
+                        ? (_heldItemTargetIndex != null
+                            ? 'Held item for ${_team[_heldItemTargetIndex!].name}'
+                            : 'Search held items')
+                        : 'Search Pokémon',
+                  ).copyWith(
                     prefixIcon: Icon(
-                      Icons.search,
+                      _searchMode == 'heldItem'
+                          ? Icons.inventory_2_outlined
+                          : Icons.search,
                       color: Theme.of(context)
                           .colorScheme
                           .onInverseSurface
                           .withValues(alpha: 0.75),
                     ),
+                    suffixIcon: _searchMode == 'heldItem'
+                        ? IconButton(
+                            tooltip: 'Cancel item search',
+                            onPressed: _exitHeldItemSearch,
+                            icon: Icon(
+                              Icons.close,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onInverseSurface,
+                            ),
+                          )
+                        : (_searchController.text.isNotEmpty
+                            ? IconButton(
+                                tooltip: 'Clear search',
+                                onPressed: () {
+                                  _searchController.clear();
+                                  _filter('');
+                                },
+                                icon: Icon(
+                                  Icons.clear,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onInverseSurface,
+                                ),
+                              )
+                            : null),
                   ),
                   onChanged: _filter,
                 ),
@@ -1046,13 +1162,15 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
             Expanded(
               flex: 2,
               child: _searchController.text.trim().isEmpty
-                  ? const Center(
+                  ? Center(
                       child: Padding(
-                        padding: EdgeInsets.all(16.0),
+                        padding: const EdgeInsets.all(16.0),
                         child: Text(
-                          'Start typing above to search for Pokémon.',
+                          _searchMode == 'heldItem'
+                              ? 'Type above to search Champions held items.'
+                              : 'Start typing above to search for Pokémon.',
                           textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 13),
+                          style: const TextStyle(fontSize: 13),
                         ),
                       ),
                     )
@@ -1060,13 +1178,22 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                       itemCount: _filtered.length,
                       itemBuilder: (context, index) {
                         final name = _filtered[index];
+                        final isItem = _searchMode == 'heldItem';
                         return Semantics(
                           button: true,
-                          label: 'Add $name to team',
+                          label: isItem
+                              ? 'Set held item to $name'
+                              : 'Add $name to team',
                           child: ListTile(
                             dense: true,
                             title: Text(name),
-                            onTap: () => _addToTeam(name),
+                            onTap: () {
+                              if (isItem) {
+                                _pickHeldItemFromSearch(name);
+                              } else {
+                                _addToTeam(name);
+                              }
+                            },
                           ),
                         );
                       },
@@ -1494,99 +1621,63 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         ),
       );
 
-      final itemField = (itemController == null || itemFocus == null)
-          ? const Center(child: CircularProgressIndicator())
-          : Semantics(
-              label:
-                  'Held item for ${member.name}, currently ${member.heldItem ?? "none"}',
-              textField: true,
-              child: RawAutocomplete<String>(
-                textEditingController: itemController,
-                focusNode: itemFocus,
-                optionsBuilder: (TextEditingValue value) {
-                  final query = value.text.trim().toLowerCase();
-                  final pool = _cachedValidItems ?? const <String>[];
-                  if (query.isEmpty) {
-                    // Show a short default list so the user discovers items
-                    return pool.take(12);
-                  }
-                  return pool
-                      .where((item) => item.toLowerCase().contains(query))
-                      .take(20);
-                },
-                onSelected: (String selection) {
-                  itemController.text = selection;
-                  _commitHeldItem(index);
-                },
-                fieldViewBuilder: (
-                  context,
-                  textController,
-                  focusNode,
-                  onFieldSubmitted,
-                ) {
-                  return TextField(
-                    controller: textController,
-                    focusNode: focusNode,
-                    style: TextStyle(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onInverseSurface),
-                    cursorColor:
-                        Theme.of(context).colorScheme.inversePrimary,
-                    decoration:
-                        _adaptiveInputDecoration('Held Item').copyWith(
-                      hintText: 'e.g. life orb, leftovers',
-                      hintStyle: TextStyle(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onInverseSurface
-                            .withValues(alpha: 0.5),
-                      ),
-                    ),
-                    onEditingComplete: () {
-                      _commitHeldItem(index);
-                      focusNode.unfocus();
+      // Ensure controller exists before building the field
+      _ensureItemController(index);
+      final itemController = _itemControllers[index]!;
+      final itemFocus = _itemFocusNodes[index]!;
+
+      final itemField = Semantics(
+        label:
+            'Held item for ${member.name}, currently ${member.heldItem ?? "none"}. Type to search.',
+        textField: true,
+        child: TextField(
+          controller: itemController,
+          focusNode: itemFocus,
+          style: TextStyle(
+              color: Theme.of(context).colorScheme.onInverseSurface),
+          cursorColor: Theme.of(context).colorScheme.inversePrimary,
+          decoration: _adaptiveInputDecoration('Held Item').copyWith(
+            hintText: 'Type to search items…',
+            hintStyle: TextStyle(
+              color: Theme.of(context)
+                  .colorScheme
+                  .onInverseSurface
+                  .withValues(alpha: 0.5),
+            ),
+            suffixIcon: itemController.text.isNotEmpty
+                ? IconButton(
+                    tooltip: 'Clear held item',
+                    onPressed: () async {
+                      itemController.clear();
+                      await _setHeldItem(index, '');
+                      _filterHeldItems('');
                     },
-                    onSubmitted: (_) {
-                      _commitHeldItem(index);
-                      onFieldSubmitted();
-                    },
-                  );
-                },
-                optionsViewBuilder: (context, onSelected, options) {
-                  final cs = Theme.of(context).colorScheme;
-                  return Align(
-                    alignment: Alignment.topLeft,
-                    child: Material(
-                      elevation: 4,
-                      color: cs.inverseSurface,
-                      borderRadius: BorderRadius.circular(8),
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(
-                            maxHeight: 200, maxWidth: 280),
-                        child: ListView.builder(
-                          padding: EdgeInsets.zero,
-                          shrinkWrap: true,
-                          itemCount: options.length,
-                          itemBuilder: (context, i) {
-                            final option = options.elementAt(i);
-                            return ListTile(
-                              dense: true,
-                              title: Text(
-                                option,
-                                style:
-                                    TextStyle(color: cs.onInverseSurface),
-                              ),
-                              onTap: () => onSelected(option),
-                            );
-                          },
-                        ),
-                      ),
+                    icon: Icon(
+                      Icons.clear,
+                      color:
+                          Theme.of(context).colorScheme.onInverseSurface,
                     ),
-                  );
-                },
-              ),
-            );
+                  )
+                : Icon(
+                    Icons.search,
+                    color: Theme.of(context).colorScheme.onInverseSurface,
+                  ),
+          ),
+          onTap: () => _enterHeldItemSearch(index),
+          onChanged: (value) {
+            // Same keystroke behavior as species search: filter the shared list
+            if (_heldItemTargetIndex != index) {
+              _heldItemTargetIndex = index;
+            }
+            _filterHeldItems(value);
+          },
+          onEditingComplete: () {
+            _commitHeldItem(index);
+            itemFocus.unfocus();
+          },
+          onSubmitted: (_) => _commitHeldItem(index),
+        ),
+      );
 
       // 2 columns × 2 rows: Item | Gender / Ability | Nature
       return Column(
