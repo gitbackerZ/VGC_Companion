@@ -156,50 +156,13 @@ class PokeApiService {
         return _cachedHeldItems!;
       }
     } catch (_) {
-      // Asset missing or malformed — fall through to network scrape.
+      // Asset missing or malformed.
     }
 
-    // Fallback: scrape PokéAPI item categories (broader than Champions).
-    final categoriesToFetch = [
-      'held-items',
-      'choice',
-      'type-enhancement',
-      'species-specific',
-      'stat-boosts',
-      'baking-only',
-      'plates',
-      'z-crystals',
-      'in-a-pinch',
-      'jewels',
-      'mega-stones',
-      'spelunking',
-      'effort-drop',
-      'medicine',
-      'flute',
-      'vitamins',
-    ];
-
-    final Set<String> heldItems = {};
-
-    for (final category in categoriesToFetch) {
-      try {
-        final response = await http.get(
-          Uri.parse('$baseUrl/item-category/$category'),
-        );
-        if (response.statusCode == 200) {
-          final data = json.decode(response.body);
-          final items = data['items'] as List;
-          for (final item in items) {
-            // Keep PokeAPI slug form (hyphenated) for consistency with JSON.
-            heldItems.add((item['name'] as String).toLowerCase());
-          }
-        }
-      } catch (e) {
-        continue;
-      }
-    }
-
-    _cachedHeldItems = heldItems.toList()..sort();
+    // Do not scrape PokéAPI categories here — that is many sequential HTTP
+    // calls and makes Team Builder startup very slow. Prefer shipping
+    // lib/data/champions_held_items.json as an asset.
+    _cachedHeldItems = [];
     return _cachedHeldItems!;
   }
 }
