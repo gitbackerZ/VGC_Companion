@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_js/flutter_js.dart';
@@ -39,16 +41,32 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     }
   }
 
+  void _fetchLogs() {
+    if (_jsRuntime == null) return;
+    try {
+      final rawJson = _jsRuntime!.evaluate("globalThis.getLogs();").stringResult;
+      final List<dynamic> parsed = jsonDecode(rawJson);
+      if (parsed.isNotEmpty) {
+        setState(() {
+          for (var chunk in parsed) {
+            _logs.add(chunk.toString().trim());
+          }
+        });
+      }
+    } catch (e) {
+      // Handle parse error if engine returns non-array string
+    }
+  }
+
   void _startBattle() {
     if (_jsRuntime == null) return;
-    // Example test teams in Showdown format
     const p1Team = 'Incineroar||sitrusberry|intimidate|fakeout,flareblitz,knockoff,partingshot|Careful|252,0,156,0,100,0';
     const p2Team = 'Flutter Mane||boosterenergy|protosynthesis|dazzlinggleam,shadowball,moonblast,protect|Timid|0,0,4,252,0,252';
 
     _jsRuntime!.evaluate("globalThis.startVGCBattle('gen9vgc2024', '$p1Team', '$p2Team');");
-    setState(() {
-      _logs.add('Battle started!');
-    });
+    
+    // Retrieve logs shortly after sending start stream
+    Future.delayed(const Duration(milliseconds: 300), _fetchLogs);
   }
 
   @override
