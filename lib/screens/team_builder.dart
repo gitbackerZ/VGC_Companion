@@ -157,6 +157,12 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     });
   }
 
+  int _extractPokedexNumber(Map<String, dynamic> data) {
+    if (data['num'] is int) return data['num'] as int;
+    if (data['id'] is int) return data['id'] as int;
+    return int.tryParse(data['id']?.toString() ?? '0') ?? 0;
+  }
+
   Future<void> _addToTeam(String name) async {
     _unfocus();
     if (_team.length >= 6) {
@@ -166,9 +172,10 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
     try {
       final String selectedFormName = name;
-
       final data = await _service.getPokemon(selectedFormName);
-      final pokedexNumber = data['id'] as int;
+
+      // Safe integer extraction for Dex Number
+      final pokedexNumber = _extractPokedexNumber(data);
 
       if (_team.any((m) => m.name == selectedFormName)) {
         _announce('$selectedFormName is already on your team.');
@@ -178,22 +185,31 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       List<String?> defaultMoves = List.filled(4, null);
       String? defaultAbility;
 
-      try {
-        final abilities =
-            await _service.getAbilitiesForPokemon(selectedFormName);
-        if (abilities.isNotEmpty) {
-          defaultAbility = abilities.first['name'] as String;
-        }
-      } catch (_) {}
+      // Check payload abilities first, fallback to service call
+      if (data['abilities'] is List && (data['abilities'] as List).isNotEmpty) {
+        defaultAbility = (data['abilities'] as List).first.toString();
+      } else {
+        try {
+          final abilities = await _service.getAbilitiesForPokemon(selectedFormName);
+          if (abilities.isNotEmpty) {
+            defaultAbility = abilities.first['name'] as String;
+          }
+        } catch (_) {}
+      }
 
       try {
-        final moves = await _service.getMovesForPokemon(selectedFormName);
+        final moveList = await _service.getMoveList();
+        final moves = moveList.map((m) => m['name'].toString()).toList();
         for (int i = 0; i < 4 && i < moves.length; i++) {
           defaultMoves[i] = moves[i];
         }
       } catch (_) {}
 
-      final genderRate = await _service.getGenderRate(selectedFormName);
+      int genderRate = 4;
+      try {
+        genderRate = await _service.getGenderRate(selectedFormName);
+      } catch (_) {}
+
       String defaultGender;
       if (genderRate == -1) {
         defaultGender = 'Genderless';
@@ -220,7 +236,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       });
       await _saveTeam();
       _announce('$selectedFormName added to your team.');
-    } catch (e) {
+    } catch (e, stack) {
+      debugPrint('Error adding $name: $e\n$stack');
       _announce('Could not add $name. Check the name and try again.');
     } finally {
       _unfocus();
@@ -316,14 +333,17 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     if (_activePanels[index] != null) {
       if (!_movesCache.containsKey(index)) {
         try {
-          final moves = await _service.getMovesForPokemon(_team[index].name);
+          final moveList = await _service.getMoveList();
+          final moves = moveList.map((m) => m['name'].toString()).toList();
           setState(() => _movesCache[index] = moves);
         } catch (_) {}
       }
       if (!_abilitiesCache.containsKey(index)) {
         try {
-          final abilities =
-              await _service.getAbilitiesForPokemon(_team[index].name);
+          final data = await _service.getPokemon(_team[index].name);
+          final abilities = (data['abilities'] as List? ?? [])
+              .map((a) => {'name': a.toString()})
+              .toList();
           setState(() => _abilitiesCache[index] = abilities);
         } catch (_) {}
       }
@@ -403,7 +423,10 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       final boosted = natureInfo['plus'] ?? '';
       final lowered = natureInfo['minus'] ?? '';
 
-      final normalBaseStats = await _service.getBaseStats(member.name);
+      final pokemonData = await _service.getPokemon(member.name);
+      final rawStats = pokemonData['baseStats'] as Map<String, dynamic>;
+      final normalBaseStats = rawStats.map((k, v) => MapEntry(k, (v as num).toInt()));
+
       final normalStats = StatCalculator.calculate(
         baseStats: normalBaseStats,
         evs: member.evs,
@@ -534,7 +557,10 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         final boosted = natureInfo['plus'] ?? '';
         final lowered = natureInfo['minus'] ?? '';
 
-        final baseStats = await _service.getBaseStats(member.name);
+        final pokemonData = await _service.getPokemon(member.name);
+        final rawStats = pokemonData['baseStats'] as Map<String, dynamic>;
+        final baseStats = rawStats.map((k, v) => MapEntry(k, (v as num).toInt()));
+
         baseStatsByIndex[i] = StatCalculator.calculate(
           baseStats: baseStats,
           evs: member.evs,
@@ -558,9 +584,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
             }
           } catch (_) {}
         }
-      } catch (_) {
-        // Skip stats for this member if fetch fails
-      }
+      } catch (_) {}
     }
 
     if (!mounted) return;
@@ -716,8 +740,14 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       if (_team.length + toAdd.length >= 6) break;
       try {
         final data = await _service.getPokemon(member.name);
-        member.pokedexNumber = data['id'] as int;
-        member.genderRate = await _service.getGenderRate(member.name);
+        member.pokedexNumber = _extractPokedexNumber(data);
+        
+        try {
+          member.genderRate = await _service.getGenderRate(member.name);
+        } catch (_) {
+          member.genderRate = 4;
+        }
+
         if (_team.any((m) => m.name == member.name) ||
             toAdd.any((m) => m.name == member.name)) {
           failed++;
