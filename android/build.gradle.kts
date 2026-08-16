@@ -21,7 +21,7 @@ subprojects {
 }
 
 subprojects {
-    afterEvaluate {
+    val configureJvm = {
         tasks.withType<JavaCompile>().configureEach {
             sourceCompatibility = "17"
             targetCompatibility = "17"
@@ -30,6 +30,14 @@ subprojects {
             compilerOptions {
                 jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
             }
+        }
+    }
+
+    if (state.executed) {
+        configureJvm()
+    } else {
+        afterEvaluate {
+            configureJvm()
         }
     }
 }
