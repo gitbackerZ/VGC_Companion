@@ -5,7 +5,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/js_engine_service.dart';
 import '../services/stat_calculator.dart';
 import '../services/team_text_codec.dart';
-import '../data/natures.dart';
 import '../widgets/ev_editor_panel.dart';
 import '../widgets/details_editor_panel.dart';
 
