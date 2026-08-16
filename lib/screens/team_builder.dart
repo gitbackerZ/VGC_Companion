@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle, Clipboard, ClipboardData;
 import 'package:shared_preferences/shared_preferences.dart';
-import '../services/pokeapi_service.dart';
+import '../services/js_engine_service.dart';
 import '../services/stat_calculator.dart';
 import '../services/team_text_codec.dart';
 import '../data/natures.dart';
@@ -68,7 +68,7 @@ class TeamBuilderScreen extends StatefulWidget {
 }
 
 class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
-  final _service = PokeApiService();
+  final _service = JsEngineService();
   final _searchController = TextEditingController();
   final _searchFocusNode = FocusNode();
   static const _storageKey = 'saved_team';
@@ -106,6 +106,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
   Future<void> _loadData() async {
     try {
+      await _service.init();
       final rosterJson =
           await rootBundle.loadString('lib/data/champions_roster.json');
       final roster = json.decode(rosterJson);
