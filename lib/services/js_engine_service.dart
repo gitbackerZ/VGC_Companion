@@ -16,7 +16,6 @@ class JsEngineService {
 
     _jsRuntime = getJavascriptRuntime();
 
-    // Environment polyfills for Browser/CommonJS/UMD JS bundles
     _jsRuntime.evaluate('''
       var global = globalThis;
       var window = globalThis;
@@ -31,35 +30,6 @@ class JsEngineService {
     if (result.isError) {
       throw Exception('Failed to evaluate assets/engine.js: ${result.stringResult}');
     }
-
-    // Inspect export targets and bind Dex globally
-    _jsRuntime.evaluate('''
-      (function() {
-        if (typeof globalThis.Dex !== 'undefined') return;
-
-        // 1. Check if module.exports is the Dex object itself
-        if (typeof module !== 'undefined' && module.exports) {
-          var mod = module.exports;
-          if (mod.species || mod.data || mod.getSpecies || mod.pokedex) {
-            globalThis.Dex = mod;
-            return;
-          }
-          if (mod.Dex) {
-            globalThis.Dex = mod.Dex;
-            return;
-          }
-          if (mod.default) {
-            globalThis.Dex = mod.default.Dex || mod.default;
-            return;
-          }
-        }
-
-        // 2. Check standalone global scope
-        if (typeof Dex !== 'undefined') {
-          globalThis.Dex = Dex;
-        }
-      })();
-    ''');
 
     _initialized = true;
   }
@@ -83,33 +53,11 @@ class JsEngineService {
   Future<List<String>> getSpeciesList() async {
     final decoded = _evalJson('''
       (function() {
-        var dexObj = typeof Dex !== 'undefined' ? Dex : (typeof globalThis.Dex !== 'undefined' ? globalThis.Dex : null);
-        
-        if (!dexObj) {
-          var globalKeys = Object.keys(globalThis).filter(function(k) {
-            return k !== 'global' && k !== 'window' && k !== 'self' && k !== 'globalThis';
-          }).join(', ');
-          var modType = typeof module !== 'undefined' ? typeof module.exports : 'undefined';
-          return JSON.stringify({ 
-            error: "Dex object is undefined. Available global keys: [" + globalKeys + "]. module.exports type: " + modType
-          });
+        if (typeof getSpeciesList === 'function') {
+          var res = getSpeciesList();
+          return typeof res === 'string' ? res : JSON.stringify(res);
         }
-
-        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex || dexObj.pokedex;
-        if (!speciesMap) {
-          var dexKeys = Object.keys(dexObj).join(', ');
-          return JSON.stringify({ error: "Species map missing on Dex object. Dex keys: [" + dexKeys + "]" });
-        }
-        
-        var list = [];
-        if (typeof speciesMap.all === 'function') {
-          list = speciesMap.all().map(function(s) { return s.name; });
-        } else if (typeof speciesMap === 'object') {
-          list = Object.keys(speciesMap).map(function(k) { 
-            return speciesMap[k].name || speciesMap[k].species || k; 
-          });
-        }
-        return JSON.stringify(list);
+        return JSON.stringify({ error: "getSpeciesList function is not defined globally." });
       })()
     ''');
 
@@ -123,15 +71,21 @@ class JsEngineService {
   Future<Map<String, dynamic>> getPokemon(String name) async {
     final decoded = _evalJson('''
       (function() {
-        var dexObj = typeof Dex !== 'undefined' ? Dex : globalThis.Dex;
-        if (!dexObj) return JSON.stringify({ error: "Dex undefined" });
-        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex || dexObj.pokedex;
-        var p = typeof speciesMap.get === 'function' ? speciesMap.get('$name') : speciesMap['$name'];
-        if (!p) return JSON.stringify({ error: "Pokémon not found: $name" });
-        return JSON.stringify({
-          id: p.num || p.pokedexNumber || 0,
-          name: p.name || '$name'
-        });
+        if (typeof getPokemon === 'function') {
+          var p = getPokemon('$name');
+          if (p) return JSON.stringify(p);
+        }
+        // Fallback: check if getSpeciesList data can find it
+        if (typeof getSpeciesList === 'function') {
+          var all = getSpeciesList();
+          var match = Array.isArray(all) ? all.find(function(s) { 
+            return (typeof s === 'string' ? s : s.name).toLowerCase() === '$name'.toLowerCase(); 
+          }) : null;
+          if (match) {
+            return JSON.stringify(typeof match === 'string' ? { id: 0, name: match } : match);
+          }
+        }
+        return JSON.stringify({ error: "Pokémon not found: $name" });
       })()
     ''');
 
@@ -145,22 +99,11 @@ class JsEngineService {
   Future<List<Map<String, dynamic>>> getAbilitiesForPokemon(String name) async {
     final decoded = _evalJson('''
       (function() {
-        var dexObj = typeof Dex !== 'undefined' ? Dex : globalThis.Dex;
-        if (!dexObj) return JSON.stringify([]);
-        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex || dexObj.pokedex;
-        var p = typeof speciesMap.get === 'function' ? speciesMap.get('$name') : speciesMap['$name'];
-        if (!p || !p.abilities) return JSON.stringify([]);
-        
-        var abilities = [];
-        var abs = p.abilities;
-        if (Array.isArray(abs)) {
-          abilities = abs.map(function(a) { return { name: a }; });
-        } else if (typeof abs === 'object') {
-          Object.keys(abs).forEach(function(key) {
-            if (abs[key]) abilities.push({ name: abs[key] });
-          });
+        if (typeof getAbilities === 'function') {
+          var res = getAbilities('$name');
+          return typeof res === 'string' ? res : JSON.stringify(res);
         }
-        return JSON.stringify(abilities);
+        return JSON.stringify([]);
       })()
     ''');
 
@@ -170,18 +113,11 @@ class JsEngineService {
   Future<List<String>> getMovesForPokemon(String name) async {
     final decoded = _evalJson('''
       (function() {
-        var dexObj = typeof Dex !== 'undefined' ? Dex : globalThis.Dex;
-        if (!dexObj) return JSON.stringify([]);
-        var movesMap = dexObj.moves || dexObj.data?.Moves;
-        if (!movesMap) return JSON.stringify([]);
-        
-        var list = [];
-        if (typeof movesMap.all === 'function') {
-          list = movesMap.all().map(function(m) { return m.name; });
-        } else if (typeof movesMap === 'object') {
-          list = Object.keys(movesMap).map(function(k) { return movesMap[k].name || k; });
+        if (typeof getMoveList === 'function') {
+          var res = getMoveList('$name');
+          return typeof res === 'string' ? res : JSON.stringify(res);
         }
-        return JSON.stringify(list);
+        return JSON.stringify([]);
       })()
     ''');
 
@@ -191,19 +127,10 @@ class JsEngineService {
   Future<int> getGenderRate(String name) async {
     final decoded = _evalJson('''
       (function() {
-        var dexObj = typeof Dex !== 'undefined' ? Dex : globalThis.Dex;
-        if (!dexObj) return JSON.stringify(4);
-        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex || dexObj.pokedex;
-        var p = typeof speciesMap.get === 'function' ? speciesMap.get('$name') : speciesMap['$name'];
-        if (!p) return JSON.stringify(4);
-        if (p.gender === 'N') return JSON.stringify(-1);
-        if (p.gender === 'M') return JSON.stringify(0);
-        if (p.gender === 'F') return JSON.stringify(8);
-        if (p.genderRatio) {
-          if (p.genderRatio.M === 1) return JSON.stringify(0);
-          if (p.genderRatio.F === 1) return JSON.stringify(8);
+        if (typeof getGenderRate === 'function') {
+          return getGenderRate('$name');
         }
-        return JSON.stringify(4);
+        return 4;
       })()
     ''');
 
@@ -213,11 +140,11 @@ class JsEngineService {
   Future<Map<String, dynamic>> getNatureBoosts(String nature) async {
     final decoded = _evalJson('''
       (function() {
-        var dexObj = typeof Dex !== 'undefined' ? Dex : globalThis.Dex;
-        if (!dexObj || !dexObj.natures) return JSON.stringify({ plus: null, minus: null });
-        var n = typeof dexObj.natures.get === 'function' ? dexObj.natures.get('$nature') : dexObj.natures['$nature'];
-        if (!n) return JSON.stringify({ plus: null, minus: null });
-        return JSON.stringify({ plus: n.plus || null, minus: n.minus || null });
+        if (typeof getNatureBoosts === 'function') {
+          var res = getNatureBoosts('$nature');
+          return typeof res === 'string' ? res : JSON.stringify(res);
+        }
+        return JSON.stringify({ plus: null, minus: null });
       })()
     ''');
 
@@ -227,12 +154,11 @@ class JsEngineService {
   Future<Map<String, int>> getBaseStats(String name) async {
     final decoded = _evalJson('''
       (function() {
-        var dexObj = typeof Dex !== 'undefined' ? Dex : globalThis.Dex;
-        if (!dexObj) return JSON.stringify({ hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 });
-        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex || dexObj.pokedex;
-        var p = typeof speciesMap.get === 'function' ? speciesMap.get('$name') : speciesMap['$name'];
-        if (!p || !p.baseStats) return JSON.stringify({ hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 });
-        return JSON.stringify(p.baseStats);
+        if (typeof getBaseStats === 'function') {
+          var res = getBaseStats('$name');
+          return typeof res === 'string' ? res : JSON.stringify(res);
+        }
+        return JSON.stringify({ hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 });
       })()
     ''');
 
@@ -243,20 +169,11 @@ class JsEngineService {
   Future<Map<String, Map<String, int>>> getAllMegaBaseStats(String name) async {
     final decoded = _evalJson('''
       (function() {
-        var dexObj = typeof Dex !== 'undefined' ? Dex : globalThis.Dex;
-        if (!dexObj) return JSON.stringify({});
-        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex || dexObj.pokedex;
-        var result = {};
-        
-        if (speciesMap && typeof speciesMap.all === 'function') {
-          var all = speciesMap.all();
-          all.forEach(function(s) {
-            if (s.name.toLowerCase().indexOf('$name'.toLowerCase() + '-mega') === 0 && s.baseStats) {
-              result[s.name] = s.baseStats;
-            }
-          });
+        if (typeof getAllMegaBaseStats === 'function') {
+          var res = getAllMegaBaseStats('$name');
+          return typeof res === 'string' ? res : JSON.stringify(res);
         }
-        return JSON.stringify(result);
+        return JSON.stringify({});
       })()
     ''');
 
