@@ -27,7 +27,7 @@ class JsEngineService {
     final result = _jsRuntime.evaluate(script);
 
     if (result.isError) {
-      throw Exception('Failed to evaluate assets/engine.js: ${result.string}');
+      throw Exception('Failed to evaluate assets/engine.js: ${result.stringResult}');
     }
 
     _initialized = true;
@@ -38,10 +38,10 @@ class JsEngineService {
     final result = _jsRuntime.evaluate(jsCode);
 
     if (result.isError) {
-      throw Exception('JS Runtime Error: ${result.string}');
+      throw Exception('JS Runtime Error: ${result.stringResult}');
     }
 
-    final rawString = result.string;
+    final rawString = result.stringResult;
     try {
       return jsonDecode(rawString);
     } catch (e) {
