@@ -107,7 +107,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   Future<void> _loadData() async {
     try {
       await _service.init();
-      
+
       final allowed = await _service.getSpeciesList();
 
       await _loadSavedTeam();
@@ -197,9 +197,10 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         } catch (_) {}
       }
 
+      // Species-specific learnset lookup instead of the full move dex
       try {
-        final moveList = await _service.getMoveList();
-        final moves = moveList.map((m) => m['name'].toString()).toList();
+        final movesData = await _service.getMovesForSpecies(selectedFormName);
+        final moves = movesData.map((m) => m['name'].toString()).toList();
         for (int i = 0; i < 4 && i < moves.length; i++) {
           defaultMoves[i] = moves[i];
         }
@@ -333,8 +334,9 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     if (_activePanels[index] != null) {
       if (!_movesCache.containsKey(index)) {
         try {
-          final moveList = await _service.getMoveList();
-          final moves = moveList.map((m) => m['name'].toString()).toList();
+          // Species-specific learnset lookup instead of the full move dex
+          final movesData = await _service.getMovesForSpecies(_team[index].name);
+          final moves = movesData.map((m) => m['name'].toString()).toList();
           setState(() => _movesCache[index] = moves);
         } catch (_) {}
       }
@@ -741,7 +743,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       try {
         final data = await _service.getPokemon(member.name);
         member.pokedexNumber = _extractPokedexNumber(data);
-        
+
         try {
           member.genderRate = await _service.getGenderRate(member.name);
         } catch (_) {
@@ -1197,6 +1199,14 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           const SizedBox(height: 6),
           if (moveOptions == null)
             const Center(child: CircularProgressIndicator())
+          else if (moveOptions.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8.0),
+              child: Text(
+                'No learnable moves found for this Pokémon.',
+                style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+              ),
+            )
           else
             ...List.generate(2, (row) {
               return Padding(
