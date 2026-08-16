@@ -21,27 +21,14 @@ subprojects {
 }
 
 subprojects {
-    plugins.withId("com.android.library") {
-        extensions.configure<com.android.build.gradle.LibraryExtension> {
-            compileOptions {
-                sourceCompatibility = JavaVersion.VERSION_17
-                targetCompatibility = JavaVersion.VERSION_17
-            }
-        }
-    }
-
-    plugins.withId("com.android.application") {
-        extensions.configure<com.android.build.gradle.AppExtension> {
-            compileOptions {
-                sourceCompatibility = JavaVersion.VERSION_17
-                targetCompatibility = JavaVersion.VERSION_17
-            }
-        }
+    tasks.withType<JavaCompile>().configureEach {
+        sourceCompatibility = "11"
+        targetCompatibility = "11"
     }
 
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
         compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
         }
     }
 }
