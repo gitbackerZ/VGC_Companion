@@ -100,4 +100,34 @@ class JsEngineService {
     }
     return megaStats;
   }
+
+  Future<List<dynamic>> getSpeciesList() async {
+    await init();
+    try {
+      final jsonStr = _jsRuntime!.evaluate("globalThis.getSpeciesList();").stringResult;
+      return jsonDecode(jsonStr);
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<dynamic>> getMoveList() async {
+    await init();
+    try {
+      final jsonStr = _jsRuntime!.evaluate("globalThis.getMoveList();").stringResult;
+      return jsonDecode(jsonStr);
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<dynamic>> getItemList() async {
+    await init();
+    try {
+      final jsonStr = _jsRuntime!.evaluate("globalThis.getItemList();").stringResult;
+      return jsonDecode(jsonStr);
+    } catch (_) {
+      return [];
+    }
+  }
 }
