@@ -42,6 +42,72 @@ class JsEngineService {
     return list.cast<Map<String, dynamic>>();
   }
 
+  /// Returns only the moves learnable by [name], walking up the prevo chain
+  /// so evolved/final-stage forms include moves inherited from earlier stages.
+  /// Fails safe: returns [] on any missing data, JS error, or malformed result
+  /// rather than throwing.
+  Future<List<Map<String, dynamic>>> getMovesForSpecies(String name) async {
+    try {
+      final sanitized = name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+      final script = '''
+        (function() {
+          try {
+            var species = Dex.species.get("$sanitized");
+            if (!species || !species.exists) return JSON.stringify([]);
+            if (!Dex.data.Learnsets) return JSON.stringify([]);
+
+            var moveIdSet = {};
+            var current = species;
+            var seen = {};
+            var guard = 0;
+
+            while (current && guard < 10) {
+              guard++;
+              if (seen[current.id]) break;
+              seen[current.id] = true;
+
+              var learnsetData = Dex.data.Learnsets[current.id];
+              if (learnsetData && learnsetData.learnset) {
+                var ids = Object.keys(learnsetData.learnset);
+                for (var i = 0; i < ids.length; i++) {
+                  moveIdSet[ids[i]] = true;
+                }
+              }
+
+              if (current.prevo) {
+                current = Dex.species.get(current.prevo);
+              } else {
+                current = null;
+              }
+            }
+
+            var moveIds = Object.keys(moveIdSet);
+            var moves = moveIds
+              .map(function(mid) { return Dex.data.Moves[mid]; })
+              .filter(function(m) { return m; });
+
+            return JSON.stringify(moves);
+          } catch (e) {
+            return JSON.stringify([]);
+          }
+        })()
+      ''';
+
+      final result = _jsRuntime!.evaluate(script);
+      if (result.isError) return [];
+
+      final decoded = json.decode(result.stringResult);
+      if (decoded is! List) return [];
+
+      return decoded
+          .whereType<Map>()
+          .map((m) => m.cast<String, dynamic>())
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   Future<List<Map<String, dynamic>>> getAbilitiesForPokemon(String name) async {
     try {
       final data = await getPokemon(name);
