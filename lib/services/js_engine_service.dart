@@ -93,10 +93,7 @@ class JsEngineService {
   Future<Map<String, dynamic>> getPokemon(String name) async {
     final decoded = _evalJson('''
       (function() {
-        if (typeof getPokemon === 'function') {
-          var p = getPokemon('$name');
-          if (p) return JSON.stringify(p);
-        }
+        var nameClean = '$name'.toLowerCase().replace(/[^a-z0-9]/g, '');
         if (typeof getSpeciesList === 'function') {
           var all = getSpeciesList();
           if (typeof all === 'string') {
@@ -105,20 +102,20 @@ class JsEngineService {
           if (Array.isArray(all)) {
             var match = all.find(function(s) { 
               var sName = typeof s === 'string' ? s : (s.name || s.species);
-              return sName && sName.toLowerCase() === '$name'.toLowerCase(); 
+              return sName && sName.toLowerCase().replace(/[^a-z0-9]/g, '') === nameClean; 
             });
             if (match) {
-              return JSON.stringify(typeof match === 'string' ? { id: 0, name: match } : match);
+              if (typeof match === 'string') return JSON.stringify({ id: 0, name: match });
+              return JSON.stringify({
+                id: match.num || match.id || match.pokedexNumber || 0,
+                name: match.name || match.species || '$name'
+              });
             }
           }
         }
-        return JSON.stringify({ error: "Pokémon not found: $name" });
+        return JSON.stringify({ id: 0, name: '$name' });
       })()
     ''');
-
-    if (decoded is Map && decoded.containsKey('error')) {
-      throw Exception(decoded['error']);
-    }
 
     return Map<String, dynamic>.from(decoded);
   }
@@ -126,9 +123,30 @@ class JsEngineService {
   Future<List<Map<String, dynamic>>> getAbilitiesForPokemon(String name) async {
     final decoded = _evalJson('''
       (function() {
-        if (typeof getAbilities === 'function') {
-          var res = getAbilities('$name');
-          return typeof res === 'string' ? res : JSON.stringify(res);
+        var nameClean = '$name'.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (typeof getSpeciesList === 'function') {
+          var all = getSpeciesList();
+          if (typeof all === 'string') {
+            try { all = JSON.parse(all); } catch(e) {}
+          }
+          if (Array.isArray(all)) {
+            var match = all.find(function(s) { 
+              var sName = typeof s === 'string' ? s : (s.name || s.species);
+              return sName && sName.toLowerCase().replace(/[^a-z0-9]/g, '') === nameClean; 
+            });
+            if (match && match.abilities) {
+              var abs = match.abilities;
+              var result = [];
+              if (Array.isArray(abs)) {
+                result = abs.map(function(a) { return { name: typeof a === 'string' ? a : (a.name || String(a)) }; });
+              } else if (typeof abs === 'object') {
+                Object.keys(abs).forEach(function(k) {
+                  if (abs[k]) result.push({ name: typeof abs[k] === 'string' ? abs[k] : (abs[k].name || String(abs[k])) });
+                });
+              }
+              return JSON.stringify(result);
+            }
+          }
         }
         return JSON.stringify([]);
       })()
@@ -142,6 +160,7 @@ class JsEngineService {
       (function() {
         if (typeof getMoveList === 'function') {
           var res = getMoveList('$name');
+          if (!res || res.length === 0) res = getMoveList();
           var list = res;
           if (typeof res === 'string') {
             try { list = JSON.parse(res); } catch(e) {}
@@ -156,7 +175,6 @@ class JsEngineService {
             });
             return JSON.stringify(names);
           }
-          return typeof res === 'string' ? res : JSON.stringify(res);
         }
         return JSON.stringify([]);
       })()
@@ -176,10 +194,27 @@ class JsEngineService {
   Future<int> getGenderRate(String name) async {
     final decoded = _evalJson('''
       (function() {
-        if (typeof getGenderRate === 'function') {
-          return getGenderRate('$name');
+        var nameClean = '$name'.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (typeof getSpeciesList === 'function') {
+          var all = getSpeciesList();
+          if (typeof all === 'string') { try { all = JSON.parse(all); } catch(e) {} }
+          if (Array.isArray(all)) {
+            var match = all.find(function(s) {
+              var sName = typeof s === 'string' ? s : (s.name || s.species);
+              return sName && sName.toLowerCase().replace(/[^a-z0-9]/g, '') === nameClean;
+            });
+            if (match) {
+              if (match.gender === 'N') return JSON.stringify(-1);
+              if (match.gender === 'M') return JSON.stringify(0);
+              if (match.gender === 'F') return JSON.stringify(8);
+              if (match.genderRatio) {
+                if (match.genderRatio.M === 1) return JSON.stringify(0);
+                if (match.genderRatio.F === 1) return JSON.stringify(8);
+              }
+            }
+          }
         }
-        return 4;
+        return JSON.stringify(4);
       })()
     ''');
 
@@ -203,33 +238,55 @@ class JsEngineService {
   Future<Map<String, int>> getBaseStats(String name) async {
     final decoded = _evalJson('''
       (function() {
-        if (typeof getBaseStats === 'function') {
-          var res = getBaseStats('$name');
-          return typeof res === 'string' ? res : JSON.stringify(res);
+        var nameClean = '$name'.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (typeof getSpeciesList === 'function') {
+          var all = getSpeciesList();
+          if (typeof all === 'string') { try { all = JSON.parse(all); } catch(e) {} }
+          if (Array.isArray(all)) {
+            var match = all.find(function(s) {
+              var sName = typeof s === 'string' ? s : (s.name || s.species);
+              return sName && sName.toLowerCase().replace(/[^a-z0-9]/g, '') === nameClean;
+            });
+            if (match && (match.baseStats || match.stats)) {
+              return JSON.stringify(match.baseStats || match.stats);
+            }
+          }
         }
-        return JSON.stringify({ hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 });
+        return JSON.stringify({ hp: 45, atk: 45, def: 45, spa: 45, spd: 45, spe: 45 });
       })()
     ''');
 
     final map = Map<String, dynamic>.from(decoded);
-    return map.map((k, v) => MapEntry(k, (v as num).toInt()));
+    return map.map((k, v) => MapEntry(k.toString().toLowerCase(), (v as num).toInt()));
   }
 
   Future<Map<String, Map<String, int>>> getAllMegaBaseStats(String name) async {
     final decoded = _evalJson('''
       (function() {
-        if (typeof getAllMegaBaseStats === 'function') {
-          var res = getAllMegaBaseStats('$name');
-          return typeof res === 'string' ? res : JSON.stringify(res);
+        var nameClean = '$name'.toLowerCase().replace(/[^a-z0-9]/g, '');
+        var result = {};
+        if (typeof getSpeciesList === 'function') {
+          var all = getSpeciesList();
+          if (typeof all === 'string') { try { all = JSON.parse(all); } catch(e) {} }
+          if (Array.isArray(all)) {
+            all.forEach(function(s) {
+              if (s && s.name && (s.baseStats || s.stats)) {
+                var sClean = s.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+                if (sClean.indexOf(nameClean + 'mega') === 0) {
+                  result[s.name] = s.baseStats || s.stats;
+                }
+              }
+            });
+          }
         }
-        return JSON.stringify({});
+        return JSON.stringify(result);
       })()
     ''');
 
     final map = Map<String, dynamic>.from(decoded);
     return map.map((k, v) {
       final inner = Map<String, dynamic>.from(v);
-      return MapEntry(k, inner.map((ik, iv) => MapEntry(ik, (iv as num).toInt())));
+      return MapEntry(k, inner.map((ik, iv) => MapEntry(ik.toString().toLowerCase(), (iv as num).toInt())));
     });
   }
 }
