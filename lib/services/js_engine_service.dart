@@ -55,6 +55,20 @@ class JsEngineService {
       (function() {
         if (typeof getSpeciesList === 'function') {
           var res = getSpeciesList();
+          var list = res;
+          if (typeof res === 'string') {
+            try { list = JSON.parse(res); } catch(e) {}
+          }
+          if (Array.isArray(list)) {
+            var names = list.map(function(item) {
+              if (typeof item === 'string') return item;
+              if (typeof item === 'object' && item !== null) {
+                return item.name || item.species || item.id || String(item);
+              }
+              return String(item);
+            });
+            return JSON.stringify(names);
+          }
           return typeof res === 'string' ? res : JSON.stringify(res);
         }
         return JSON.stringify({ error: "getSpeciesList function is not defined globally." });
@@ -63,6 +77,14 @@ class JsEngineService {
 
     if (decoded is Map && decoded.containsKey('error')) {
       throw Exception(decoded['error']);
+    }
+
+    if (decoded is List) {
+      return decoded.map((e) {
+        if (e is String) return e;
+        if (e is Map && e.containsKey('name')) return e['name'].toString();
+        return e.toString();
+      }).toList();
     }
 
     return List<String>.from(decoded);
@@ -75,14 +97,19 @@ class JsEngineService {
           var p = getPokemon('$name');
           if (p) return JSON.stringify(p);
         }
-        // Fallback: check if getSpeciesList data can find it
         if (typeof getSpeciesList === 'function') {
           var all = getSpeciesList();
-          var match = Array.isArray(all) ? all.find(function(s) { 
-            return (typeof s === 'string' ? s : s.name).toLowerCase() === '$name'.toLowerCase(); 
-          }) : null;
-          if (match) {
-            return JSON.stringify(typeof match === 'string' ? { id: 0, name: match } : match);
+          if (typeof all === 'string') {
+            try { all = JSON.parse(all); } catch(e) {}
+          }
+          if (Array.isArray(all)) {
+            var match = all.find(function(s) { 
+              var sName = typeof s === 'string' ? s : (s.name || s.species);
+              return sName && sName.toLowerCase() === '$name'.toLowerCase(); 
+            });
+            if (match) {
+              return JSON.stringify(typeof match === 'string' ? { id: 0, name: match } : match);
+            }
           }
         }
         return JSON.stringify({ error: "Pokémon not found: $name" });
@@ -115,11 +142,33 @@ class JsEngineService {
       (function() {
         if (typeof getMoveList === 'function') {
           var res = getMoveList('$name');
+          var list = res;
+          if (typeof res === 'string') {
+            try { list = JSON.parse(res); } catch(e) {}
+          }
+          if (Array.isArray(list)) {
+            var names = list.map(function(item) {
+              if (typeof item === 'string') return item;
+              if (typeof item === 'object' && item !== null) {
+                return item.name || item.move || String(item);
+              }
+              return String(item);
+            });
+            return JSON.stringify(names);
+          }
           return typeof res === 'string' ? res : JSON.stringify(res);
         }
         return JSON.stringify([]);
       })()
     ''');
+
+    if (decoded is List) {
+      return decoded.map((e) {
+        if (e is String) return e;
+        if (e is Map && e.containsKey('name')) return e['name'].toString();
+        return e.toString();
+      }).toList();
+    }
 
     return List<String>.from(decoded);
   }
