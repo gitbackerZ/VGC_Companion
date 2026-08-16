@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -80,7 +81,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   final Map<int, List<Map<String, dynamic>>> _abilitiesCache = {};
 
   final Map<int, String?> _activePanels = {};
-  final Set<int> _collapsedCards = {}; // cards that are collapsed (summary only)
+  final Set<int> _collapsedCards = {};
 
   bool _loading = true;
   String _statusMessage = '';
@@ -119,9 +120,11 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           _collapsedCards.add(i);
         }
       });
-    } catch (e) {
+    } catch (e, stack) {
+      debugPrint('Engine Initialization Error: $e');
+      debugPrint(stack.toString());
       setState(() {
-        _statusMessage = 'Error loading Pokémon roster from engine.';
+        _statusMessage = 'Error loading Pokémon roster: $e';
         _loading = false;
       });
     }
@@ -556,7 +559,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           } catch (_) {}
         }
       } catch (_) {
-        // Skip stats for this member if fetch fails; export continues without them.
+        // Skip stats for this member if fetch fails
       }
     }
 
@@ -844,7 +847,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 2.0),
                 child: Semantics(
                   liveRegion: true,
-                  child: Text(_statusMessage, style: const TextStyle(color: Colors.blue, fontSize: 12)),
+                  child: Text(_statusMessage, style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
                 ),
               ),
             if (_team.isNotEmpty)
