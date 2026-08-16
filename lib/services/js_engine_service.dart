@@ -16,10 +16,11 @@ class JsEngineService {
 
     _jsRuntime = getJavascriptRuntime();
 
-    // Environment polyfills for Node/CommonJS/Browser JS bundles
+    // Environment polyfills for Browser/CommonJS/UMD JS bundles
     _jsRuntime.evaluate('''
       var global = globalThis;
       var window = globalThis;
+      var self = globalThis;
       var module = { exports: {} };
       var exports = module.exports;
     ''');
@@ -31,21 +32,31 @@ class JsEngineService {
       throw Exception('Failed to evaluate assets/engine.js: ${result.stringResult}');
     }
 
-    // Bind Dex to globalThis regardless of export pattern used by engine.js
+    // Inspect export targets and bind Dex globally
     _jsRuntime.evaluate('''
       (function() {
-        if (typeof globalThis.Dex === 'undefined') {
-          if (typeof Dex !== 'undefined') {
-            globalThis.Dex = Dex;
-          } else if (typeof module !== 'undefined' && module.exports) {
-            if (module.exports.Dex) {
-              globalThis.Dex = module.exports.Dex;
-            } else if (module.exports.default && module.exports.default.Dex) {
-              globalThis.Dex = module.exports.default.Dex;
-            } else if (module.exports.species || module.exports.data) {
-              globalThis.Dex = module.exports;
-            }
+        if (typeof globalThis.Dex !== 'undefined') return;
+
+        // 1. Check if module.exports is the Dex object itself
+        if (typeof module !== 'undefined' && module.exports) {
+          var mod = module.exports;
+          if (mod.species || mod.data || mod.getSpecies || mod.pokedex) {
+            globalThis.Dex = mod;
+            return;
           }
+          if (mod.Dex) {
+            globalThis.Dex = mod.Dex;
+            return;
+          }
+          if (mod.default) {
+            globalThis.Dex = mod.default.Dex || mod.default;
+            return;
+          }
+        }
+
+        // 2. Check standalone global scope
+        if (typeof Dex !== 'undefined') {
+          globalThis.Dex = Dex;
         }
       })();
     ''');
@@ -73,13 +84,21 @@ class JsEngineService {
     final decoded = _evalJson('''
       (function() {
         var dexObj = typeof Dex !== 'undefined' ? Dex : (typeof globalThis.Dex !== 'undefined' ? globalThis.Dex : null);
+        
         if (!dexObj) {
-          var modKeys = (typeof module !== 'undefined' && module.exports) ? Object.keys(module.exports).join(', ') : 'none';
-          return JSON.stringify({ error: "Dex object is undefined. module.exports keys: [" + modKeys + "]" });
+          var globalKeys = Object.keys(globalThis).filter(function(k) {
+            return k !== 'global' && k !== 'window' && k !== 'self' && k !== 'globalThis';
+          }).join(', ');
+          var modType = typeof module !== 'undefined' ? typeof module.exports : 'undefined';
+          return JSON.stringify({ 
+            error: "Dex object is undefined. Available global keys: [" + globalKeys + "]. module.exports type: " + modType
+          });
         }
-        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex;
+
+        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex || dexObj.pokedex;
         if (!speciesMap) {
-          return JSON.stringify({ error: "Dex species repository is undefined on Dex object." });
+          var dexKeys = Object.keys(dexObj).join(', ');
+          return JSON.stringify({ error: "Species map missing on Dex object. Dex keys: [" + dexKeys + "]" });
         }
         
         var list = [];
@@ -106,7 +125,7 @@ class JsEngineService {
       (function() {
         var dexObj = typeof Dex !== 'undefined' ? Dex : globalThis.Dex;
         if (!dexObj) return JSON.stringify({ error: "Dex undefined" });
-        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex;
+        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex || dexObj.pokedex;
         var p = typeof speciesMap.get === 'function' ? speciesMap.get('$name') : speciesMap['$name'];
         if (!p) return JSON.stringify({ error: "Pokémon not found: $name" });
         return JSON.stringify({
@@ -128,7 +147,7 @@ class JsEngineService {
       (function() {
         var dexObj = typeof Dex !== 'undefined' ? Dex : globalThis.Dex;
         if (!dexObj) return JSON.stringify([]);
-        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex;
+        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex || dexObj.pokedex;
         var p = typeof speciesMap.get === 'function' ? speciesMap.get('$name') : speciesMap['$name'];
         if (!p || !p.abilities) return JSON.stringify([]);
         
@@ -174,7 +193,7 @@ class JsEngineService {
       (function() {
         var dexObj = typeof Dex !== 'undefined' ? Dex : globalThis.Dex;
         if (!dexObj) return JSON.stringify(4);
-        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex;
+        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex || dexObj.pokedex;
         var p = typeof speciesMap.get === 'function' ? speciesMap.get('$name') : speciesMap['$name'];
         if (!p) return JSON.stringify(4);
         if (p.gender === 'N') return JSON.stringify(-1);
@@ -210,7 +229,7 @@ class JsEngineService {
       (function() {
         var dexObj = typeof Dex !== 'undefined' ? Dex : globalThis.Dex;
         if (!dexObj) return JSON.stringify({ hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 });
-        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex;
+        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex || dexObj.pokedex;
         var p = typeof speciesMap.get === 'function' ? speciesMap.get('$name') : speciesMap['$name'];
         if (!p || !p.baseStats) return JSON.stringify({ hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 });
         return JSON.stringify(p.baseStats);
@@ -226,7 +245,7 @@ class JsEngineService {
       (function() {
         var dexObj = typeof Dex !== 'undefined' ? Dex : globalThis.Dex;
         if (!dexObj) return JSON.stringify({});
-        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex;
+        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex || dexObj.pokedex;
         var result = {};
         
         if (speciesMap && typeof speciesMap.all === 'function') {
