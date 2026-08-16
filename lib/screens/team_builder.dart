@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle, Clipboard, ClipboardData, FilteringTextInputFormatter;
+import 'package:flutter/services.dart' show rootBundle, Clipboard, ClipboardData;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/pokeapi_service.dart';
 import '../services/stat_calculator.dart';
 import '../services/team_text_codec.dart';
 import '../data/natures.dart';
+import '../widgets/ev_editor_panel.dart';
+import '../widgets/details_editor_panel.dart';
 
 class TeamMember {
   String name;
@@ -72,7 +74,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   static const _storageKey = 'saved_team';
 
   List<String> _allSpecies = [];
-  List<String> _excludedPokemon = [];
   List<String> _filtered = [];
   List<TeamMember> _team = [];
 
@@ -81,16 +82,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
   final Map<int, String?> _activePanels = {};
   final Set<int> _collapsedCards = {}; // cards that are collapsed (summary only)
-
-  // Stable EV editors: controllers are created when the EV panel opens and
-  // only write back to the model when the field loses focus / editing completes.
-  final Map<int, Map<String, TextEditingController>> _evControllers = {};
-  final Map<int, Map<String, FocusNode>> _evFocusNodes = {};
-
-  // Held-item text fields (one per team member), committed on focus loss.
-  final Map<int, TextEditingController> _itemControllers = {};
-  final Map<int, FocusNode> _itemFocusNodes = {};
-  List<String>? _cachedValidItems;
 
   bool _loading = true;
   String _statusMessage = '';
@@ -105,157 +96,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   void dispose() {
     _searchController.dispose();
     _searchFocusNode.dispose();
-    _disposeAllEvControllers();
     super.dispose();
-  }
-
-  void _disposeAllEvControllers() {
-    for (final map in _evControllers.values) {
-      for (final c in map.values) {
-        c.dispose();
-      }
-    }
-    _evControllers.clear();
-    for (final map in _evFocusNodes.values) {
-      for (final n in map.values) {
-        n.dispose();
-      }
-    }
-    _evFocusNodes.clear();
-    for (final c in _itemControllers.values) {
-      c.dispose();
-    }
-    _itemControllers.clear();
-    for (final n in _itemFocusNodes.values) {
-      n.dispose();
-    }
-    _itemFocusNodes.clear();
-  }
-
-  void _disposeEvControllersForIndex(int index) {
-    final controllers = _evControllers.remove(index);
-    if (controllers != null) {
-      for (final c in controllers.values) {
-        c.dispose();
-      }
-    }
-    final nodes = _evFocusNodes.remove(index);
-    if (nodes != null) {
-      for (final n in nodes.values) {
-        n.dispose();
-      }
-    }
-    _itemControllers.remove(index)?.dispose();
-    _itemFocusNodes.remove(index)?.dispose();
-  }
-
-  /// Ensure controllers exist for this team member and are in sync with model values.
-  void _ensureEvControllers(int index) {
-    final member = _team[index];
-    final existing = _evControllers[index];
-    if (existing != null) {
-      // Keep text in sync if the model changed externally (e.g. import)
-      for (final stat in member.evs.keys) {
-        final c = existing[stat];
-        if (c != null && c.text != member.evs[stat].toString()) {
-          c.text = member.evs[stat].toString();
-        }
-      }
-      return;
-    }
-
-    final controllers = <String, TextEditingController>{};
-    final nodes = <String, FocusNode>{};
-    for (final stat in member.evs.keys) {
-      final controller = TextEditingController(text: member.evs[stat].toString());
-      final focusNode = FocusNode();
-      focusNode.addListener(() {
-        if (!focusNode.hasFocus) {
-          _commitEv(index, stat);
-        }
-      });
-      controllers[stat] = controller;
-      nodes[stat] = focusNode;
-    }
-    _evControllers[index] = controllers;
-    _evFocusNodes[index] = nodes;
-  }
-
-  /// Parse the controller text, clamp, enforce 510 total, call _setEv, and
-  /// rewrite the controller so it shows the final accepted value.
-  void _commitEv(int index, String stat) {
-    final controllers = _evControllers[index];
-    if (controllers == null) return;
-    final controller = controllers[stat];
-    if (controller == null) return;
-
-    final parsed = int.tryParse(controller.text.trim()) ?? 0;
-    _setEv(index, stat, parsed);
-
-    // Reflect the clamped value back into the field without fighting the cursor
-    // while the user is still typing (we only get here on focus loss).
-    final accepted = _team[index].evs[stat]!.toString();
-    if (controller.text != accepted) {
-      controller.text = accepted;
-      controller.selection = TextSelection.collapsed(offset: accepted.length);
-    }
-  }
-
-  void _ensureItemController(int index) {
-    if (_itemControllers.containsKey(index)) {
-      final current = _team[index].heldItem ?? '';
-      // Only sync from model when the field is not focused (avoid fighting typing).
-      final focus = _itemFocusNodes[index];
-      if (focus != null && !focus.hasFocus) {
-        if (_itemControllers[index]!.text != current) {
-          _itemControllers[index]!.text = current;
-        }
-      }
-      return;
-    }
-    final controller =
-        TextEditingController(text: _team[index].heldItem ?? '');
-    final focusNode = FocusNode();
-    focusNode.addListener(() {
-      if (!focusNode.hasFocus) {
-        _commitHeldItem(index);
-      }
-    });
-    _itemControllers[index] = controller;
-    _itemFocusNodes[index] = focusNode;
-  }
-
-  Future<void> _commitHeldItem(int index) async {
-    final controller = _itemControllers[index];
-    if (controller == null) return;
-    final raw = controller.text.trim();
-
-    // Explicit clear → no item
-    if (raw.isEmpty) {
-      if (_team[index].heldItem != null) {
-        await _setHeldItem(index, '');
-      }
-      return;
-    }
-
-    try {
-      _cachedValidItems ??= await _service.getHeldItemNames();
-      final canonical = _resolveHeldItemName(raw);
-      if (canonical != null) {
-        // Skip no-op re-announce if unchanged
-        if (_team[index].heldItem != canonical) {
-          await _setHeldItem(index, canonical);
-        }
-        controller.text = canonical;
-      } else {
-        // Invalid input: restore previous value — do NOT clear the item
-        _announce('Not a recognized Champions held item.');
-        controller.text = _team[index].heldItem ?? '';
-      }
-    } catch (_) {
-      _announce('Could not validate held item.');
-      controller.text = _team[index].heldItem ?? '';
-    }
   }
 
   void _unfocus() {
@@ -271,14 +112,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       final List<String> allowed =
           List<String>.from(roster['allowed_pokemon']);
 
-      // Load saved team + items in parallel (items are local JSON — fast).
-      final itemsFuture = _service.getHeldItemNames();
       await _loadSavedTeam();
-      try {
-        _cachedValidItems = await itemsFuture;
-      } catch (_) {
-        _cachedValidItems = [];
-      }
 
       setState(() {
         _allSpecies = allowed;
@@ -323,24 +157,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     });
   }
 
-  /// Resolve typed text to a canonical Champions item slug, or null if invalid.
-  String? _resolveHeldItemName(String raw) {
-    final q = raw.trim().toLowerCase();
-    if (q.isEmpty) return null;
-    final pool = _cachedValidItems ?? const <String>[];
-    final slug = q.replaceAll(' ', '-');
-    final spaced = q.replaceAll('-', ' ');
-    for (final item in pool) {
-      final clean = item.toLowerCase();
-      if (clean == q ||
-          clean == slug ||
-          clean == spaced ||
-          clean.replaceAll('-', ' ') == spaced) {
-        return clean;
-      }
-    }
-    return null;
-  }
 
   Future<void> _addToTeam(String name) async {
     _unfocus();
@@ -357,9 +173,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       final data = await _service.getPokemon(selectedFormName);
       final pokedexNumber = data['id'] as int;
 
-      if (_team.any((m) => m.pokedexNumber == pokedexNumber)) {
-        _announce(
-            '$selectedFormName shares a Pokédex number with a Pokémon already on your team.');
+      if (_team.any((m) => m.name == selectedFormName)) {
+        _announce('$selectedFormName is already on your team.');
         return;
       }
 
@@ -448,63 +263,14 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     final removed = _team[index].name;
     setState(() {
       _team.removeAt(index);
-      _movesCache.remove(index);
-      _abilitiesCache.remove(index);
-      _activePanels.remove(index);
-      _collapsedCards.remove(index);
-      _disposeEvControllersForIndex(index);
-
-      // Re-key maps that are keyed by team index
-      final newCollapsed = <int>{};
-      for (final i in _collapsedCards) {
-        newCollapsed.add(i > index ? i - 1 : i);
+      // Clear panel states to prevent index keys from shifting onto the wrong member
+      _movesCache.clear();
+      _abilitiesCache.clear();
+      _activePanels.clear();
+      _collapsedCards.clear();
+      for (int i = 0; i < _team.length; i++) {
+        _collapsedCards.add(i);
       }
-      _collapsedCards
-        ..clear()
-        ..addAll(newCollapsed);
-
-      // Re-key EV controllers / focus nodes
-      final newEvControllers = <int, Map<String, TextEditingController>>{};
-      final newEvFocusNodes = <int, Map<String, FocusNode>>{};
-      for (final entry in _evControllers.entries) {
-        final i = entry.key;
-        if (i == index) continue; // already disposed
-        final newKey = i > index ? i - 1 : i;
-        newEvControllers[newKey] = entry.value;
-      }
-      for (final entry in _evFocusNodes.entries) {
-        final i = entry.key;
-        if (i == index) continue;
-        final newKey = i > index ? i - 1 : i;
-        newEvFocusNodes[newKey] = entry.value;
-      }
-      _evControllers
-        ..clear()
-        ..addAll(newEvControllers);
-      _evFocusNodes
-        ..clear()
-        ..addAll(newEvFocusNodes);
-
-      final newItemControllers = <int, TextEditingController>{};
-      final newItemFocusNodes = <int, FocusNode>{};
-      for (final entry in _itemControllers.entries) {
-        final i = entry.key;
-        if (i == index) continue;
-        final newKey = i > index ? i - 1 : i;
-        newItemControllers[newKey] = entry.value;
-      }
-      for (final entry in _itemFocusNodes.entries) {
-        final i = entry.key;
-        if (i == index) continue;
-        final newKey = i > index ? i - 1 : i;
-        newItemFocusNodes[newKey] = entry.value;
-      }
-      _itemControllers
-        ..clear()
-        ..addAll(newItemControllers);
-      _itemFocusNodes
-        ..clear()
-        ..addAll(newItemFocusNodes);
     });
     await _saveTeam();
     _announce('$removed removed from team.');
@@ -553,18 +319,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     });
 
     if (_activePanels[index] != null) {
-      if (panelName == 'evs') {
-        _ensureEvControllers(index);
-      }
-      if (panelName == 'details') {
-        _ensureItemController(index);
-        // Prefetch held-item pool for autocomplete suggestions
-        if (_cachedValidItems == null) {
-          try {
-            _cachedValidItems = await _service.getHeldItemNames();
-          } catch (_) {}
-        }
-      }
       if (!_movesCache.containsKey(index)) {
         try {
           final moves = await _service.getMovesForPokemon(_team[index].name);
@@ -958,30 +712,38 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       });
     }
 
-    int added = 0;
     int failed = 0;
+    final List<TeamMember> toAdd = [];
+
     for (final member in parsed) {
-      if (_team.length >= 6) break;
+      if (_team.length + toAdd.length >= 6) break;
       try {
         final data = await _service.getPokemon(member.name);
         member.pokedexNumber = data['id'] as int;
         member.genderRate = await _service.getGenderRate(member.name);
-        if (_team.any((m) => m.pokedexNumber == member.pokedexNumber)) {
+        if (_team.any((m) => m.name == member.name) ||
+            toAdd.any((m) => m.name == member.name)) {
           failed++;
           continue;
         }
-        setState(() {
-          _team.add(member);
-          _collapsedCards.add(_team.length - 1);
-        });
-        added++;
+        toAdd.add(member);
       } catch (e) {
         failed++;
       }
     }
 
+    if (toAdd.isNotEmpty) {
+      setState(() {
+        final startIndex = _team.length;
+        _team.addAll(toAdd);
+        for (int i = 0; i < toAdd.length; i++) {
+          _collapsedCards.add(startIndex + i);
+        }
+      });
+    }
+
     await _saveTeam();
-    _announce('Import complete. $added Pokémon added${failed > 0 ? ", $failed failed or skipped" : ""}.');
+    _announce('Import complete. ${toAdd.length} Pokémon added${failed > 0 ? ", $failed failed or skipped" : ""}.');
     _unfocus();
   }
 
@@ -1433,7 +1195,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                             label:
                                 'Move slot ${slot + 1} for ${member.name}',
                             child: DropdownButtonFormField<String>(
-                              initialValue: member.moves[slot],
+                              value: member.moves[slot],
                               isExpanded: true,
                               dropdownColor: _dropdownMenuColor,
                               style: TextStyle(
@@ -1476,356 +1238,29 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     }
 
     if (panelName == 'details') {
-      final abilityOptions = _abilitiesCache[index];
-
-      List<DropdownMenuItem<String>> genderItems;
-      final itemStyle = TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.92));
-      if (member.genderRate == -1) {
-        genderItems = [
-          DropdownMenuItem(
-              value: 'Genderless',
-              child: Text('Genderless', style: itemStyle))
-        ];
-      } else if (member.genderRate == 0) {
-        genderItems = [
-          DropdownMenuItem(
-              value: 'Male', child: Text('Male', style: itemStyle))
-        ];
-      } else if (member.genderRate == 8) {
-        genderItems = [
-          DropdownMenuItem(
-              value: 'Female', child: Text('Female', style: itemStyle))
-        ];
-      } else {
-        genderItems = [
-          DropdownMenuItem(
-              value: 'Male', child: Text('Male', style: itemStyle)),
-          DropdownMenuItem(
-              value: 'Female', child: Text('Female', style: itemStyle)),
-        ];
-      }
-
-      Widget abilityField;
-      if (abilityOptions == null) {
-        abilityField = const Center(child: CircularProgressIndicator());
-      } else {
-        abilityField = Semantics(
-          label:
-              'Ability for ${member.name}, currently ${member.ability ?? "none"}',
-          child: DropdownButtonFormField<String>(
-            initialValue: member.ability,
-            isExpanded: true,
-            dropdownColor: _dropdownMenuColor,
-            style: TextStyle(color: _fieldTextColor, fontSize: 14),
-            decoration: _adaptiveInputDecoration('Ability'),
-            items: abilityOptions.map((a) {
-              final label =
-                  a['isHidden'] ? '${a['name']} (Hidden)' : a['name'];
-              return DropdownMenuItem<String>(
-                value: a['name'] as String,
-                child: Text(label,
-                    style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.92))),
-              );
-            }).toList(),
-            onChanged: (value) {
-              if (value != null) _setAbility(index, value);
-            },
-          ),
-        );
-      }
-
-      final genderField = Semantics(
-        label: 'Gender for ${member.name}, currently ${member.gender}',
-        child: DropdownButtonFormField<String>(
-          initialValue: member.gender,
-          isExpanded: true,
-          dropdownColor: _dropdownMenuColor,
-          style: TextStyle(color: _fieldTextColor, fontSize: 14),
-          decoration: _adaptiveInputDecoration('Gender'),
-          items: genderItems,
-          onChanged: genderItems.length > 1
-              ? (value) {
-                  if (value != null) _setGender(index, value);
-                }
-              : null,
-        ),
-      );
-
-      final natureField = Semantics(
-        label: 'Nature for ${member.name}, currently ${member.nature}',
-        child: DropdownButtonFormField<String>(
-          initialValue: member.nature,
-          isExpanded: true,
-          dropdownColor: _dropdownMenuColor,
-          style: TextStyle(color: _fieldTextColor, fontSize: 14),
-          decoration: _adaptiveInputDecoration('Nature'),
-          items: allNatures.map((n) {
-            final desc = n.boosted == null
-                ? '${n.name} (neutral)'
-                : '${n.name} (+${n.boosted}, -${n.lowered})';
-            return DropdownMenuItem(
-              value: n.name,
-              child:
-                  Text(desc, style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.92))),
-            );
-          }).toList(),
-          onChanged: (value) {
-            if (value != null) _setNature(index, value);
-          },
-        ),
-      );
-
-      // Ensure controller exists before building the field
-      _ensureItemController(index);
-      final itemController = _itemControllers[index]!;
-      final itemFocus = _itemFocusNodes[index]!;
-
-      final itemField = Semantics(
-        label:
-            'Held item for ${member.name}, currently ${member.heldItem ?? "none"}. Type to search.',
-        textField: true,
-        child: RawAutocomplete<String>(
-          textEditingController: itemController,
-          focusNode: itemFocus,
-          optionsViewOpenDirection: OptionsViewOpenDirection.up,
-          optionsBuilder: (TextEditingValue value) {
-            final q = value.text.trim().toLowerCase();
-            final pool = _cachedValidItems ?? const <String>[];
-            if (q.isEmpty) return const Iterable<String>.empty();
-            return pool
-                .where((item) => item.toLowerCase().contains(q))
-                .take(20);
-          },
-          onSelected: (String selection) async {
-            // Apply immediately; focus listener must not wipe it
-            itemController.text = selection;
-            if (_team[index].heldItem != selection) {
-              await _setHeldItem(index, selection);
-            }
-            itemFocus.unfocus();
-          },
-          fieldViewBuilder: (
-            context,
-            textController,
-            focusNode,
-            onFieldSubmitted,
-          ) {
-            return TextField(
-              controller: textController,
-              focusNode: focusNode,
-              style: TextStyle(
-                color: Theme.of(context)
-                    .colorScheme
-                    .onSurface
-                    .withValues(alpha: 0.92),
-              ),
-              cursorColor: Theme.of(context)
-                  .colorScheme
-                  .primary
-                  .withValues(alpha: 0.85),
-              decoration: _adaptiveInputDecoration('Held Item').copyWith(
-                hintText: 'Type to search items…',
-                hintStyle: TextStyle(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .onSurface
-                      .withValues(alpha: 0.45),
-                ),
-                suffixIcon: textController.text.isNotEmpty
-                    ? IconButton(
-                        tooltip: 'Clear held item',
-                        onPressed: () async {
-                          textController.clear();
-                          await _setHeldItem(index, '');
-                        },
-                        icon: Icon(
-                          Icons.clear,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurface
-                              .withValues(alpha: 0.75),
-                        ),
-                      )
-                    : Icon(
-                        Icons.search,
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withValues(alpha: 0.75),
-                      ),
-              ),
-              onEditingComplete: () {
-                _commitHeldItem(index);
-                focusNode.unfocus();
-              },
-              onSubmitted: (_) {
-                _commitHeldItem(index);
-                onFieldSubmitted();
-              },
-            );
-          },
-          optionsViewBuilder: (context, onSelected, options) {
-            final cs = Theme.of(context).colorScheme;
-            final soft = Color.alphaBlend(
-              cs.onSurface.withValues(alpha: 0.08),
-              cs.surfaceContainerHigh,
-            );
-            return Align(
-              alignment: Alignment.bottomLeft,
-              child: Material(
-                elevation: 6,
-                color: soft,
-                borderRadius: BorderRadius.circular(8),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxHeight: 220,
-                    maxWidth: 320,
-                  ),
-                  child: ListView.builder(
-                    padding: EdgeInsets.zero,
-                    shrinkWrap: true,
-                    itemCount: options.length,
-                    itemBuilder: (context, i) {
-                      final option = options.elementAt(i);
-                      return ListTile(
-                        dense: true,
-                        title: Text(
-                          option,
-                          style: TextStyle(
-                            color: cs.onSurface.withValues(alpha: 0.92),
-                          ),
-                        ),
-                        onTap: () => onSelected(option),
-                      );
-                    },
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
-      );
-
-      // 2 columns × 2 rows: Item | Gender / Ability | Nature
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Held Item, Gender, Ability & Nature',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-          const SizedBox(height: 6),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(child: itemField),
-                const SizedBox(width: 8),
-                Expanded(child: genderField),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(child: abilityField),
-                const SizedBox(width: 8),
-                Expanded(child: natureField),
-              ],
-            ),
-          ),
-        ],
+      return DetailsEditorPanel(
+        heldItem: member.heldItem,
+        gender: member.gender,
+        genderRate: member.genderRate,
+        ability: member.ability,
+        abilities: _abilitiesCache[index],
+        nature: member.nature,
+        onChanged: ({heldItem, gender, ability, nature}) async {
+          if (heldItem != null) await _setHeldItem(index, heldItem);
+          if (gender != null) await _setGender(index, gender);
+          if (ability != null) await _setAbility(index, ability);
+          if (nature != null) await _setNature(index, nature);
+        },
       );
     }
 
     if (panelName == 'evs') {
-      // Controllers are created when the panel is opened (_togglePanel).
-      final controllers = _evControllers[index];
-      final focusNodes = _evFocusNodes[index];
-      if (controllers == null || focusNodes == null) {
-        return const Center(child: CircularProgressIndicator());
-      }
-
-      final stats = member.evs.keys.toList(); // HP Atk Def SpA SpD Spe
-
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Effort Values (EVs)',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              Semantics(
-                liveRegion: true,
-                child: Text(
-                  '${member.evTotal}/510 total',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: member.evTotal > 510
-                        ? Colors.red
-                        : Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          // 2 columns × 3 rows → at most 3 visual rows of fields
-          ...List.generate(3, (row) {
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(
-                children: [
-                  for (int col = 0; col < 2; col++) ...[
-                    if (col > 0) const SizedBox(width: 8),
-                    Expanded(
-                      child: Builder(builder: (_) {
-                        final statIndex = row * 2 + col;
-                        if (statIndex >= stats.length) {
-                          return const SizedBox.shrink();
-                        }
-                        final stat = stats[statIndex];
-                        return Semantics(
-                          label:
-                              '$stat effort values, currently ${member.evs[stat]} out of 252',
-                          textField: true,
-                          child: TextField(
-                            controller: controllers[stat],
-                            focusNode: focusNodes[stat],
-                            keyboardType: TextInputType.number,
-                            style: TextStyle(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurface
-                                    .withValues(alpha: 0.92)),
-                            cursorColor: Theme.of(context)
-                                .colorScheme
-                                .primary
-                                .withValues(alpha: 0.85),
-                            inputFormatters: [
-                              FilteringTextInputFormatter.digitsOnly,
-                            ],
-                            decoration: _adaptiveInputDecoration(
-                                '$stat EVs (0-252)'),
-                            onEditingComplete: () {
-                              _commitEv(index, stat);
-                              focusNodes[stat]?.unfocus();
-                            },
-                            onSubmitted: (_) {
-                              _commitEv(index, stat);
-                            },
-                          ),
-                        );
-                      }),
-                    ),
-                  ],
-                ],
-              ),
-            );
-          }),
-        ],
+      return EvEditorPanel(
+        evs: member.evs,
+        onChanged: (updatedEvs) async {
+          setState(() => member.evs = updatedEvs);
+          await _saveTeam();
+        },
       );
     }
 
