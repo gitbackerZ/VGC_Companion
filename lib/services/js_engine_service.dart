@@ -1,158 +1,229 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_js/flutter_js.dart';
 
 class JsEngineService {
-  JavascriptRuntime? _jsRuntime;
+  static final JsEngineService _instance = JsEngineService._internal();
+  factory JsEngineService() => _instance;
+  JsEngineService._internal();
+
+  late JavascriptRuntime _jsRuntime;
+  bool _initialized = false;
 
   Future<void> init() async {
-    if (_jsRuntime != null) return;
+    if (_initialized) return;
+
     _jsRuntime = getJavascriptRuntime();
-    final engineCode = await rootBundle.loadString('assets/engine.js');
-    _jsRuntime!.evaluate(engineCode);
-  }
 
-  dynamic _evalJson(String jsExpression) {
-    if (_jsRuntime == null) throw Exception('Engine not initialized');
-    final result = _jsRuntime!.evaluate("JSON.stringify($jsExpression)").stringResult;
-    if (result == 'undefined' || result.isEmpty) return null;
-    return jsonDecode(result);
-  }
+    // Setup global environment bindings required by Showdown/engine.js
+    _jsRuntime.evaluate('''
+      var global = globalThis;
+      var window = globalThis;
+      var exports = globalThis;
+    ''');
 
-  /// Encodes a Dart string as a safely-escaped JS string literal
-  /// (quotes, backslashes, unicode all handled) to prevent injection
-  /// when the value is interpolated into an evaluated JS expression.
-  String _jsLiteral(String value) => jsonEncode(value);
+    final script = await rootBundle.loadString('assets/engine.js');
+    final result = _jsRuntime.evaluate(script);
 
-  Future<Map<String, dynamic>> getPokemon(String name) async {
-    await init();
-    final species = _evalJson("globalThis.Dex.species.get(${_jsLiteral(name)})");
-    if (species == null) throw Exception('Species $name not found in engine');
-    return {
-      'id': species['num'] ?? 0,
-      'name': species['name'] ?? name,
-    };
-  }
-
-  Future<List<Map<String, dynamic>>> getAbilitiesForPokemon(String name) async {
-    await init();
-    final species = _evalJson("globalThis.Dex.species.get(${_jsLiteral(name)})");
-    if (species == null || species['abilities'] == null) return [];
-
-    final Map<String, dynamic> abilitiesMap = Map<String, dynamic>.from(species['abilities']);
-    return abilitiesMap.values
-        .map((abilityName) => {'name': abilityName.toString().toLowerCase()})
-        .toList();
-  }
-
-  Future<List<String>> getMovesForPokemon(String name) async {
-    await init();
-    final learnset = _evalJson("globalThis.Dex.species.getLearnset(${_jsLiteral(name)}) || {}");
-    if (learnset == null) return [];
-    final Map<String, dynamic> map = Map<String, dynamic>.from(learnset);
-    return map.keys.toList();
-  }
-
-  Future<int> getGenderRate(String name) async {
-    await init();
-    final species = _evalJson("globalThis.Dex.species.get(${_jsLiteral(name)})");
-    if (species == null) return 4;
-
-    final gender = species['gender'];
-    if (gender == 'N') return -1;
-    if (gender == 'M') return 0;
-    if (gender == 'F') return 8;
-
-    if (species['genderRatio'] != null) {
-      final fRatio = (species['genderRatio']['F'] as num?) ?? 0.5;
-      return (fRatio * 8).round();
-    }
-    return 4;
-  }
-
-  Future<Map<String, int>> getBaseStats(String name) async {
-    await init();
-    final species = _evalJson("globalThis.Dex.species.get(${_jsLiteral(name)})");
-    if (species == null || species['baseStats'] == null) {
-      return {'HP': 0, 'Atk': 0, 'Def': 0, 'SpA': 0, 'SpD': 0, 'Spe': 0};
+    if (result.isError) {
+      throw Exception('Failed to evaluate assets/engine.js: ${result.string}');
     }
 
-    final stats = species['baseStats'];
-    return {
-      'HP': (stats['hp'] as num).toInt(),
-      'Atk': (stats['atk'] as num).toInt(),
-      'Def': (stats['def'] as num).toInt(),
-      'SpA': (stats['spa'] as num).toInt(),
-      'SpD': (stats['spd'] as num).toInt(),
-      'Spe': (stats['spe'] as num).toInt(),
-    };
+    _initialized = true;
   }
 
-  Future<Map<String, Map<String, int>>> getAllMegaBaseStats(String name) async {
-    await init();
-    final species = _evalJson("globalThis.Dex.species.get(${_jsLiteral(name)})");
-    if (species == null || species['otherFormes'] == null) return {};
+  /// Safely evaluates JS code and decodes the JSON payload.
+  dynamic _evalJson(String jsCode) {
+    final result = _jsRuntime.evaluate(jsCode);
 
-    final List<dynamic> otherFormes = species['otherFormes'];
-    final Map<String, Map<String, int>> megaStats = {};
-
-    for (final formeName in otherFormes) {
-      final formeStr = formeName.toString();
-      if (formeStr.toLowerCase().contains('mega') || formeStr.toLowerCase().contains('primal')) {
-        final keyName = formeStr.toLowerCase().replaceAll(' ', '');
-        megaStats[keyName] = await getBaseStats(formeStr);
-      }
+    if (result.isError) {
+      throw Exception('JS Runtime Error: ${result.string}');
     }
-    return megaStats;
+
+    final rawString = result.string;
+    try {
+      return jsonDecode(rawString);
+    } catch (e) {
+      throw Exception('JS Engine output invalid JSON ($rawString): $e');
+    }
   }
 
   Future<List<String>> getSpeciesList() async {
-    await init();
-    final list = _evalJson("globalThis.Dex.species.all().filter(s => s.exists && !s.isNonstandard).map(s => s.name)");
-    return list != null ? List<String>.from(list) : [];
-  }
+    final decoded = _evalJson('''
+      (function() {
+        var dexObj = typeof Dex !== 'undefined' ? Dex : (typeof globalThis.Dex !== 'undefined' ? globalThis.Dex : null);
+        if (!dexObj) {
+          return JSON.stringify({ error: "Dex object is undefined on global environment." });
+        }
+        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex;
+        if (!speciesMap) {
+          return JSON.stringify({ error: "Dex species repository is undefined." });
+        }
+        
+        var list = [];
+        if (typeof speciesMap.all === 'function') {
+          list = speciesMap.all().map(function(s) { return s.name; });
+        } else if (typeof speciesMap === 'object') {
+          list = Object.keys(speciesMap).map(function(k) { 
+            return speciesMap[k].name || speciesMap[k].species || k; 
+          });
+        }
+        return JSON.stringify(list);
+      })()
+    ''');
 
-  Future<List<String>> getItemList() async {
-    await init();
-    final list = _evalJson("globalThis.Dex.items.all().filter(i => i.exists && !i.isNonstandard).map(i => i.name)");
-    return list != null ? List<String>.from(list) : [];
-  }
-
-  Future<List<dynamic>> getMoveList() async {
-    await init();
-    try {
-      final jsonStr = _jsRuntime!.evaluate("globalThis.getMoveList();").stringResult;
-      return jsonDecode(jsonStr);
-    } catch (_) {
-      return [];
-    }
-  }
-
-  Future<List<String>> getNaturesList() async {
-    await init();
-    final list = _evalJson("globalThis.Dex.natures.all().map(n => n.name)");
-    return list != null ? List<String>.from(list) : [];
-  }
-
-  Future<Map<String, String>> getNatureBoosts(String natureName) async {
-    await init();
-    final nature = _evalJson("globalThis.Dex.natures.get(${_jsLiteral(natureName)})");
-    if (nature == null) return {'plus': '', 'minus': ''};
-
-    String mapStat(String? key) {
-      switch (key) {
-        case 'atk': return 'Attack';
-        case 'def': return 'Defense';
-        case 'spa': return 'Sp. Atk';
-        case 'spd': return 'Sp. Def';
-        case 'spe': return 'Speed';
-        default: return '';
-      }
+    if (decoded is Map && decoded.containsKey('error')) {
+      throw Exception(decoded['error']);
     }
 
-    return {
-      'plus': mapStat(nature['plus']),
-      'minus': mapStat(nature['minus']),
-    };
+    return List<String>.from(decoded);
+  }
+
+  Future<Map<String, dynamic>> getPokemon(String name) async {
+    final decoded = _evalJson('''
+      (function() {
+        var dexObj = typeof Dex !== 'undefined' ? Dex : globalThis.Dex;
+        if (!dexObj) return JSON.stringify({ error: "Dex undefined" });
+        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex;
+        var p = typeof speciesMap.get === 'function' ? speciesMap.get('$name') : speciesMap['$name'];
+        if (!p) return JSON.stringify({ error: "Pokémon not found: $name" });
+        return JSON.stringify({
+          id: p.num || p.pokedexNumber || 0,
+          name: p.name || '$name'
+        });
+      })()
+    ''');
+
+    if (decoded is Map && decoded.containsKey('error')) {
+      throw Exception(decoded['error']);
+    }
+
+    return Map<String, dynamic>.from(decoded);
+  }
+
+  Future<List<Map<String, dynamic>>> getAbilitiesForPokemon(String name) async {
+    final decoded = _evalJson('''
+      (function() {
+        var dexObj = typeof Dex !== 'undefined' ? Dex : globalThis.Dex;
+        if (!dexObj) return JSON.stringify([]);
+        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex;
+        var p = typeof speciesMap.get === 'function' ? speciesMap.get('$name') : speciesMap['$name'];
+        if (!p || !p.abilities) return JSON.stringify([]);
+        
+        var abilities = [];
+        var abs = p.abilities;
+        if (Array.isArray(abs)) {
+          abilities = abs.map(function(a) { return { name: a }; });
+        } else if (typeof abs === 'object') {
+          Object.keys(abs).forEach(function(key) {
+            if (abs[key]) abilities.push({ name: abs[key] });
+          });
+        }
+        return JSON.stringify(abilities);
+      })()
+    ''');
+
+    return List<Map<String, dynamic>>.from(decoded);
+  }
+
+  Future<List<String>> getMovesForPokemon(String name) async {
+    final decoded = _evalJson('''
+      (function() {
+        var dexObj = typeof Dex !== 'undefined' ? Dex : globalThis.Dex;
+        if (!dexObj) return JSON.stringify([]);
+        var movesMap = dexObj.moves || dexObj.data?.Moves;
+        if (!movesMap) return JSON.stringify([]);
+        
+        var list = [];
+        if (typeof movesMap.all === 'function') {
+          list = movesMap.all().map(function(m) { return m.name; });
+        } else if (typeof movesMap === 'object') {
+          list = Object.keys(movesMap).map(function(k) { return movesMap[k].name || k; });
+        }
+        return JSON.stringify(list);
+      })()
+    ''');
+
+    return List<String>.from(decoded);
+  }
+
+  Future<int> getGenderRate(String name) async {
+    final decoded = _evalJson('''
+      (function() {
+        var dexObj = typeof Dex !== 'undefined' ? Dex : globalThis.Dex;
+        if (!dexObj) return JSON.stringify(4);
+        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex;
+        var p = typeof speciesMap.get === 'function' ? speciesMap.get('$name') : speciesMap['$name'];
+        if (!p) return JSON.stringify(4);
+        if (p.gender === 'N') return JSON.stringify(-1);
+        if (p.gender === 'M') return JSON.stringify(0);
+        if (p.gender === 'F') return JSON.stringify(8);
+        if (p.genderRatio) {
+          if (p.genderRatio.M === 1) return JSON.stringify(0);
+          if (p.genderRatio.F === 1) return JSON.stringify(8);
+        }
+        return JSON.stringify(4);
+      })()
+    ''');
+
+    return (decoded as num).toInt();
+  }
+
+  Future<Map<String, dynamic>> getNatureBoosts(String nature) async {
+    final decoded = _evalJson('''
+      (function() {
+        var dexObj = typeof Dex !== 'undefined' ? Dex : globalThis.Dex;
+        if (!dexObj || !dexObj.natures) return JSON.stringify({ plus: null, minus: null });
+        var n = typeof dexObj.natures.get === 'function' ? dexObj.natures.get('$nature') : dexObj.natures['$nature'];
+        if (!n) return JSON.stringify({ plus: null, minus: null });
+        return JSON.stringify({ plus: n.plus || null, minus: n.minus || null });
+      })()
+    ''');
+
+    return Map<String, dynamic>.from(decoded);
+  }
+
+  Future<Map<String, int>> getBaseStats(String name) async {
+    final decoded = _evalJson('''
+      (function() {
+        var dexObj = typeof Dex !== 'undefined' ? Dex : globalThis.Dex;
+        if (!dexObj) return JSON.stringify({ hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 });
+        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex;
+        var p = typeof speciesMap.get === 'function' ? speciesMap.get('$name') : speciesMap['$name'];
+        if (!p || !p.baseStats) return JSON.stringify({ hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 });
+        return JSON.stringify(p.baseStats);
+      })()
+    ''');
+
+    final map = Map<String, dynamic>.from(decoded);
+    return map.map((k, v) => MapEntry(k, (v as num).toInt()));
+  }
+
+  Future<Map<String, Map<String, int>>> getAllMegaBaseStats(String name) async {
+    final decoded = _evalJson('''
+      (function() {
+        var dexObj = typeof Dex !== 'undefined' ? Dex : globalThis.Dex;
+        if (!dexObj) return JSON.stringify({});
+        var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex;
+        var result = {};
+        
+        if (speciesMap && typeof speciesMap.all === 'function') {
+          var all = speciesMap.all();
+          all.forEach(function(s) {
+            if (s.name.toLowerCase().indexOf('$name'.toLowerCase() + '-mega') === 0 && s.baseStats) {
+              result[s.name] = s.baseStats;
+            }
+          });
+        }
+        return JSON.stringify(result);
+      })()
+    ''');
+
+    final map = Map<String, dynamic>.from(decoded);
+    return map.map((k, v) {
+      final inner = Map<String, dynamic>.from(v);
+      return MapEntry(k, inner.map((ik, iv) => MapEntry(ik, (iv as num).toInt())));
+    });
   }
 }
