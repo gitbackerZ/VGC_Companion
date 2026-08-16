@@ -101,14 +101,16 @@ class JsEngineService {
     return megaStats;
   }
 
-  Future<List<dynamic>> getSpeciesList() async {
+  Future<List<String>> getSpeciesList() async {
     await init();
-    try {
-      final jsonStr = _jsRuntime!.evaluate("globalThis.getSpeciesList();").stringResult;
-      return jsonDecode(jsonStr);
-    } catch (_) {
-      return [];
-    }
+    final list = _evalJson("globalThis.Dex.species.all().filter(s => s.exists && !s.isNonstandard).map(s => s.name)");
+    return list != null ? List<String>.from(list) : [];
+  }
+
+  Future<List<String>> getItemList() async {
+    await init();
+    final list = _evalJson("globalThis.Dex.items.all().filter(i => i.exists && !i.isNonstandard).map(i => i.name)");
+    return list != null ? List<String>.from(list) : [];
   }
 
   Future<List<dynamic>> getMoveList() async {
@@ -121,13 +123,31 @@ class JsEngineService {
     }
   }
 
-  Future<List<dynamic>> getItemList() async {
+  Future<List<String>> getNaturesList() async {
     await init();
-    try {
-      final jsonStr = _jsRuntime!.evaluate("globalThis.getItemList();").stringResult;
-      return jsonDecode(jsonStr);
-    } catch (_) {
-      return [];
+    final list = _evalJson("globalThis.Dex.natures.all().map(n => n.name)");
+    return list != null ? List<String>.from(list) : [];
+  }
+
+  Future<Map<String, String>> getNatureBoosts(String natureName) async {
+    await init();
+    final nature = _evalJson("globalThis.Dex.natures.get('$natureName')");
+    if (nature == null) return {'plus': '', 'minus': ''};
+
+    String mapStat(String? key) {
+      switch (key) {
+        case 'atk': return 'Attack';
+        case 'def': return 'Defense';
+        case 'spa': return 'Sp. Atk';
+        case 'spd': return 'Sp. Def';
+        case 'spe': return 'Speed';
+        default: return '';
+      }
     }
+
+    return {
+      'plus': mapStat(nature['plus']),
+      'minus': mapStat(nature['minus']),
+    };
   }
 }
