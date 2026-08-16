@@ -1,6 +1,5 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/services.dart';
 import 'package:flutter_js/flutter_js.dart';
 
 class JsEngineService {
@@ -8,130 +7,129 @@ class JsEngineService {
   factory JsEngineService() => _instance;
   JsEngineService._internal();
 
-  late JavascriptRuntime _jsRuntime;
-  bool _initialized = false;
+  JavascriptRuntime? _jsRuntime;
+  bool _isInitialized = false;
 
   Future<void> init() async {
-    if (_initialized) return;
+    if (_isInitialized) return;
 
     _jsRuntime = getJavascriptRuntime();
 
-    _jsRuntime.evaluate('''
-      var global = globalThis;
-      var window = globalThis;
-      var self = globalThis;
-      var module = { exports: {} };
-      var exports = module.exports;
-    ''');
+    final dexJs = await rootBundle.loadString('assets/js/dex.js');
+    _jsRuntime!.evaluate(dexJs);
 
-    final script = await rootBundle.loadString('assets/engine.js');
-    final result = _jsRuntime.evaluate(script);
-
-    if (result.isError) {
-      throw Exception('Failed to evaluate assets/engine.js: ${result.stringResult}');
-    }
-
-    _initialized = true;
+    _isInitialized = true;
   }
 
-  /// Evaluates JS code and safely decodes double-stringified JSON.
-  dynamic _evalAndParse(String jsCode) {
-    final result = _jsRuntime.evaluate(jsCode);
-
-    if (result.isError) {
-      throw Exception('JS Runtime Error: ${result.stringResult}');
-    }
-
-    var raw = result.stringResult;
-    try {
-      var decoded = jsonDecode(raw);
-      // Handles cases where JS returns a stringified JSON string
-      if (decoded is String) {
-        decoded = jsonDecode(decoded);
-      }
-      return decoded;
-    } catch (e) {
-      throw Exception('Failed to parse JS output ($raw): $e');
-    }
-  }
-
-  /// Fetches all species objects directly from getSpeciesList()
-  Future<List<Map<String, dynamic>>> getAllSpeciesData() async {
-    final decoded = _evalAndParse('getSpeciesList()');
-    if (decoded is List) {
-      return List<Map<String, dynamic>>.from(decoded);
-    }
-    return [];
-  }
-
-  /// Returns species names for search suggestions
   Future<List<String>> getSpeciesList() async {
-    final speciesData = await getAllSpeciesData();
-    return speciesData
-        .map((s) => (s['name'] ?? s['id'] ?? '').toString())
-        .where((n) => n.isNotEmpty)
-        .toList();
+    final result = _jsRuntime!.evaluate('Object.keys(Dex.data.Species)');
+    if (result.isError) return [];
+    final List<dynamic> list = json.decode(result.stringResult);
+    return list.cast<String>();
   }
 
-  /// Gets a full payload for a given Pokémon name or ID
   Future<Map<String, dynamic>> getPokemon(String name) async {
-    final cleanTarget = name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-    final allSpecies = await getAllSpeciesData();
-
-    final match = allSpecies.firstWhere(
-      (s) {
-        final sName = (s['name'] ?? '').toString().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-        final sId = (s['id'] ?? '').toString().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-        return sName == cleanTarget || sId == cleanTarget;
-      },
-      orElse: () => {},
-    );
-
-    if (match.isNotEmpty) {
-      final baseStats = Map<String, dynamic>.from(match['baseStats'] ?? {});
-      
-      // Provides both numeric ID and string ID, plus mapped stat keys for Dart model safety
-      return {
-        'id': match['id'] ?? cleanTarget,
-        'num': 0, // Fallback if Dart model expects an int num
-        'name': match['name'] ?? name,
-        'species': match['name'] ?? name,
-        'types': List<String>.from(match['types'] ?? ['Normal']),
-        'abilities': List<String>.from(match['abilities'] ?? []),
-        'baseStats': {
-          'hp': baseStats['hp'] ?? 80,
-          'atk': baseStats['atk'] ?? 80,
-          'def': baseStats['def'] ?? 80,
-          'spa': baseStats['spa'] ?? 80,
-          'spd': baseStats['spd'] ?? 80,
-          'spe': baseStats['spe'] ?? 80,
-          'attack': baseStats['atk'] ?? 80,
-          'defense': baseStats['def'] ?? 80,
-          'specialAttack': baseStats['spa'] ?? 80,
-          'specialDefense': baseStats['spd'] ?? 80,
-          'speed': baseStats['spe'] ?? 80,
-        },
-      };
-    }
-
-    throw Exception('Species "$name" not found in Dex.');
+    final sanitized = name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+    final result = _jsRuntime!.evaluate('JSON.stringify(Dex.species.get("$sanitized"))');
+    if (result.isError) throw Exception('Failed to get species data for $name');
+    return json.decode(result.stringResult) as Map<String, dynamic>;
   }
 
-  /// Fetches competitive move list
   Future<List<Map<String, dynamic>>> getMoveList() async {
-    final decoded = _evalAndParse('getMoveList()');
-    if (decoded is List) {
-      return List<Map<String, dynamic>>.from(decoded);
-    }
-    return [];
+    final result = _jsRuntime!.evaluate('JSON.stringify(Object.values(Dex.data.Moves))');
+    if (result.isError) return [];
+    final List<dynamic> list = json.decode(result.stringResult);
+    return list.cast<Map<String, dynamic>>();
   }
 
-  /// Fetches competitive item list
-  Future<List<Map<String, dynamic>>> getItemList() async {
-    final decoded = _evalAndParse('getItemList()');
-    if (decoded is List) {
-      return List<Map<String, dynamic>>.from(decoded);
+  Future<List<Map<String, dynamic>>> getAbilitiesForPokemon(String name) async {
+    try {
+      final data = await getPokemon(name);
+      if (data['abilities'] is List) {
+        return (data['abilities'] as List)
+            .map((a) => {'name': a.toString()})
+            .toList();
+      }
+      if (data['abilities'] is Map) {
+        final abilitiesMap = data['abilities'] as Map<String, dynamic>;
+        return abilitiesMap.values
+            .map((a) => {'name': a.toString()})
+            .toList();
+      }
+      return [];
+    } catch (_) {
+      return [];
     }
-    return [];
+  }
+
+  Future<int> getGenderRate(String name) async {
+    try {
+      final data = await getPokemon(name);
+      if (data['gender'] == 'N') return -1;
+      if (data['gender'] == 'M') return 0;
+      if (data['gender'] == 'F') return 8;
+      if (data.containsKey('genderRatio') && data['genderRatio'] is Map) {
+        final double m = (data['genderRatio']['M'] as num?)?.toDouble() ?? 0.5;
+        if (m == 0.0) return 8;
+        if (m == 1.0) return 0;
+      }
+      return 4;
+    } catch (_) {
+      return 4;
+    }
+  }
+
+  Future<Map<String, Map<String, int>>> getAllMegaBaseStats(String name) async {
+    try {
+      final cleanBaseName = name.toLowerCase().split('-')[0];
+      final baseData = await getPokemon(cleanBaseName);
+      final otherFormes = baseData['otherFormes'] as List? ?? [];
+
+      Map<String, Map<String, int>> megaMap = {};
+      for (final formName in otherFormes) {
+        final formStr = formName.toString();
+        if (formStr.contains('-mega')) {
+          final formData = await getPokemon(formStr);
+          if (formData['baseStats'] is Map) {
+            final rawStats = formData['baseStats'] as Map<String, dynamic>;
+            megaMap[formStr] = rawStats.map((k, v) => MapEntry(k, (v as num).toInt()));
+          }
+        }
+      }
+      return megaMap;
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<Map<String, String>> getNatureBoosts(String nature) async {
+    const natures = {
+      'adamant': {'plus': 'Attack', 'minus': 'Sp. Atk'},
+      'bashful': {'plus': '', 'minus': ''},
+      'bold': {'plus': 'Defense', 'minus': 'Attack'},
+      'brave': {'plus': 'Attack', 'minus': 'Speed'},
+      'calm': {'plus': 'Sp. Def', 'minus': 'Attack'},
+      'careful': {'plus': 'Sp. Def', 'minus': 'Sp. Atk'},
+      'docile': {'plus': '', 'minus': ''},
+      'gentle': {'plus': 'Sp. Def', 'minus': 'Defense'},
+      'hardy': {'plus': '', 'minus': ''},
+      'hasty': {'plus': 'Speed', 'minus': 'Defense'},
+      'impish': {'plus': 'Defense', 'minus': 'Sp. Atk'},
+      'jolly': {'plus': 'Speed', 'minus': 'Sp. Atk'},
+      'lax': {'plus': 'Defense', 'minus': 'Sp. Def'},
+      'lonely': {'plus': 'Attack', 'minus': 'Defense'},
+      'mild': {'plus': 'Sp. Atk', 'minus': 'Defense'},
+      'modest': {'plus': 'Sp. Atk', 'minus': 'Attack'},
+      'naive': {'plus': 'Speed', 'minus': 'Sp. Def'},
+      'naughty': {'plus': 'Attack', 'minus': 'Sp. Def'},
+      'quiet': {'plus': 'Sp. Atk', 'minus': 'Speed'},
+      'quirky': {'plus': '', 'minus': ''},
+      'rash': {'plus': 'Sp. Atk', 'minus': 'Sp. Def'},
+      'relaxed': {'plus': 'Defense', 'minus': 'Speed'},
+      'sassy': {'plus': 'Sp. Def', 'minus': 'Speed'},
+      'serious': {'plus': '', 'minus': ''},
+      'timid': {'plus': 'Speed', 'minus': 'Attack'},
+    };
+    return natures[nature.toLowerCase()] ?? {'plus': '', 'minus': ''};
   }
 }
