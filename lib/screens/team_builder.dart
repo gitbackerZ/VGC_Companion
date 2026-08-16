@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle, Clipboard, ClipboardData;
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/js_engine_service.dart';
 import '../services/stat_calculator.dart';
@@ -106,11 +106,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   Future<void> _loadData() async {
     try {
       await _service.init();
-      final rosterJson =
-          await rootBundle.loadString('lib/data/champions_roster.json');
-      final roster = json.decode(rosterJson);
-      final List<String> allowed =
-          List<String>.from(roster['allowed_pokemon']);
+      
+      final allowed = await _service.getSpeciesList();
 
       await _loadSavedTeam();
 
@@ -124,7 +121,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       });
     } catch (e) {
       setState(() {
-        _statusMessage = 'Error loading Pokémon roster.';
+        _statusMessage = 'Error loading Pokémon roster from engine.';
         _loading = false;
       });
     }
@@ -157,7 +154,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     });
   }
 
-
   Future<void> _addToTeam(String name) async {
     _unfocus();
     if (_team.length >= 6) {
@@ -166,8 +162,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     }
 
     try {
-      // The roster already contains the exact form name (e.g. "raichu-alola").
-      // Use it directly — no need to query varieties.
       final String selectedFormName = name;
 
       final data = await _service.getPokemon(selectedFormName);
@@ -263,7 +257,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     final removed = _team[index].name;
     setState(() {
       _team.removeAt(index);
-      // Clear panel states to prevent index keys from shifting onto the wrong member
       _movesCache.clear();
       _abilitiesCache.clear();
       _activePanels.clear();
@@ -282,7 +275,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         _collapsedCards.remove(index);
       } else {
         _collapsedCards.add(index);
-        _activePanels[index] = null; // also close any open sub-panel
+        _activePanels[index] = null;
       }
     });
   }
@@ -291,7 +284,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     final cleanItem = item.trim().toLowerCase();
 
     if (cleanItem.isNotEmpty) {
-      // Check if another member on the team is already holding this item
       final duplicateMember = _team.firstWhere(
         (m) => m.heldItem?.trim().toLowerCase() == cleanItem && _team.indexOf(m) != index,
         orElse: () => TeamMember(name: '', pokedexNumber: -1),
@@ -370,7 +362,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     if (heldItem.isEmpty) return false;
     final item = heldItem.toLowerCase().trim();
 
-    // Guard against non-Mega item ending in 'ite'
     if (item == 'eviolite') return false;
 
     if (formKey.contains('-mega-x')) {
@@ -386,8 +377,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     }
   }
 
-  /// Determines the active Mega form (if any) based purely on held item.
-  /// Returns (formName, baseStats) or null if not currently Mega Evolved.
   Future<MapEntry<String, Map<String, int>>?> _resolveActiveMega(TeamMember member) async {
     final heldItem = (member.heldItem ?? '').toLowerCase().trim();
     if (heldItem.isEmpty) return null;
@@ -407,14 +396,16 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     _unfocus();
     final member = _team[index];
     try {
-      final nature = allNatures.firstWhere((n) => n.name == member.nature);
+      final natureInfo = await _service.getNatureBoosts(member.nature);
+      final boosted = natureInfo['plus'] ?? '';
+      final lowered = natureInfo['minus'] ?? '';
 
       final normalBaseStats = await _service.getBaseStats(member.name);
       final normalStats = StatCalculator.calculate(
         baseStats: normalBaseStats,
         evs: member.evs,
-        natureBoosted: nature.boosted ?? '',
-        natureLowered: nature.lowered ?? '',
+        natureBoosted: boosted,
+        natureLowered: lowered,
       );
 
       Map<String, int>? megaStats;
@@ -427,8 +418,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         megaStats = StatCalculator.calculate(
           baseStats: activeMega.value,
           evs: member.evs,
-          natureBoosted: nature.boosted ?? '',
-          natureLowered: nature.lowered ?? '',
+          natureBoosted: boosted,
+          natureLowered: lowered,
         );
         try {
           final abilities = await _service.getAbilitiesForPokemon(megaFormName);
@@ -453,13 +444,13 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                 const Text('Assumes max IVs (31) at Level 50.', style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic)),
                 const SizedBox(height: 12),
                 const Text('Base Form', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                ..._buildStatRows(normalStats, nature),
+                ..._buildStatRows(normalStats, boosted, lowered),
                 if (megaStats != null) ...[
                   const SizedBox(height: 16),
                   Text('Mega Evolution: $megaFormName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   if (megaAbility != null) Text('Ability: $megaAbility', style: const TextStyle(fontStyle: FontStyle.italic)),
                   const SizedBox(height: 4),
-                  ..._buildStatRows(megaStats, nature),
+                  ..._buildStatRows(megaStats, boosted, lowered),
                 ] else ...[
                   const SizedBox(height: 16),
                   Text(
@@ -486,18 +477,18 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     }
   }
 
-  List<Widget> _buildStatRows(Map<String, int> stats, Nature nature) {
+  List<Widget> _buildStatRows(Map<String, int> stats, String boosted, String lowered) {
     return stats.entries.map((e) {
-      final isBoosted = (e.key == 'Atk' && nature.boosted == 'Attack') ||
-          (e.key == 'Def' && nature.boosted == 'Defense') ||
-          (e.key == 'SpA' && nature.boosted == 'Sp. Atk') ||
-          (e.key == 'SpD' && nature.boosted == 'Sp. Def') ||
-          (e.key == 'Spe' && nature.boosted == 'Speed');
-      final isLowered = (e.key == 'Atk' && nature.lowered == 'Attack') ||
-          (e.key == 'Def' && nature.lowered == 'Defense') ||
-          (e.key == 'SpA' && nature.lowered == 'Sp. Atk') ||
-          (e.key == 'SpD' && nature.lowered == 'Sp. Def') ||
-          (e.key == 'Spe' && nature.lowered == 'Speed');
+      final isBoosted = (e.key == 'Atk' && boosted == 'Attack') ||
+          (e.key == 'Def' && boosted == 'Defense') ||
+          (e.key == 'SpA' && boosted == 'Sp. Atk') ||
+          (e.key == 'SpD' && boosted == 'Sp. Def') ||
+          (e.key == 'Spe' && boosted == 'Speed');
+      final isLowered = (e.key == 'Atk' && lowered == 'Attack') ||
+          (e.key == 'Def' && lowered == 'Defense') ||
+          (e.key == 'SpA' && lowered == 'Sp. Atk') ||
+          (e.key == 'SpD' && lowered == 'Sp. Def') ||
+          (e.key == 'Spe' && lowered == 'Speed');
       final suffix = isBoosted ? ' (+)' : (isLowered ? ' (-)' : '');
       return Semantics(
         label: '${e.key}: ${e.value}${isBoosted ? ", boosted" : ""}${isLowered ? ", lowered" : ""}',
@@ -536,13 +527,16 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     for (int i = 0; i < _team.length; i++) {
       final member = _team[i];
       try {
-        final nature = allNatures.firstWhere((n) => n.name == member.nature);
+        final natureInfo = await _service.getNatureBoosts(member.nature);
+        final boosted = natureInfo['plus'] ?? '';
+        final lowered = natureInfo['minus'] ?? '';
+
         final baseStats = await _service.getBaseStats(member.name);
         baseStatsByIndex[i] = StatCalculator.calculate(
           baseStats: baseStats,
           evs: member.evs,
-          natureBoosted: nature.boosted ?? '',
-          natureLowered: nature.lowered ?? '',
+          natureBoosted: boosted,
+          natureLowered: lowered,
         );
 
         final activeMega = await _resolveActiveMega(member);
@@ -551,8 +545,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           megaStatsByIndex[i] = StatCalculator.calculate(
             baseStats: activeMega.value,
             evs: member.evs,
-            natureBoosted: nature.boosted ?? '',
-            natureLowered: nature.lowered ?? '',
+            natureBoosted: boosted,
+            natureLowered: lowered,
           );
           try {
             final abilities = await _service.getAbilitiesForPokemon(activeMega.key);
@@ -567,7 +561,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     }
 
     if (!mounted) return;
-    Navigator.pop(context); // close loading dialog
+    Navigator.pop(context);
 
     final text = TeamTextCodec.encodeTeam(
       _team,
@@ -925,7 +919,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // COMPACT HEADER: name, collapse toggle, remove toggle — always visible
           Semantics(
             label:
                 '${member.name}. Item: ${member.heldItem ?? "none"}. Gender: ${member.gender}. Ability: ${member.ability ?? "none"}. Nature: ${member.nature}. EVs: ${member.evTotal} of 510. Moves: $movesDisplay.',
@@ -1000,7 +993,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  // Details first, then Moves (interchanged)
                   _buildToolbarToggle(
                     emoji: '⚙️',
                     label: 'Details',
@@ -1065,7 +1057,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     String? semanticLabel,
   }) {
     final cs = Theme.of(context).colorScheme;
-    // Adaptive highlight; emoji follows onSurface so it stays readable in light & dark.
     final Color bg =
         isActive ? cs.primary.withValues(alpha: 0.25) : Colors.transparent;
     final Color emojiColor = isActive ? cs.primary : cs.onSurface;
@@ -1098,10 +1089,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     );
   }
 
-  /// Soft high-contrast fields: muted gray/white fills, readable but not glaring.
   InputDecoration _adaptiveInputDecoration(String labelText) {
     final cs = Theme.of(context).colorScheme;
-    // Light wash of onSurface over surface → soft gray in both themes
     final softFill = Color.alphaBlend(
       cs.onSurface.withValues(alpha: 0.10),
       cs.surfaceContainerHighest,
@@ -1134,7 +1123,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     );
   }
 
-  /// Dropdown menu: soft elevated surface, not full inverse white/black.
   Color get _dropdownMenuColor {
     final cs = Theme.of(context).colorScheme;
     return Color.alphaBlend(
@@ -1143,11 +1131,9 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     );
   }
 
-  /// Body text inside fields / dropdowns.
   Color get _fieldTextColor =>
       Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.92);
 
-  /// Primary actions — soft filled (primaryContainer), easier on the eyes.
   ButtonStyle get _inverseFilledButtonStyle {
     final cs = Theme.of(context).colorScheme;
     return FilledButton.styleFrom(
@@ -1158,7 +1144,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     );
   }
 
-  /// Secondary / cancel — muted primary, not neon inverse.
   ButtonStyle get _inverseTextButtonStyle {
     final cs = Theme.of(context).colorScheme;
     return TextButton.styleFrom(
@@ -1180,7 +1165,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           if (moveOptions == null)
             const Center(child: CircularProgressIndicator())
           else
-            // 2 columns × 2 rows → at most 2 visual rows of fields
             ...List.generate(2, (row) {
               return Padding(
                 padding: const EdgeInsets.only(bottom: 6),
@@ -1266,5 +1250,4 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
     return const SizedBox.shrink();
   }
-
 }
