@@ -22,7 +22,7 @@ class JsEngineService {
   }
 
   Future<List<String>> getSpeciesList() async {
-    final result = _jsRuntime!.evaluate('Object.keys(Dex.data.Species)');
+    final result = _jsRuntime!.evaluate('JSON.stringify(Object.keys(Dex.data.Species))');
     if (result.isError) return [];
     final List<dynamic> list = json.decode(result.stringResult);
     return list.cast<String>();
