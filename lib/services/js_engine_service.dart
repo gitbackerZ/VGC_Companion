@@ -19,9 +19,14 @@ class JsEngineService {
     return jsonDecode(result);
   }
 
+  /// Encodes a Dart string as a safely-escaped JS string literal
+  /// (quotes, backslashes, unicode all handled) to prevent injection
+  /// when the value is interpolated into an evaluated JS expression.
+  String _jsLiteral(String value) => jsonEncode(value);
+
   Future<Map<String, dynamic>> getPokemon(String name) async {
     await init();
-    final species = _evalJson("globalThis.Dex.species.get('$name')");
+    final species = _evalJson("globalThis.Dex.species.get(${_jsLiteral(name)})");
     if (species == null) throw Exception('Species $name not found in engine');
     return {
       'id': species['num'] ?? 0,
@@ -31,9 +36,9 @@ class JsEngineService {
 
   Future<List<Map<String, dynamic>>> getAbilitiesForPokemon(String name) async {
     await init();
-    final species = _evalJson("globalThis.Dex.species.get('$name')");
+    final species = _evalJson("globalThis.Dex.species.get(${_jsLiteral(name)})");
     if (species == null || species['abilities'] == null) return [];
-    
+
     final Map<String, dynamic> abilitiesMap = Map<String, dynamic>.from(species['abilities']);
     return abilitiesMap.values
         .map((abilityName) => {'name': abilityName.toString().toLowerCase()})
@@ -42,7 +47,7 @@ class JsEngineService {
 
   Future<List<String>> getMovesForPokemon(String name) async {
     await init();
-    final learnset = _evalJson("globalThis.Dex.species.getLearnset('$name') || {}");
+    final learnset = _evalJson("globalThis.Dex.species.getLearnset(${_jsLiteral(name)}) || {}");
     if (learnset == null) return [];
     final Map<String, dynamic> map = Map<String, dynamic>.from(learnset);
     return map.keys.toList();
@@ -50,7 +55,7 @@ class JsEngineService {
 
   Future<int> getGenderRate(String name) async {
     await init();
-    final species = _evalJson("globalThis.Dex.species.get('$name')");
+    final species = _evalJson("globalThis.Dex.species.get(${_jsLiteral(name)})");
     if (species == null) return 4;
 
     final gender = species['gender'];
@@ -67,7 +72,7 @@ class JsEngineService {
 
   Future<Map<String, int>> getBaseStats(String name) async {
     await init();
-    final species = _evalJson("globalThis.Dex.species.get('$name')");
+    final species = _evalJson("globalThis.Dex.species.get(${_jsLiteral(name)})");
     if (species == null || species['baseStats'] == null) {
       return {'HP': 0, 'Atk': 0, 'Def': 0, 'SpA': 0, 'SpD': 0, 'Spe': 0};
     }
@@ -85,7 +90,7 @@ class JsEngineService {
 
   Future<Map<String, Map<String, int>>> getAllMegaBaseStats(String name) async {
     await init();
-    final species = _evalJson("globalThis.Dex.species.get('$name')");
+    final species = _evalJson("globalThis.Dex.species.get(${_jsLiteral(name)})");
     if (species == null || species['otherFormes'] == null) return {};
 
     final List<dynamic> otherFormes = species['otherFormes'];
@@ -131,7 +136,7 @@ class JsEngineService {
 
   Future<Map<String, String>> getNatureBoosts(String natureName) async {
     await init();
-    final nature = _evalJson("globalThis.Dex.natures.get('$natureName')");
+    final nature = _evalJson("globalThis.Dex.natures.get(${_jsLiteral(natureName)})");
     if (nature == null) return {'plus': '', 'minus': ''};
 
     String mapStat(String? key) {
