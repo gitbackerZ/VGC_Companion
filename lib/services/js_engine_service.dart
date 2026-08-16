@@ -16,11 +16,12 @@ class JsEngineService {
 
     _jsRuntime = getJavascriptRuntime();
 
-    // Setup global environment bindings required by Showdown/engine.js
+    // Environment polyfills for Node/CommonJS/Browser JS bundles
     _jsRuntime.evaluate('''
       var global = globalThis;
       var window = globalThis;
-      var exports = globalThis;
+      var module = { exports: {} };
+      var exports = module.exports;
     ''');
 
     final script = await rootBundle.loadString('assets/engine.js');
@@ -29,6 +30,25 @@ class JsEngineService {
     if (result.isError) {
       throw Exception('Failed to evaluate assets/engine.js: ${result.stringResult}');
     }
+
+    // Bind Dex to globalThis regardless of export pattern used by engine.js
+    _jsRuntime.evaluate('''
+      (function() {
+        if (typeof globalThis.Dex === 'undefined') {
+          if (typeof Dex !== 'undefined') {
+            globalThis.Dex = Dex;
+          } else if (typeof module !== 'undefined' && module.exports) {
+            if (module.exports.Dex) {
+              globalThis.Dex = module.exports.Dex;
+            } else if (module.exports.default && module.exports.default.Dex) {
+              globalThis.Dex = module.exports.default.Dex;
+            } else if (module.exports.species || module.exports.data) {
+              globalThis.Dex = module.exports;
+            }
+          }
+        }
+      })();
+    ''');
 
     _initialized = true;
   }
@@ -54,11 +74,12 @@ class JsEngineService {
       (function() {
         var dexObj = typeof Dex !== 'undefined' ? Dex : (typeof globalThis.Dex !== 'undefined' ? globalThis.Dex : null);
         if (!dexObj) {
-          return JSON.stringify({ error: "Dex object is undefined on global environment." });
+          var modKeys = (typeof module !== 'undefined' && module.exports) ? Object.keys(module.exports).join(', ') : 'none';
+          return JSON.stringify({ error: "Dex object is undefined. module.exports keys: [" + modKeys + "]" });
         }
         var speciesMap = dexObj.species || dexObj.data?.Species || dexObj.data?.Pokedex;
         if (!speciesMap) {
-          return JSON.stringify({ error: "Dex species repository is undefined." });
+          return JSON.stringify({ error: "Dex species repository is undefined on Dex object." });
         }
         
         var list = [];
