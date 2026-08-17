@@ -21,7 +21,7 @@ class TeamMember {
   int level;
   String? ability;
   String gender;
-  int genderRate; // -1 genderless, 0 always male, 8 always female, else both possible
+  int genderRate;
 
   TeamMember({
     required this.name,
@@ -84,6 +84,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   static const _storageKey = 'saved_team';
 
   List<String> _allSpecies = [];
+  List<String> _allItems = [];
   List<String> _filtered = [];
   List<TeamMember> _team = [];
 
@@ -184,7 +185,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       final String selectedFormName = name;
       final data = await _service.getPokemon(selectedFormName);
 
-      // Safe integer extraction for Dex Number
       final pokedexNumber = _extractPokedexNumber(data);
 
       if (_team.any((m) => m.name == selectedFormName)) {
@@ -195,7 +195,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       List<String?> defaultMoves = List.filled(4, null);
       String? defaultAbility;
 
-      // Check payload abilities first, fallback to service call
       if (data['abilities'] is List && (data['abilities'] as List).isNotEmpty) {
         defaultAbility = (data['abilities'] as List).first.toString();
       } else {
@@ -207,7 +206,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         } catch (_) {}
       }
 
-      // Species-specific learnset lookup instead of the full move dex
       try {
         final movesData = await _service.getMovesForSpecies(selectedFormName);
         final moves = movesData.map((m) => m['name'].toString()).toList();
@@ -221,9 +219,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         genderRate = await _service.getGenderRate(selectedFormName);
       } catch (_) {}
 
-      // Default gender is derived from genderRate (the authoritative source
-      // that also drives the edit dropdown's available options), not from
-      // pattern-matching the display name.
       String defaultGender;
       if (genderRate == -1) {
         defaultGender = 'Genderless';
@@ -232,7 +227,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       } else if (genderRate == 0) {
         defaultGender = 'Male';
       } else {
-        defaultGender = 'Male'; // both possible - Male is a reasonable default
+        defaultGender = 'Male';
       }
 
       final newMember = TeamMember(
@@ -349,7 +344,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     if (_activePanels[index] != null) {
       if (!_movesCache.containsKey(index)) {
         try {
-          // Species-specific learnset lookup instead of the full move dex
           final movesData = await _service.getMovesForSpecies(_team[index].name);
           final moves = movesData.map((m) => m['name'].toString()).toList();
           setState(() => _movesCache[index] = moves);
@@ -1312,6 +1306,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         ability: member.ability,
         abilities: _abilitiesCache[index],
         nature: member.nature,
+        itemList: _allItems,
         onChanged: ({heldItem, gender, ability, nature}) async {
           if (heldItem != null) await _setHeldItem(index, heldItem);
           if (gender != null) await _setGender(index, gender);
@@ -1322,10 +1317,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     }
 
     if (panelName == 'evs') {
-      // Keyed on member identity, not just list position, so a removal
-      // earlier in the team doesn't cause Flutter to reuse this panel's
-      // TextEditingControllers (and their stale text) for a different
-      // Pokémon that happens to land on the same index afterward.
       return EvEditorPanel(
         key: ValueKey('evs-${member.name}-$index'),
         evs: member.evs,
