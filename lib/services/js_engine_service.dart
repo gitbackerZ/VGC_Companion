@@ -19,31 +19,97 @@ class JsEngineService {
     final dexJs = await rootBundle.loadString('assets/js/dex.js');
     _jsRuntime!.evaluate(dexJs);
 
-    // Inject learnset data extracted from @pkmn/dex's gen-9 learnsets chunk,
-    // since the bundled dex.js only contains a lazy-loader stub for
-    // Dex.data.Learnsets and never actually populates it at runtime.
     try {
       final learnsetsJson = await rootBundle.loadString('assets/js/learnsets.json');
-      final result = _jsRuntime!.evaluate('Dex.data.Learnsets = $learnsetsJson;');
-      if (result.isError) {
-        debugPrint('Failed to inject learnsets data: ${result.stringResult}');
-      }
+      _jsRuntime!.evaluate('Dex.data.Learnsets = $learnsetsJson;');
     } catch (e, stack) {
-      debugPrint('Error loading learnsets.json: $e');
-      debugPrint(stack.toString());
-      // Fail soft: getMovesForSpecies() already handles a missing/empty
-      // Dex.data.Learnsets by returning [], so the app remains usable
-      // even if this asset is missing or malformed.
+      debugPrint('Error loading learnsets.json: $e\n$stack');
     }
 
     _isInitialized = true;
   }
 
-  Future<List<String>> getSpeciesList() async {
-    final result = _jsRuntime!.evaluate('JSON.stringify(Object.keys(Dex.data.Species))');
+  /// Returns real held item names from Dex.data.Items
+  Future<List<String>> getItemList() async {
+    final script = '''
+      (function() {
+        if (!Dex.data.Items) return JSON.stringify([]);
+        var items = Object.values(Dex.data.Items)
+          .filter(function(i) { return i.exists && !i.isNonstandard; })
+          .map(function(i) { return i.name; });
+        return JSON.stringify(items);
+      })()
+    ''';
+    final result = _jsRuntime!.evaluate(script);
     if (result.isError) return [];
     final List<dynamic> list = json.decode(result.stringResult);
     return list.cast<String>();
+  }
+
+  /// Returns base species only (1 per Dex number), excluding Megas and Gmax
+  Future<List<Map<String, dynamic>>> getBaseSpeciesList() async {
+    final script = '''
+      (function() {
+        var results = [];
+        var seenNum = {};
+        var keys = Object.keys(Dex.data.Species);
+        for (var i = 0; i < keys.length; i++) {
+          var spec = Dex.species.get(keys[i]);
+          if (!spec || !spec.exists || spec.num <= 0) continue;
+          
+          var isMega = spec.forme && spec.forme.indexOf('Mega') !== -1;
+          var isGmax = spec.forme && spec.forme.indexOf('Gmax') !== -1;
+          if (isMega || isGmax) continue;
+
+          if (!spec.forme && !seenNum[spec.num]) {
+            seenNum[spec.num] = true;
+            results.push({
+              'name': spec.name,
+              'num': spec.num,
+              'types': spec.types || [],
+              'hasFormes': (spec.otherFormes && spec.otherFormes.length > 0)
+            });
+          }
+        }
+        return JSON.stringify(results);
+      })()
+    ''';
+    final result = _jsRuntime!.evaluate(script);
+    if (result.isError) return [];
+    final List<dynamic> list = json.decode(result.stringResult);
+    return list.cast<Map<String, dynamic>>();
+  }
+
+  /// Gets non-Mega, non-Gmax varieties for a base species
+  Future<List<Map<String, dynamic>>> getFormesForSpecies(String baseName) async {
+    final script = '''
+      (function() {
+        var base = Dex.species.get("$baseName");
+        if (!base || !base.exists) return JSON.stringify([]);
+        
+        var list = [base];
+        if (base.otherFormes) {
+          for (var i = 0; i < base.otherFormes.length; i++) {
+            var fName = base.otherFormes[i];
+            if (fName.indexOf('Mega') !== -1 || fName.indexOf('Gmax') !== -1) continue;
+            var fSpec = Dex.species.get(fName);
+            if (fSpec && fSpec.exists) list.push(fSpec);
+          }
+        }
+        return JSON.stringify(list.map(function(s) {
+          return {
+            'name': s.name,
+            'num': s.num,
+            'forme': s.forme || 'Base',
+            'types': s.types || []
+          };
+        }));
+      })()
+    ''';
+    final result = _jsRuntime!.evaluate(script);
+    if (result.isError) return [];
+    final List<dynamic> list = json.decode(result.stringResult);
+    return list.cast<Map<String, dynamic>>();
   }
 
   Future<Map<String, dynamic>> getPokemon(String name) async {
@@ -53,20 +119,6 @@ class JsEngineService {
     return json.decode(result.stringResult) as Map<String, dynamic>;
   }
 
-  Future<List<Map<String, dynamic>>> getMoveList() async {
-    final result = _jsRuntime!.evaluate('JSON.stringify(Object.values(Dex.data.Moves))');
-    if (result.isError) return [];
-    final List<dynamic> list = json.decode(result.stringResult);
-    return list.cast<Map<String, dynamic>>();
-  }
-
-  /// Returns only the moves learnable by [name], walking up the prevo chain
-  /// so evolved/final-stage forms include moves inherited from earlier stages,
-  /// and falling back to baseSpecies for Mega Evolutions, regional formes,
-  /// and other alternate forms that don't have their own learnset entry
-  /// (e.g. Raichu-Mega-X inherits Raichu's movepool).
-  /// Fails safe: returns [] on any missing data, JS error, or malformed result
-  /// rather than throwing.
   Future<List<Map<String, dynamic>>> getMovesForSpecies(String name) async {
     try {
       final sanitized = name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
@@ -90,17 +142,12 @@ class JsEngineService {
               var learnsetData = Dex.data.Learnsets[current.id];
               if (learnsetData && learnsetData.learnset) {
                 var ids = Object.keys(learnsetData.learnset);
-                for (var i = 0; i < ids.length; i++) {
-                  moveIdSet[ids[i]] = true;
-                }
+                for (var i = 0; i < ids.length; i++) moveIdSet[ids[i]] = true;
               }
 
               if (current.prevo) {
                 current = Dex.species.get(current.prevo);
               } else if (current.baseSpecies && current.baseSpecies !== current.name) {
-                // Mega evolutions, regional formes, and other alternate forms
-                // don't have their own learnset entry - fall back to the base
-                // species' movepool (e.g. Raichu-Mega-X -> Raichu).
                 current = Dex.species.get(current.baseSpecies);
               } else {
                 current = null;
@@ -121,7 +168,6 @@ class JsEngineService {
 
       final result = _jsRuntime!.evaluate(script);
       if (result.isError) return [];
-
       final decoded = json.decode(result.stringResult);
       if (decoded is! List) return [];
 
@@ -137,16 +183,12 @@ class JsEngineService {
   Future<List<Map<String, dynamic>>> getAbilitiesForPokemon(String name) async {
     try {
       final data = await getPokemon(name);
-      if (data['abilities'] is List) {
-        return (data['abilities'] as List)
-            .map((a) => {'name': a.toString()})
-            .toList();
+      final raw = data['abilities'];
+      if (raw is Map) {
+        return raw.values.map((a) => {'name': a.toString()}).toList();
       }
-      if (data['abilities'] is Map) {
-        final abilitiesMap = data['abilities'] as Map<String, dynamic>;
-        return abilitiesMap.values
-            .map((a) => {'name': a.toString()})
-            .toList();
+      if (raw is List) {
+        return raw.map((a) => {'name': a.toString()}).toList();
       }
       return [];
     } catch (_) {
