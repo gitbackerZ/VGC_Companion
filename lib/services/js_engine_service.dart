@@ -18,6 +18,23 @@ class JsEngineService {
     final dexJs = await rootBundle.loadString('assets/js/dex.js');
     _jsRuntime!.evaluate(dexJs);
 
+    // Inject learnset data extracted from @pkmn/dex's gen-9 learnsets chunk,
+    // since the bundled dex.js only contains a lazy-loader stub for
+    // Dex.data.Learnsets and never actually populates it at runtime.
+    try {
+      final learnsetsJson = await rootBundle.loadString('assets/js/learnsets.json');
+      final result = _jsRuntime!.evaluate('Dex.data.Learnsets = $learnsetsJson;');
+      if (result.isError) {
+        debugPrint('Failed to inject learnsets data: ${result.stringResult}');
+      }
+    } catch (e, stack) {
+      debugPrint('Error loading learnsets.json: $e');
+      debugPrint(stack.toString());
+      // Fail soft: getMovesForSpecies() already handles a missing/empty
+      // Dex.data.Learnsets by returning [], so the app remains usable
+      // even if this asset is missing or malformed.
+    }
+
     _isInitialized = true;
   }
 
