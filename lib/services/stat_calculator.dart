@@ -1,6 +1,6 @@
 class StatCalculator {
   /// Calculates final competitive stats at Level 50, IV 31, given EVs and nature.
-  /// baseStats keys must be: hp, attack, defense, special-attack, special-defense, speed
+  /// baseStats keys must match Showdown/@pkmn Dex format: hp, atk, def, spa, spd, spe
   static Map<String, int> calculate({
     required Map<String, int> baseStats,
     required Map<String, int> evs, // keys: HP, Atk, Def, SpA, SpD, Spe
@@ -27,11 +27,11 @@ class StatCalculator {
 
     return {
       'HP': calcHp(baseStats['hp'] ?? 0, evs['HP'] ?? 0),
-      'Atk': calcOther(baseStats['attack'] ?? 0, evs['Atk'] ?? 0, multiplierFor('Attack')),
-      'Def': calcOther(baseStats['defense'] ?? 0, evs['Def'] ?? 0, multiplierFor('Defense')),
-      'SpA': calcOther(baseStats['special-attack'] ?? 0, evs['SpA'] ?? 0, multiplierFor('Sp. Atk')),
-      'SpD': calcOther(baseStats['special-defense'] ?? 0, evs['SpD'] ?? 0, multiplierFor('Sp. Def')),
-      'Spe': calcOther(baseStats['speed'] ?? 0, evs['Spe'] ?? 0, multiplierFor('Speed')),
+      'Atk': calcOther(baseStats['atk'] ?? 0, evs['Atk'] ?? 0, multiplierFor('Attack')),
+      'Def': calcOther(baseStats['def'] ?? 0, evs['Def'] ?? 0, multiplierFor('Defense')),
+      'SpA': calcOther(baseStats['spa'] ?? 0, evs['SpA'] ?? 0, multiplierFor('Sp. Atk')),
+      'SpD': calcOther(baseStats['spd'] ?? 0, evs['SpD'] ?? 0, multiplierFor('Sp. Def')),
+      'Spe': calcOther(baseStats['spe'] ?? 0, evs['Spe'] ?? 0, multiplierFor('Speed')),
     };
   }
 }
