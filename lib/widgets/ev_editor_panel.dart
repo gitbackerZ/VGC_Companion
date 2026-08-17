@@ -36,13 +36,23 @@ class _EvEditorPanelState extends State<EvEditorPanel> {
 
   void _commitStat(String stat) {
     final parsed = int.tryParse(_controllers[stat]!.text.trim()) ?? 0;
-    final clamped = parsed.clamp(0, 252);
+    final statClamped = parsed.clamp(0, 252);
+
+    // Enforce the shared 510 EV budget across all stats, not just the
+    // per-stat 0-252 cap - previously any stat could be set up to 252
+    // regardless of what the other five stats already totaled, allowing
+    // an illegal total well past 510.
+    final otherTotal = widget.evs.entries
+        .where((e) => e.key != stat)
+        .fold(0, (sum, e) => sum + e.value);
+    final maxAllowed = (510 - otherTotal).clamp(0, 252);
+    final finalValue = statClamped > maxAllowed ? maxAllowed : statClamped;
 
     final updated = Map<String, int>.from(widget.evs);
-    updated[stat] = clamped;
+    updated[stat] = finalValue;
 
     widget.onChanged(updated);
-    _controllers[stat]!.text = clamped.toString();
+    _controllers[stat]!.text = finalValue.toString();
   }
 
   @override
