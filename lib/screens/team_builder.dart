@@ -13,6 +13,7 @@ import '../widgets/iv_level_editor_panel.dart';
 class TeamMember {
   String name;
   int pokedexNumber;
+  List<String> types;
   String? heldItem;
   List<String?> moves;
   String nature;
@@ -26,6 +27,7 @@ class TeamMember {
   TeamMember({
     required this.name,
     required this.pokedexNumber,
+    List<String>? types,
     this.heldItem,
     List<String?>? moves,
     this.nature = 'Hardy',
@@ -35,7 +37,8 @@ class TeamMember {
     this.ability,
     this.gender = 'Male',
     this.genderRate = 4,
-  })  : moves = moves ?? List.filled(4, null),
+  })  : types = types ?? [],
+        moves = moves ?? List.filled(4, null),
         evs = evs ?? {'HP': 0, 'Atk': 0, 'Def': 0, 'SpA': 0, 'SpD': 0, 'Spe': 0},
         ivs = ivs ?? {'HP': 31, 'Atk': 31, 'Def': 31, 'SpA': 31, 'SpD': 31, 'Spe': 31};
 
@@ -44,6 +47,7 @@ class TeamMember {
   Map<String, dynamic> toJson() => {
         'name': name,
         'pokedexNumber': pokedexNumber,
+        'types': types,
         'heldItem': heldItem,
         'moves': moves,
         'nature': nature,
@@ -58,6 +62,7 @@ class TeamMember {
   factory TeamMember.fromJson(Map<String, dynamic> json) => TeamMember(
         name: json['name'],
         pokedexNumber: json['pokedexNumber'],
+        types: List<String>.from(json['types'] ?? []),
         heldItem: json['heldItem'],
         moves: List<String?>.from(json['moves'] ?? List.filled(4, null)),
         nature: json['nature'] ?? 'Hardy',
@@ -83,16 +88,16 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   final _searchFocusNode = FocusNode();
   static const _storageKey = 'saved_team';
 
-  List<String> _allSpecies = [];
-  List<String> _allItems = [];
-  List<String> _filtered = [];
+  List<Map<String, dynamic>> _baseSpeciesList = [];
+  List<Map<String, dynamic>> _filtered = [];
+  List<String> _itemList = [];
   List<TeamMember> _team = [];
 
-  final Map<int, List<String>> _movesCache = {};
-  final Map<int, List<Map<String, dynamic>>> _abilitiesCache = {};
-
-  final Map<int, String?> _activePanels = {};
-  final Set<int> _collapsedCards = {};
+  // Key caches and UI state by TeamMember reference for stability across list re-orders
+  final Map<TeamMember, List<String>> _movesCache = {};
+  final Map<TeamMember, List<Map<String, dynamic>>> _abilitiesCache = {};
+  final Map<TeamMember, String?> _activePanels = {};
+  final Set<TeamMember> _collapsedCards = {};
 
   bool _loading = true;
   String _statusMessage = '';
@@ -118,22 +123,29 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   Future<void> _loadData() async {
     try {
       await _service.init();
+      if (!mounted) return;
 
-      final allowed = await _service.getSpeciesList();
+      final baseList = await _service.getBaseSpeciesList();
+      if (!mounted) return;
+
+      final items = await _service.getItemList();
+      if (!mounted) return;
 
       await _loadSavedTeam();
+      if (!mounted) return;
 
       setState(() {
-        _allSpecies = allowed;
+        _baseSpeciesList = baseList;
+        _itemList = items;
         _filtered = [];
         _loading = false;
-        for (int i = 0; i < _team.length; i++) {
-          _collapsedCards.add(i);
+        for (final member in _team) {
+          _collapsedCards.add(member);
         }
       });
     } catch (e, stack) {
-      debugPrint('Engine Initialization Error: $e');
-      debugPrint(stack.toString());
+      debugPrint('Initialization Error: $e\n$stack');
+      if (!mounted) return;
       setState(() {
         _statusMessage = 'Error loading Pokémon roster: $e';
         _loading = false;
@@ -156,83 +168,115 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     await prefs.setString(_storageKey, encoded);
   }
 
+  void _applyVgcPreset() async {
+    _unfocus();
+    setState(() {
+      for (final m in _team) {
+        m.level = 50;
+        m.ivs = {'HP': 31, 'Atk': 31, 'Def': 31, 'SpA': 31, 'SpD': 31, 'Spe': 31};
+      }
+    });
+    await _saveTeam();
+    if (!mounted) return;
+    _announce('Applied VGC Preset: All members set to Level 50 with 31 IVs.');
+  }
+
   void _filter(String query) {
     final q = query.trim().toLowerCase();
     setState(() {
       if (q.isEmpty) {
         _filtered = [];
       } else {
-        _filtered =
-            _allSpecies.where((p) => p.toLowerCase().contains(q)).toList();
+        _filtered = _baseSpeciesList
+            .where((p) => p['name'].toString().toLowerCase().contains(q))
+            .toList();
       }
     });
   }
 
-  int _extractPokedexNumber(Map<String, dynamic> data) {
-    if (data['num'] is int) return data['num'] as int;
-    if (data['id'] is int) return data['id'] as int;
-    return int.tryParse(data['id']?.toString() ?? '0') ?? 0;
-  }
-
-  Future<void> _addToTeam(String name) async {
+  Future<void> _handleSpeciesTap(Map<String, dynamic> baseEntry) async {
     _unfocus();
-    if (_team.length >= 6) {
-      _announce('Team is full. Maximum of six Pokémon.');
+    final int pokedexNumber = baseEntry['num'] as int;
+
+    // Species Clause Check
+    if (_team.any((m) => m.pokedexNumber == pokedexNumber)) {
+      _announce('Species Clause Violation: Pokédex #$pokedexNumber is already on your team.');
       return;
     }
 
+    if (_team.length >= 6) {
+      _announce('Team is full. Maximum of 6 Pokémon allowed.');
+      return;
+    }
+
+    final formes = await _service.getFormesForSpecies(baseEntry['name']);
+    if (!mounted) return;
+
+    String selectedForm = baseEntry['name'];
+
+    if (formes.length > 1) {
+      final chosen = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Select Form for ${baseEntry['name']}'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: formes.map((f) {
+                final String fName = f['name'];
+                final List<String> fTypes = List<String>.from(f['types'] ?? []);
+                return ListTile(
+                  title: Text(fName),
+                  subtitle: Text('Types: ${fTypes.join('/')}'),
+                  onTap: () => Navigator.pop(context, fName),
+                );
+              }).toList(),
+            ),
+          ),
+        ),
+      );
+      if (!mounted || chosen == null) return;
+      selectedForm = chosen;
+    }
+
+    await _addToTeam(selectedForm, pokedexNumber);
+  }
+
+  Future<void> _addToTeam(String formName, int pokedexNumber) async {
     try {
-      final String selectedFormName = name;
-      final data = await _service.getPokemon(selectedFormName);
-
-      final pokedexNumber = _extractPokedexNumber(data);
-
-      if (_team.any((m) => m.name == selectedFormName)) {
-        _announce('$selectedFormName is already on your team.');
-        return;
-      }
+      final data = await _service.getPokemon(formName);
+      if (!mounted) return;
+      final types = List<String>.from(data['types'] ?? []);
 
       List<String?> defaultMoves = List.filled(4, null);
       String? defaultAbility;
 
-      if (data['abilities'] is List && (data['abilities'] as List).isNotEmpty) {
-        defaultAbility = (data['abilities'] as List).first.toString();
-      } else {
-        try {
-          final abilities = await _service.getAbilitiesForPokemon(selectedFormName);
-          if (abilities.isNotEmpty) {
-            defaultAbility = abilities.first['name'] as String;
-          }
-        } catch (_) {}
-      }
+      final abilities = await _service.getAbilitiesForPokemon(formName);
+      if (!mounted) return;
+      if (abilities.isNotEmpty) defaultAbility = abilities.first['name'];
 
       try {
-        final movesData = await _service.getMovesForSpecies(selectedFormName);
-        final moves = movesData.map((m) => m['name'].toString()).toList();
-        for (int i = 0; i < 4 && i < moves.length; i++) {
-          defaultMoves[i] = moves[i];
+        final movesData = await _service.getMovesForSpecies(formName);
+        if (mounted) {
+          for (int i = 0; i < 4 && i < movesData.length; i++) {
+            defaultMoves[i] = movesData[i]['name'].toString();
+          }
         }
       } catch (_) {}
 
       int genderRate = 4;
       try {
-        genderRate = await _service.getGenderRate(selectedFormName);
+        genderRate = await _service.getGenderRate(formName);
       } catch (_) {}
 
-      String defaultGender;
-      if (genderRate == -1) {
-        defaultGender = 'Genderless';
-      } else if (genderRate == 8) {
-        defaultGender = 'Female';
-      } else if (genderRate == 0) {
-        defaultGender = 'Male';
-      } else {
-        defaultGender = 'Male';
-      }
+      if (!mounted) return;
+
+      String defaultGender = (genderRate == -1) ? 'Genderless' : ((genderRate == 8) ? 'Female' : 'Male');
 
       final newMember = TeamMember(
-        name: selectedFormName,
+        name: formName,
         pokedexNumber: pokedexNumber,
+        types: types,
         ability: defaultAbility,
         moves: defaultMoves,
         gender: defaultGender,
@@ -241,15 +285,17 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
       setState(() {
         _team.add(newMember);
-        _collapsedCards.add(_team.length - 1);
+        _collapsedCards.add(newMember);
         _searchController.clear();
         _filtered = [];
       });
       await _saveTeam();
-      _announce('$selectedFormName added to your team.');
+      if (!mounted) return;
+      _announce('$formName added to your team.');
     } catch (e, stack) {
-      debugPrint('Error adding $name: $e\n$stack');
-      _announce('Could not add $name. Check the name and try again.');
+      debugPrint('Error adding $formName: $e\n$stack');
+      if (!mounted) return;
+      _announce('Could not add $formName.');
     } finally {
       _unfocus();
     }
@@ -257,12 +303,12 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
   Future<void> _confirmRemoveFromTeam(int index) async {
     _unfocus();
-    final name = _team[index].name;
+    final member = _team[index];
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Remove Pokémon?'),
-        content: Text('Remove $name from your team? This cannot be undone.'),
+        content: Text('Remove ${member.name} from your team? This cannot be undone.'),
         actions: [
           TextButton(
             style: _inverseTextButtonStyle,
@@ -272,41 +318,40 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           FilledButton(
             style: _inverseFilledButtonStyle,
             onPressed: () => Navigator.pop(context, true),
-            child: Text('Remove $name'),
+            child: Text('Remove ${member.name}'),
           ),
         ],
       ),
     );
 
     _unfocus();
-    if (confirmed == true) {
+    if (mounted && confirmed == true) {
       await _removeFromTeam(index);
     }
   }
 
   Future<void> _removeFromTeam(int index) async {
-    final removed = _team[index].name;
+    final member = _team[index];
+    final removed = member.name;
     setState(() {
       _team.removeAt(index);
-      _movesCache.clear();
-      _abilitiesCache.clear();
-      _activePanels.clear();
-      _collapsedCards.clear();
-      for (int i = 0; i < _team.length; i++) {
-        _collapsedCards.add(i);
-      }
+      _movesCache.remove(member);
+      _abilitiesCache.remove(member);
+      _activePanels.remove(member);
+      _collapsedCards.remove(member);
     });
     await _saveTeam();
+    if (!mounted) return;
     _announce('$removed removed from team.');
   }
 
-  void _toggleCardCollapsed(int index) {
+  void _toggleCardCollapsed(TeamMember member) {
     setState(() {
-      if (_collapsedCards.contains(index)) {
-        _collapsedCards.remove(index);
+      if (_collapsedCards.contains(member)) {
+        _collapsedCards.remove(member);
       } else {
-        _collapsedCards.add(index);
-        _activePanels[index] = null;
+        _collapsedCards.add(member);
+        _activePanels[member] = null;
       }
     });
   }
@@ -328,34 +373,34 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
     setState(() => _team[index].heldItem = cleanItem.isEmpty ? null : cleanItem);
     await _saveTeam();
+    if (!mounted) return;
     _announce('${_team[index].name} is now holding ${cleanItem.isEmpty ? "no item" : cleanItem}.');
   }
 
-  void _togglePanel(int index, String panelName) async {
+  void _togglePanel(TeamMember member, String panelName) async {
     _unfocus();
     setState(() {
-      if (_activePanels[index] == panelName) {
-        _activePanels[index] = null;
+      if (_activePanels[member] == panelName) {
+        _activePanels[member] = null;
       } else {
-        _activePanels[index] = panelName;
+        _activePanels[member] = panelName;
       }
     });
 
-    if (_activePanels[index] != null) {
-      if (!_movesCache.containsKey(index)) {
+    if (_activePanels[member] != null) {
+      if (!_movesCache.containsKey(member)) {
         try {
-          final movesData = await _service.getMovesForSpecies(_team[index].name);
+          final movesData = await _service.getMovesForSpecies(member.name);
+          if (!mounted) return;
           final moves = movesData.map((m) => m['name'].toString()).toList();
-          setState(() => _movesCache[index] = moves);
+          setState(() => _movesCache[member] = moves);
         } catch (_) {}
       }
-      if (!_abilitiesCache.containsKey(index)) {
+      if (!_abilitiesCache.containsKey(member)) {
         try {
-          final data = await _service.getPokemon(_team[index].name);
-          final abilities = (data['abilities'] as List? ?? [])
-              .map((a) => {'name': a.toString()})
-              .toList();
-          setState(() => _abilitiesCache[index] = abilities);
+          final abilities = await _service.getAbilitiesForPokemon(member.name);
+          if (!mounted) return;
+          setState(() => _abilitiesCache[member] = abilities);
         } catch (_) {}
       }
     }
@@ -415,7 +460,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     if (heldItem.isEmpty) return null;
 
     final allMegaStats = await _service.getAllMegaBaseStats(member.name);
-    if (allMegaStats.isEmpty) return null;
+    if (!mounted || allMegaStats.isEmpty) return null;
 
     for (final entry in allMegaStats.entries) {
       if (_isValidMegaItem(heldItem, entry.key)) {
@@ -425,15 +470,16 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     return null;
   }
 
-  Future<void> _showStats(int index) async {
+  Future<void> _showStats(TeamMember member) async {
     _unfocus();
-    final member = _team[index];
     try {
       final natureInfo = await _service.getNatureBoosts(member.nature);
+      if (!mounted) return;
       final boosted = natureInfo['plus'] ?? '';
       final lowered = natureInfo['minus'] ?? '';
 
       final pokemonData = await _service.getPokemon(member.name);
+      if (!mounted) return;
       final rawStats = pokemonData['baseStats'] as Map<String, dynamic>;
       final normalBaseStats = rawStats.map((k, v) => MapEntry(k, (v as num).toInt()));
 
@@ -449,10 +495,15 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       Map<String, int>? megaStats;
       String? megaFormName;
       String? megaAbility;
+      List<String> megaTypes = [];
 
       final activeMega = await _resolveActiveMega(member);
+      if (!mounted) return;
       if (activeMega != null) {
         megaFormName = activeMega.key;
+        final megaData = await _service.getPokemon(megaFormName);
+        if (!mounted) return;
+        megaTypes = List<String>.from(megaData['types'] ?? []);
         megaStats = StatCalculator.calculate(
           baseStats: activeMega.value,
           evs: member.evs,
@@ -463,7 +514,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         );
         try {
           final abilities = await _service.getAbilitiesForPokemon(megaFormName);
-          if (abilities.isNotEmpty) {
+          if (mounted && abilities.isNotEmpty) {
             megaAbility = abilities.first['name'] as String;
           }
         } catch (_) {}
@@ -479,6 +530,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Text('Types: ${member.types.join("/")}'),
                 Text('Gender: ${member.gender} • Nature: ${member.nature}'),
                 const SizedBox(height: 8),
                 Text(
@@ -491,14 +543,15 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                 if (megaStats != null) ...[
                   const SizedBox(height: 16),
                   Text('Mega Evolution: $megaFormName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  Text('Mega Types: ${megaTypes.join("/")}', style: const TextStyle(fontSize: 13)),
                   if (megaAbility != null) Text('Ability: $megaAbility', style: const TextStyle(fontStyle: FontStyle.italic)),
                   const SizedBox(height: 4),
                   ..._buildStatRows(megaStats, boosted, lowered),
                 ] else ...[
                   const SizedBox(height: 16),
-                  Text(
+                  const Text(
                     'No Mega Evolution active. Hold the correct Mega Stone to Mega Evolve.',
-                    style: const TextStyle(color: Colors.orange, fontSize: 13, fontStyle: FontStyle.italic),
+                    style: TextStyle(color: Colors.orange, fontSize: 13, fontStyle: FontStyle.italic),
                   ),
                 ],
               ],
@@ -514,6 +567,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         ),
       );
     } catch (e) {
+      if (!mounted) return;
       _announce('Could not load stats for ${member.name}.');
     } finally {
       _unfocus();
@@ -571,10 +625,12 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       final member = _team[i];
       try {
         final natureInfo = await _service.getNatureBoosts(member.nature);
+        if (!mounted) return;
         final boosted = natureInfo['plus'] ?? '';
         final lowered = natureInfo['minus'] ?? '';
 
         final pokemonData = await _service.getPokemon(member.name);
+        if (!mounted) return;
         final rawStats = pokemonData['baseStats'] as Map<String, dynamic>;
         final baseStats = rawStats.map((k, v) => MapEntry(k, (v as num).toInt()));
 
@@ -588,6 +644,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         );
 
         final activeMega = await _resolveActiveMega(member);
+        if (!mounted) return;
         if (activeMega != null) {
           megaFormNameByIndex[i] = activeMega.key;
           megaStatsByIndex[i] = StatCalculator.calculate(
@@ -600,7 +657,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           );
           try {
             final abilities = await _service.getAbilitiesForPokemon(activeMega.key);
-            if (abilities.isNotEmpty) {
+            if (mounted && abilities.isNotEmpty) {
               megaAbilityByIndex[i] = abilities.first['name'] as String;
             }
           } catch (_) {}
@@ -609,7 +666,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     }
 
     if (!mounted) return;
-    Navigator.pop(context);
+    Navigator.pop(context); // Dismiss progress dialog
 
     final text = TeamTextCodec.encodeTeam(
       _team,
@@ -699,7 +756,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       ),
     );
 
-    if (pastedText == null || pastedText.trim().isEmpty) {
+    if (!mounted || pastedText == null || pastedText.trim().isEmpty) {
       _unfocus();
       return;
     }
@@ -739,7 +796,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       ),
     );
 
-    if (mode == null || mode == 'cancel') {
+    if (!mounted || mode == null || mode == 'cancel') {
       _unfocus();
       return;
     }
@@ -761,7 +818,12 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       if (_team.length + toAdd.length >= 6) break;
       try {
         final data = await _service.getPokemon(member.name);
-        member.pokedexNumber = _extractPokedexNumber(data);
+        if (!mounted) return;
+
+        member.pokedexNumber = (data['num'] is int)
+            ? data['num'] as int
+            : int.tryParse(data['id']?.toString() ?? '0') ?? 0;
+        member.types = List<String>.from(data['types'] ?? []);
 
         try {
           member.genderRate = await _service.getGenderRate(member.name);
@@ -769,8 +831,9 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           member.genderRate = 4;
         }
 
-        if (_team.any((m) => m.name == member.name) ||
-            toAdd.any((m) => m.name == member.name)) {
+        // Species Clause enforcement
+        if (_team.any((m) => m.pokedexNumber == member.pokedexNumber) ||
+            toAdd.any((m) => m.pokedexNumber == member.pokedexNumber)) {
           failed++;
           continue;
         }
@@ -780,17 +843,19 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       }
     }
 
+    if (!mounted) return;
+
     if (toAdd.isNotEmpty) {
       setState(() {
-        final startIndex = _team.length;
         _team.addAll(toAdd);
-        for (int i = 0; i < toAdd.length; i++) {
-          _collapsedCards.add(startIndex + i);
+        for (final member in toAdd) {
+          _collapsedCards.add(member);
         }
       });
     }
 
     await _saveTeam();
+    if (!mounted) return;
     _announce('Import complete. ${toAdd.length} Pokémon added${failed > 0 ? ", $failed failed or skipped" : ""}.');
     _unfocus();
   }
@@ -814,6 +879,11 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         appBar: AppBar(
           title: const Text('Team Builder'),
           actions: [
+            TextButton.icon(
+              onPressed: _applyVgcPreset,
+              icon: const Icon(Icons.flash_on, size: 18),
+              label: const Text('VGC Preset', style: TextStyle(fontSize: 12)),
+            ),
             Semantics(
               button: true,
               label: 'Export team as text',
@@ -839,7 +909,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
               child: Semantics(
-                label: 'Search Pokémon by name',
+                label: 'Search Pokémon by base species',
                 child: TextField(
                   controller: _searchController,
                   focusNode: _searchFocusNode,
@@ -853,7 +923,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                       .colorScheme
                       .primary
                       .withValues(alpha: 0.85),
-                  decoration: _adaptiveInputDecoration('Search Pokémon').copyWith(
+                  decoration: _adaptiveInputDecoration('Search Base Pokémon').copyWith(
                     prefixIcon: Icon(
                       Icons.search,
                       color: Theme.of(context)
@@ -919,7 +989,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                       child: Padding(
                         padding: EdgeInsets.all(16.0),
                         child: Text(
-                          'Start typing above to search for Pokémon.',
+                          'Start typing above to search for Pokémon species.',
                           textAlign: TextAlign.center,
                           style: TextStyle(fontSize: 13),
                         ),
@@ -939,14 +1009,16 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                       : ListView.builder(
                           itemCount: _filtered.length,
                           itemBuilder: (context, index) {
-                            final name = _filtered[index];
+                            final entry = _filtered[index];
+                            final types = List<String>.from(entry['types'] ?? []);
                             return Semantics(
                               button: true,
-                              label: 'Add $name to team',
+                              label: 'Add ${entry['name']} to team',
                               child: ListTile(
                                 dense: true,
-                                title: Text(name),
-                                onTap: () => _addToTeam(name),
+                                title: Text(entry['name']),
+                                subtitle: Text('Types: ${types.join("/")}'),
+                                onTap: () => _handleSpeciesTap(entry),
                               ),
                             );
                           },
@@ -960,8 +1032,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
   Widget _buildTeamCard(int index) {
     final member = _team[index];
-    final activePanel = _activePanels[index];
-    final isCollapsed = _collapsedCards.contains(index);
+    final activePanel = _activePanels[member];
+    final isCollapsed = _collapsedCards.contains(member);
 
     final nonNullMoves = member.moves.where((m) => m != null && m.isNotEmpty).join(', ');
     final movesDisplay = nonNullMoves.isEmpty ? 'None set' : nonNullMoves;
@@ -977,9 +1049,9 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         children: [
           Semantics(
             label:
-                '${member.name}. Level ${member.level}. Item: ${member.heldItem ?? "none"}. Gender: ${member.gender}. Ability: ${member.ability ?? "none"}. Nature: ${member.nature}. EVs: ${member.evTotal} of 510. Moves: $movesDisplay.',
+                '${member.name}. Types: ${member.types.join("/")}. Level ${member.level}. Item: ${member.heldItem ?? "none"}. Gender: ${member.gender}. Ability: ${member.ability ?? "none"}. Nature: ${member.nature}. EVs: ${member.evTotal} of 510. Moves: $movesDisplay.',
             child: InkWell(
-              onTap: () => _toggleCardCollapsed(index),
+              onTap: () => _toggleCardCollapsed(member),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 child: Row(
@@ -999,7 +1071,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                         icon: Icon(isCollapsed ? Icons.expand_more : Icons.expand_less, size: 22),
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                        onPressed: () => _toggleCardCollapsed(index),
+                        onPressed: () => _toggleCardCollapsed(member),
                       ),
                     ),
                     Semantics(
@@ -1027,6 +1099,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                 spacing: 10,
                 runSpacing: 2,
                 children: [
+                  Text('Types: ${member.types.join("/")}', style: const TextStyle(fontSize: 12)),
                   Text('Level: ${member.level}', style: const TextStyle(fontSize: 12)),
                   Text('Item: ${member.heldItem ?? "None"}', style: const TextStyle(fontSize: 12)),
                   Text('Gender: ${member.gender}', style: const TextStyle(fontSize: 12)),
@@ -1059,7 +1132,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                     semanticLabel: activePanel == 'details'
                         ? 'Collapse held item, gender, ability, and nature editor for ${member.name}'
                         : 'Expand held item, gender, ability, and nature editor for ${member.name}',
-                    onPressed: () => _togglePanel(index, 'details'),
+                    onPressed: () => _togglePanel(member, 'details'),
                   ),
                   _buildToolbarToggle(
                     emoji: '⚔️',
@@ -1068,7 +1141,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                     semanticLabel: activePanel == 'moves'
                         ? 'Collapse moveset editor for ${member.name}'
                         : 'Expand moveset editor for ${member.name}',
-                    onPressed: () => _togglePanel(index, 'moves'),
+                    onPressed: () => _togglePanel(member, 'moves'),
                   ),
                   _buildToolbarToggle(
                     emoji: '📈',
@@ -1077,7 +1150,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                     semanticLabel: activePanel == 'evs'
                         ? 'Collapse effort value editor for ${member.name}'
                         : 'Expand effort value editor for ${member.name}',
-                    onPressed: () => _togglePanel(index, 'evs'),
+                    onPressed: () => _togglePanel(member, 'evs'),
                   ),
                   _buildToolbarToggle(
                     emoji: '🎚️',
@@ -1086,14 +1159,14 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                     semanticLabel: activePanel == 'ivlevel'
                         ? 'Collapse level and individual value editor for ${member.name}'
                         : 'Expand level and individual value editor for ${member.name}',
-                    onPressed: () => _togglePanel(index, 'ivlevel'),
+                    onPressed: () => _togglePanel(member, 'ivlevel'),
                   ),
                   _buildToolbarToggle(
                     emoji: '📊',
                     label: 'Stats',
                     isActive: false,
                     semanticLabel: 'Show calculated stats for ${member.name}',
-                    onPressed: () => _showStats(index),
+                    onPressed: () => _showStats(member),
                   ),
                 ],
               ),
@@ -1224,7 +1297,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     final member = _team[index];
 
     if (panelName == 'moves') {
-      final moveOptions = _movesCache[index];
+      final moveOptions = _movesCache[member];
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1304,9 +1377,9 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         gender: member.gender,
         genderRate: member.genderRate,
         ability: member.ability,
-        abilities: _abilitiesCache[index],
+        abilities: _abilitiesCache[member],
         nature: member.nature,
-        itemList: _allItems,
+        itemList: _itemList,
         onChanged: ({heldItem, gender, ability, nature}) async {
           if (heldItem != null) await _setHeldItem(index, heldItem);
           if (gender != null) await _setGender(index, gender);
