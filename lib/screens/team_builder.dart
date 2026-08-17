@@ -8,6 +8,7 @@ import '../services/stat_calculator.dart';
 import '../services/team_text_codec.dart';
 import '../widgets/ev_editor_panel.dart';
 import '../widgets/details_editor_panel.dart';
+import '../widgets/iv_level_editor_panel.dart';
 
 class TeamMember {
   String name;
@@ -16,6 +17,8 @@ class TeamMember {
   List<String?> moves;
   String nature;
   Map<String, int> evs;
+  Map<String, int> ivs;
+  int level;
   String? ability;
   String gender;
   int genderRate; // -1 genderless, 0 always male, 8 always female, else both possible
@@ -27,11 +30,14 @@ class TeamMember {
     List<String?>? moves,
     this.nature = 'Hardy',
     Map<String, int>? evs,
+    Map<String, int>? ivs,
+    this.level = 50,
     this.ability,
     this.gender = 'Male',
     this.genderRate = 4,
   })  : moves = moves ?? List.filled(4, null),
-        evs = evs ?? {'HP': 0, 'Atk': 0, 'Def': 0, 'SpA': 0, 'SpD': 0, 'Spe': 0};
+        evs = evs ?? {'HP': 0, 'Atk': 0, 'Def': 0, 'SpA': 0, 'SpD': 0, 'Spe': 0},
+        ivs = ivs ?? {'HP': 31, 'Atk': 31, 'Def': 31, 'SpA': 31, 'SpD': 31, 'Spe': 31};
 
   int get evTotal => evs.values.fold(0, (a, b) => a + b);
 
@@ -42,6 +48,8 @@ class TeamMember {
         'moves': moves,
         'nature': nature,
         'evs': evs,
+        'ivs': ivs,
+        'level': level,
         'ability': ability,
         'gender': gender,
         'genderRate': genderRate,
@@ -54,6 +62,8 @@ class TeamMember {
         moves: List<String?>.from(json['moves'] ?? List.filled(4, null)),
         nature: json['nature'] ?? 'Hardy',
         evs: Map<String, int>.from(json['evs'] ?? {'HP': 0, 'Atk': 0, 'Def': 0, 'SpA': 0, 'SpD': 0, 'Spe': 0}),
+        ivs: Map<String, int>.from(json['ivs'] ?? {'HP': 31, 'Atk': 31, 'Def': 31, 'SpA': 31, 'SpD': 31, 'Spe': 31}),
+        level: json['level'] ?? 50,
         ability: json['ability'],
         gender: json['gender'] ?? 'Male',
         genderRate: json['genderRate'] ?? 4,
@@ -211,13 +221,18 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         genderRate = await _service.getGenderRate(selectedFormName);
       } catch (_) {}
 
+      // Default gender is derived from genderRate (the authoritative source
+      // that also drives the edit dropdown's available options), not from
+      // pattern-matching the display name.
       String defaultGender;
       if (genderRate == -1) {
         defaultGender = 'Genderless';
-      } else if (selectedFormName.endsWith('-female')) {
+      } else if (genderRate == 8) {
         defaultGender = 'Female';
-      } else {
+      } else if (genderRate == 0) {
         defaultGender = 'Male';
+      } else {
+        defaultGender = 'Male'; // both possible - Male is a reasonable default
       }
 
       final newMember = TeamMember(
@@ -372,14 +387,13 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     await _saveTeam();
   }
 
-  Future<void> _setEv(int index, String stat, int value) async {
-    final member = _team[index];
-    final clamped = value.clamp(0, 252);
-    final otherTotal = member.evTotal - member.evs[stat]!;
-    final maxAllowed = (510 - otherTotal).clamp(0, 252);
-    final finalValue = clamped > maxAllowed ? maxAllowed : clamped;
+  Future<void> _setLevel(int index, int level) async {
+    setState(() => _team[index].level = level);
+    await _saveTeam();
+  }
 
-    setState(() => member.evs[stat] = finalValue);
+  Future<void> _setIvs(int index, Map<String, int> ivs) async {
+    setState(() => _team[index].ivs = ivs);
     await _saveTeam();
   }
 
@@ -432,6 +446,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       final normalStats = StatCalculator.calculate(
         baseStats: normalBaseStats,
         evs: member.evs,
+        ivs: member.ivs,
+        level: member.level,
         natureBoosted: boosted,
         natureLowered: lowered,
       );
@@ -446,6 +462,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         megaStats = StatCalculator.calculate(
           baseStats: activeMega.value,
           evs: member.evs,
+          ivs: member.ivs,
+          level: member.level,
           natureBoosted: boosted,
           natureLowered: lowered,
         );
@@ -461,7 +479,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       await showDialog(
         context: context,
         builder: (context) => AlertDialog(
-          title: Text('${member.name.toUpperCase()} — Level 50 Stats'),
+          title: Text('${member.name.toUpperCase()} — Level ${member.level} Stats'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -469,7 +487,10 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
               children: [
                 Text('Gender: ${member.gender} • Nature: ${member.nature}'),
                 const SizedBox(height: 8),
-                const Text('Assumes max IVs (31) at Level 50.', style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic)),
+                Text(
+                  'IVs: ${member.ivs.entries.map((e) => "${e.key} ${e.value}").join(", ")}',
+                  style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+                ),
                 const SizedBox(height: 12),
                 const Text('Base Form', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 ..._buildStatRows(normalStats, boosted, lowered),
@@ -566,6 +587,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         baseStatsByIndex[i] = StatCalculator.calculate(
           baseStats: baseStats,
           evs: member.evs,
+          ivs: member.ivs,
+          level: member.level,
           natureBoosted: boosted,
           natureLowered: lowered,
         );
@@ -576,6 +599,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           megaStatsByIndex[i] = StatCalculator.calculate(
             baseStats: activeMega.value,
             evs: member.evs,
+            ivs: member.ivs,
+            level: member.level,
             natureBoosted: boosted,
             natureLowered: lowered,
           );
@@ -798,6 +823,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
             Semantics(
               button: true,
               label: 'Export team as text',
+              excludeSemantics: true,
               child: IconButton(
                 icon: const Icon(Icons.upload_outlined),
                 onPressed: _showExportDialog,
@@ -806,6 +832,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
             Semantics(
               button: true,
               label: 'Import team from text',
+              excludeSemantics: true,
               child: IconButton(
                 icon: const Icon(Icons.download_outlined),
                 onPressed: _showImportDialog,
@@ -956,7 +983,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         children: [
           Semantics(
             label:
-                '${member.name}. Item: ${member.heldItem ?? "none"}. Gender: ${member.gender}. Ability: ${member.ability ?? "none"}. Nature: ${member.nature}. EVs: ${member.evTotal} of 510. Moves: $movesDisplay.',
+                '${member.name}. Level ${member.level}. Item: ${member.heldItem ?? "none"}. Gender: ${member.gender}. Ability: ${member.ability ?? "none"}. Nature: ${member.nature}. EVs: ${member.evTotal} of 510. Moves: $movesDisplay.',
             child: InkWell(
               onTap: () => _toggleCardCollapsed(index),
               child: Padding(
@@ -973,6 +1000,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                     Semantics(
                       button: true,
                       label: isCollapsed ? 'Expand ${member.name} details' : 'Collapse ${member.name} details',
+                      excludeSemantics: true,
                       child: IconButton(
                         icon: Icon(isCollapsed ? Icons.expand_more : Icons.expand_less, size: 22),
                         padding: EdgeInsets.zero,
@@ -983,6 +1011,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                     Semantics(
                       button: true,
                       label: 'Remove ${member.name} from team',
+                      excludeSemantics: true,
                       child: IconButton(
                         icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
                         padding: EdgeInsets.zero,
@@ -1004,6 +1033,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                 spacing: 10,
                 runSpacing: 2,
                 children: [
+                  Text('Level: ${member.level}', style: const TextStyle(fontSize: 12)),
                   Text('Item: ${member.heldItem ?? "None"}', style: const TextStyle(fontSize: 12)),
                   Text('Gender: ${member.gender}', style: const TextStyle(fontSize: 12)),
                   Text('Ability: ${member.ability ?? "None"}', style: const TextStyle(fontSize: 12)),
@@ -1056,6 +1086,15 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                     onPressed: () => _togglePanel(index, 'evs'),
                   ),
                   _buildToolbarToggle(
+                    emoji: '🎚️',
+                    label: 'IVs',
+                    isActive: activePanel == 'ivlevel',
+                    semanticLabel: activePanel == 'ivlevel'
+                        ? 'Collapse level and individual value editor for ${member.name}'
+                        : 'Expand level and individual value editor for ${member.name}',
+                    onPressed: () => _togglePanel(index, 'ivlevel'),
+                  ),
+                  _buildToolbarToggle(
                     emoji: '📊',
                     label: 'Stats',
                     isActive: false,
@@ -1100,6 +1139,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       button: true,
       label: semanticLabel ?? label,
       selected: isActive,
+      excludeSemantics: true,
       child: InkWell(
         onTap: onPressed,
         borderRadius: BorderRadius.circular(8),
@@ -1282,12 +1322,27 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     }
 
     if (panelName == 'evs') {
+      // Keyed on member identity, not just list position, so a removal
+      // earlier in the team doesn't cause Flutter to reuse this panel's
+      // TextEditingControllers (and their stale text) for a different
+      // Pokémon that happens to land on the same index afterward.
       return EvEditorPanel(
+        key: ValueKey('evs-${member.name}-$index'),
         evs: member.evs,
         onChanged: (updatedEvs) async {
           setState(() => member.evs = updatedEvs);
           await _saveTeam();
         },
+      );
+    }
+
+    if (panelName == 'ivlevel') {
+      return IvLevelEditorPanel(
+        key: ValueKey('ivlevel-${member.name}-$index'),
+        level: member.level,
+        ivs: member.ivs,
+        onLevelChanged: (level) => _setLevel(index, level),
+        onIvsChanged: (ivs) => _setIvs(index, ivs),
       );
     }
 
