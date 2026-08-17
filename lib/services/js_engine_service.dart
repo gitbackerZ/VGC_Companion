@@ -61,7 +61,10 @@ class JsEngineService {
   }
 
   /// Returns only the moves learnable by [name], walking up the prevo chain
-  /// so evolved/final-stage forms include moves inherited from earlier stages.
+  /// so evolved/final-stage forms include moves inherited from earlier stages,
+  /// and falling back to baseSpecies for Mega Evolutions, regional formes,
+  /// and other alternate forms that don't have their own learnset entry
+  /// (e.g. Raichu-Mega-X inherits Raichu's movepool).
   /// Fails safe: returns [] on any missing data, JS error, or malformed result
   /// rather than throwing.
   Future<List<Map<String, dynamic>>> getMovesForSpecies(String name) async {
@@ -94,6 +97,11 @@ class JsEngineService {
 
               if (current.prevo) {
                 current = Dex.species.get(current.prevo);
+              } else if (current.baseSpecies && current.baseSpecies !== current.name) {
+                // Mega evolutions, regional formes, and other alternate forms
+                // don't have their own learnset entry - fall back to the base
+                // species' movepool (e.g. Raichu-Mega-X -> Raichu).
+                current = Dex.species.get(current.baseSpecies);
               } else {
                 current = null;
               }
