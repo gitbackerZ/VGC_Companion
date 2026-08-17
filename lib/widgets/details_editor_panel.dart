@@ -8,6 +8,7 @@ class DetailsEditorPanel extends StatelessWidget {
   final String? ability;
   final List<Map<String, dynamic>>? abilities;
   final String nature;
+  final List<String> itemList;
   final Function({
     String? heldItem,
     String? gender,
@@ -23,6 +24,7 @@ class DetailsEditorPanel extends StatelessWidget {
     this.ability,
     this.abilities,
     required this.nature,
+    required this.itemList,
     required this.onChanged,
   });
 
@@ -33,12 +35,6 @@ class DetailsEditorPanel extends StatelessWidget {
     return ['Male', 'Female'];
   }
 
-  /// De-duplicates ability entries by name, since some species data returns
-  /// abilities as a Map (slot -> name) where multiple slots share the same
-  /// ability name (e.g. hidden ability duplicating a normal slot). Duplicate
-  /// values break DropdownButtonFormField, which requires each item's value
-  /// to be unique - this is why the ability dropdown could load a default
-  /// but not respond to selection.
   List<String> _getUniqueAbilityNames() {
     final seen = <String>{};
     final result = <String>[];
@@ -65,19 +61,45 @@ class DetailsEditorPanel extends StatelessWidget {
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
         ),
         const SizedBox(height: 8),
-        // 2x2 grid: Held Item / Gender on row one, Ability / Nature on row two.
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Held Item with Autocomplete
             Expanded(
-              child: TextFormField(
-                initialValue: heldItem ?? '',
-                decoration: const InputDecoration(
-                  labelText: 'Held Item',
-                  isDense: true,
-                  border: OutlineInputBorder(),
-                ),
-                onFieldSubmitted: (value) => onChanged(heldItem: value.trim()),
+              child: Autocomplete<String>(
+                initialValue: TextEditingValue(text: heldItem ?? ''),
+                optionsBuilder: (TextEditingValue value) {
+                  if (value.text.isEmpty) return const Iterable<String>.empty();
+                  final query = value.text.toLowerCase();
+                  return itemList
+                      .where((item) => item.toLowerCase().contains(query))
+                      .take(8);
+                },
+                onSelected: (selected) => onChanged(heldItem: selected),
+                fieldViewBuilder: (context, controller, focusNode, onEditingComplete) {
+                  return TextField(
+                    controller: controller,
+                    focusNode: focusNode,
+                    onEditingComplete: onEditingComplete,
+                    decoration: InputDecoration(
+                      labelText: 'Held Item',
+                      isDense: true,
+                      border: const OutlineInputBorder(),
+                      suffixIcon: controller.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, size: 18),
+                              onPressed: () {
+                                controller.clear();
+                                onChanged(heldItem: '');
+                              },
+                            )
+                          : null,
+                    ),
+                    onChanged: (val) {
+                      if (val.trim().isEmpty) onChanged(heldItem: '');
+                    },
+                  );
+                },
               ),
             ),
             const SizedBox(width: 8),
