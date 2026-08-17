@@ -13,6 +13,7 @@ class TeamTextCodec {
       final m = team[i];
       buffer.writeln('=== POKEMON ${i + 1} ===');
       buffer.writeln('Species: ${m.name}');
+      buffer.writeln('Level: ${m.level}');
       buffer.writeln('Gender: ${m.gender}');
       buffer.writeln('Held Item: ${m.heldItem ?? "None"}');
       buffer.writeln('Ability: ${m.ability ?? "None"}');
@@ -21,6 +22,8 @@ class TeamTextCodec {
       buffer.writeln('Moves: $moveList');
       final evList = m.evs.entries.map((e) => '${e.key}=${e.value}').join(', ');
       buffer.writeln('EVs: $evList');
+      final ivList = m.ivs.entries.map((e) => '${e.key}=${e.value}').join(', ');
+      buffer.writeln('IVs: $ivList');
 
       final baseStats = baseStatsByIndex[i];
       if (baseStats != null) {
@@ -60,12 +63,14 @@ class TeamTextCodec {
       final lines = block.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
 
       String? species;
+      int level = 50;
       String gender = 'Male';
       String? heldItem;
       String? ability;
       String nature = 'Hardy';
       List<String?> moves = List.filled(4, null);
       Map<String, int> evs = {'HP': 0, 'Atk': 0, 'Def': 0, 'SpA': 0, 'SpD': 0, 'Spe': 0};
+      Map<String, int> ivs = {'HP': 31, 'Atk': 31, 'Def': 31, 'SpA': 31, 'SpD': 31, 'Spe': 31};
 
       for (final line in lines) {
         if (line.startsWith('===')) continue;
@@ -74,6 +79,9 @@ class TeamTextCodec {
 
         if (line.startsWith('Species:')) {
           species = line.substring('Species:'.length).trim();
+        } else if (line.startsWith('Level:')) {
+          final parsed = int.tryParse(line.substring('Level:'.length).trim());
+          if (parsed != null) level = parsed.clamp(1, 100);
         } else if (line.startsWith('Gender:')) {
           gender = line.substring('Gender:'.length).trim();
         } else if (line.startsWith('Held Item:')) {
@@ -105,6 +113,19 @@ class TeamTextCodec {
               }
             }
           }
+        } else if (line.startsWith('IVs:')) {
+          final val = line.substring('IVs:'.length).trim();
+          final parts = val.split(',');
+          for (final part in parts) {
+            final kv = part.split('=');
+            if (kv.length == 2) {
+              final key = kv[0].trim();
+              final value = int.tryParse(kv[1].trim()) ?? 31;
+              if (ivs.containsKey(key)) {
+                ivs[key] = value.clamp(0, 31);
+              }
+            }
+          }
         }
       }
 
@@ -119,6 +140,8 @@ class TeamTextCodec {
         moves: moves,
         nature: nature,
         evs: evs,
+        ivs: ivs,
+        level: level,
         ability: ability,
         gender: gender,
       ));
