@@ -1,4 +1,4 @@
-import '../screens/team_builder.dart' show TeamMember;
+import '../models/team_member.dart';
 
 class TeamTextCodec {
   static String encodeTeam(
