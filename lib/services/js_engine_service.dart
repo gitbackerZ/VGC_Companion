@@ -29,15 +29,24 @@ class JsEngineService {
     _isInitialized = true;
   }
 
-  /// Returns real held item names from Dex.data.Items
+  /// Helper to check if runtime is ready
+  bool get isReady => _isInitialized && _jsRuntime != null;
+
+  /// Returns real held item names using Dex.items.all()
   Future<List<String>> getItemList() async {
+    if (!isReady) return [];
     final script = '''
       (function() {
-        if (!Dex.data.Items) return JSON.stringify([]);
-        var items = Object.values(Dex.data.Items)
-          .filter(function(i) { return i.exists && !i.isNonstandard; })
-          .map(function(i) { return i.name; });
-        return JSON.stringify(items);
+        if (!Dex || !Dex.items) return JSON.stringify([]);
+        var items = Dex.items.all();
+        var result = [];
+        for (var i = 0; i < items.length; i++) {
+          var item = items[i];
+          if (item.exists && !item.isNonstandard) {
+            result.push(item.name);
+          }
+        }
+        return JSON.stringify(result);
       })()
     ''';
     final result = _jsRuntime!.evaluate(script);
@@ -48,13 +57,16 @@ class JsEngineService {
 
   /// Returns base species only (1 per Dex number), excluding Megas and Gmax
   Future<List<Map<String, dynamic>>> getBaseSpeciesList() async {
+    if (!isReady) return [];
     final script = '''
       (function() {
+        if (!Dex || !Dex.species) return JSON.stringify([]);
+        var speciesList = Dex.species.all();
         var results = [];
         var seenNum = {};
-        var keys = Object.keys(Dex.data.Species);
-        for (var i = 0; i < keys.length; i++) {
-          var spec = Dex.species.get(keys[i]);
+
+        for (var i = 0; i < speciesList.length; i++) {
+          var spec = speciesList[i];
           if (!spec || !spec.exists || spec.num <= 0) continue;
           
           var isMega = spec.forme && spec.forme.indexOf('Mega') !== -1;
@@ -67,7 +79,7 @@ class JsEngineService {
               'name': spec.name,
               'num': spec.num,
               'types': spec.types || [],
-              'hasFormes': (spec.otherFormes && spec.otherFormes.length > 0)
+              'hasFormes': !!(spec.otherFormes && spec.otherFormes.length > 0)
             });
           }
         }
@@ -82,9 +94,11 @@ class JsEngineService {
 
   /// Gets non-Mega, non-Gmax varieties for a base species
   Future<List<Map<String, dynamic>>> getFormesForSpecies(String baseName) async {
+    if (!isReady) return [];
+    final sanitized = baseName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
     final script = '''
       (function() {
-        var base = Dex.species.get("$baseName");
+        var base = Dex.species.get("$sanitized");
         if (!base || !base.exists) return JSON.stringify([]);
         
         var list = [base];
@@ -112,14 +126,18 @@ class JsEngineService {
     return list.cast<Map<String, dynamic>>();
   }
 
+  /// Fetches species data via Dex.species.get()
   Future<Map<String, dynamic>> getPokemon(String name) async {
+    if (!isReady) throw Exception('JsEngineService is not initialized');
     final sanitized = name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
     final result = _jsRuntime!.evaluate('JSON.stringify(Dex.species.get("$sanitized"))');
     if (result.isError) throw Exception('Failed to get species data for $name');
     return json.decode(result.stringResult) as Map<String, dynamic>;
   }
 
+  /// Returns learnable moves for a species including pre-evolutions using Dex.moves.get()
   Future<List<Map<String, dynamic>>> getMovesForSpecies(String name) async {
+    if (!isReady) return [];
     try {
       final sanitized = name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
       final script = '''
@@ -127,7 +145,6 @@ class JsEngineService {
           try {
             var species = Dex.species.get("$sanitized");
             if (!species || !species.exists) return JSON.stringify([]);
-            if (!Dex.data.Learnsets) return JSON.stringify([]);
 
             var moveIdSet = {};
             var current = species;
@@ -139,7 +156,7 @@ class JsEngineService {
               if (seen[current.id]) break;
               seen[current.id] = true;
 
-              var learnsetData = Dex.data.Learnsets[current.id];
+              var learnsetData = Dex.data.Learnsets ? Dex.data.Learnsets[current.id] : null;
               if (learnsetData && learnsetData.learnset) {
                 var ids = Object.keys(learnsetData.learnset);
                 for (var i = 0; i < ids.length; i++) moveIdSet[ids[i]] = true;
@@ -156,8 +173,8 @@ class JsEngineService {
 
             var moveIds = Object.keys(moveIdSet);
             var moves = moveIds
-              .map(function(mid) { return Dex.data.Moves[mid]; })
-              .filter(function(m) { return m; });
+              .map(function(mid) { return Dex.moves.get(mid); })
+              .filter(function(m) { return m && m.exists && !m.isNonstandard; });
 
             return JSON.stringify(moves);
           } catch (e) {
@@ -180,6 +197,7 @@ class JsEngineService {
     }
   }
 
+  /// Returns formatted ability list for a given species name
   Future<List<Map<String, dynamic>>> getAbilitiesForPokemon(String name) async {
     try {
       final data = await getPokemon(name);
@@ -196,16 +214,23 @@ class JsEngineService {
     }
   }
 
+  /// Returns female gender rate in 8ths (-1 = Genderless, 0 = 100% Male, 8 = 100% Female)
   Future<int> getGenderRate(String name) async {
     try {
       final data = await getPokemon(name);
       if (data['gender'] == 'N') return -1;
       if (data['gender'] == 'M') return 0;
       if (data['gender'] == 'F') return 8;
+
       if (data.containsKey('genderRatio') && data['genderRatio'] is Map) {
-        final double m = (data['genderRatio']['M'] as num?)?.toDouble() ?? 0.5;
-        if (m == 0.0) return 8;
-        if (m == 1.0) return 0;
+        final ratioMap = data['genderRatio'] as Map<String, dynamic>;
+        if (ratioMap.containsKey('F')) {
+          final double f = (ratioMap['F'] as num).toDouble();
+          return (f * 8).round();
+        } else if (ratioMap.containsKey('M')) {
+          final double m = (ratioMap['M'] as num).toDouble();
+          return ((1.0 - m) * 8).round();
+        }
       }
       return 4;
     } catch (_) {
@@ -213,6 +238,7 @@ class JsEngineService {
     }
   }
 
+  /// Retrieves base stats for all Mega evolutions associated with a base species
   Future<Map<String, Map<String, int>>> getAllMegaBaseStats(String name) async {
     try {
       final cleanBaseName = name.toLowerCase().split('-')[0];
@@ -236,34 +262,39 @@ class JsEngineService {
     }
   }
 
+  /// Fetches stat modifiers (+10% / -10%) using Dex.natures.get()
   Future<Map<String, String>> getNatureBoosts(String nature) async {
-    const natures = {
-      'adamant': {'plus': 'Attack', 'minus': 'Sp. Atk'},
-      'bashful': {'plus': '', 'minus': ''},
-      'bold': {'plus': 'Defense', 'minus': 'Attack'},
-      'brave': {'plus': 'Attack', 'minus': 'Speed'},
-      'calm': {'plus': 'Sp. Def', 'minus': 'Attack'},
-      'careful': {'plus': 'Sp. Def', 'minus': 'Sp. Atk'},
-      'docile': {'plus': '', 'minus': ''},
-      'gentle': {'plus': 'Sp. Def', 'minus': 'Defense'},
-      'hardy': {'plus': '', 'minus': ''},
-      'hasty': {'plus': 'Speed', 'minus': 'Defense'},
-      'impish': {'plus': 'Defense', 'minus': 'Sp. Atk'},
-      'jolly': {'plus': 'Speed', 'minus': 'Sp. Atk'},
-      'lax': {'plus': 'Defense', 'minus': 'Sp. Def'},
-      'lonely': {'plus': 'Attack', 'minus': 'Defense'},
-      'mild': {'plus': 'Sp. Atk', 'minus': 'Defense'},
-      'modest': {'plus': 'Sp. Atk', 'minus': 'Attack'},
-      'naive': {'plus': 'Speed', 'minus': 'Sp. Def'},
-      'naughty': {'plus': 'Attack', 'minus': 'Sp. Def'},
-      'quiet': {'plus': 'Sp. Atk', 'minus': 'Speed'},
-      'quirky': {'plus': '', 'minus': ''},
-      'rash': {'plus': 'Sp. Atk', 'minus': 'Sp. Def'},
-      'relaxed': {'plus': 'Defense', 'minus': 'Speed'},
-      'sassy': {'plus': 'Sp. Def', 'minus': 'Speed'},
-      'serious': {'plus': '', 'minus': ''},
-      'timid': {'plus': 'Speed', 'minus': 'Attack'},
-    };
-    return natures[nature.toLowerCase()] ?? {'plus': '', 'minus': ''};
+    if (!isReady) return {'plus': '', 'minus': ''};
+    try {
+      final sanitized = nature.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+      final script = '''
+        (function() {
+          var statNames = {
+            atk: 'Attack',
+            def: 'Defense',
+            spa: 'Sp. Atk',
+            spd: 'Sp. Def',
+            spe: 'Speed'
+          };
+          var n = Dex.natures.get("$sanitized");
+          if (!n || !n.exists) return JSON.stringify({plus: '', minus: ''});
+          return JSON.stringify({
+            plus: statNames[n.plus] || '',
+            minus: statNames[n.minus] || ''
+          });
+        })()
+      ''';
+
+      final result = _jsRuntime!.evaluate(script);
+      if (result.isError) return {'plus': '', 'minus': ''};
+
+      final decoded = json.decode(result.stringResult) as Map<String, dynamic>;
+      return {
+        'plus': decoded['plus']?.toString() ?? '',
+        'minus': decoded['minus']?.toString() ?? '',
+      };
+    } catch (_) {
+      return {'plus': '', 'minus': ''};
+    }
   }
 }
