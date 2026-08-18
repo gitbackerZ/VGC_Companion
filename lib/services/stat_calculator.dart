@@ -1,15 +1,16 @@
 class StatCalculator {
   /// Calculates final competitive stats at a given level, given IVs, EVs, and nature.
-  /// baseStats keys must match Showdown/@pkmn Dex format: hp, atk, def, spa, spd, spe
+  /// baseStats keys must match Showdown/pkmn Dex format: hp, atk, def, spa, spd, spe
   static Map<String, int> calculate({
     required Map<String, int> baseStats,
     required Map<String, int> evs, // keys: HP, Atk, Def, SpA, SpD, Spe
     required Map<String, int> ivs, // keys: HP, Atk, Def, SpA, SpD, Spe
     required int level,
-    required String natureBoosted,
-    required String natureLowered,
+    required String natureBoosted, // e.g. "Attack", "Speed", or ""
+    required String natureLowered, // e.g. "Sp. Atk", "Defense", or ""
   }) {
     int calcHp(int base, int ev, int iv) {
+      if (base == 1) return 1; // Shedinja edge case
       return ((2 * base + iv + (ev / 4).floor()) * level / 100).floor() + level + 10;
     }
 
@@ -19,8 +20,8 @@ class StatCalculator {
     }
 
     double multiplierFor(String statLabel) {
-      if (statLabel == natureBoosted) return 1.1;
-      if (statLabel == natureLowered) return 0.9;
+      if (statLabel == natureBoosted && natureBoosted.isNotEmpty) return 1.1;
+      if (statLabel == natureLowered && natureLowered.isNotEmpty) return 0.9;
       return 1.0;
     }
 
