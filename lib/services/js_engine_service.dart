@@ -32,7 +32,7 @@ class JsEngineService {
   /// Helper to check if runtime is ready
   bool get isReady => _isInitialized && _jsRuntime != null;
 
-  /// Returns real held item names using Dex.items.all()
+  /// Returns real held item names using Dex.items.all() including Mega Stones & Orbs
   Future<List<String>> getItemList() async {
     if (!isReady) return [];
     final script = '''
@@ -42,7 +42,14 @@ class JsEngineService {
         var result = [];
         for (var i = 0; i < items.length; i++) {
           var item = items[i];
-          if (item.exists && !item.isNonstandard) {
+          if (!item || !item.exists) continue;
+          
+          // Allow standard items OR past-gen items (Mega Stones / Primal Orbs)
+          var isPastGen = item.isNonstandard === 'Past';
+          var isMegaStone = !!item.megaStone || !!item.megaEvolves;
+          var isStandard = !item.isNonstandard;
+
+          if (isStandard || isPastGen || isMegaStone) {
             result.push(item.name);
           }
         }
