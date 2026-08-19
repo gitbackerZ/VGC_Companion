@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 
 class IvEditorPanel extends StatelessWidget {
   final Map<String, int> ivs;
+  final bool isLocked;
   final ValueChanged<Map<String, int>> onChanged;
 
   const IvEditorPanel({
     super.key,
     required this.ivs,
+    this.isLocked = false,
     required this.onChanged,
   });
 
@@ -19,7 +21,17 @@ class IvEditorPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Individual Values (IVs)', style: TextStyle(fontWeight: FontWeight.bold)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Individual Values (IVs)', style: TextStyle(fontWeight: FontWeight.bold)),
+              if (isLocked)
+                const Text(
+                  'Locked to 31 (Champions VGC)',
+                  style: TextStyle(fontSize: 10, color: Colors.orangeAccent, fontWeight: FontWeight.bold),
+                ),
+            ],
+          ),
           const SizedBox(height: 8),
           GridView.builder(
             shrinkWrap: true,
@@ -33,14 +45,15 @@ class IvEditorPanel extends StatelessWidget {
             itemCount: _statsOrder.length,
             itemBuilder: (context, index) {
               final stat = _statsOrder[index];
-              final currentIv = ivs[stat] ?? 31;
+              final currentIv = isLocked ? 31 : (ivs[stat] ?? 31);
 
               return Semantics(
-                label: 'Individual Value for $stat, current value $currentIv',
+                label: 'Individual Value for $stat, current value $currentIv${isLocked ? ", locked" : ""}',
                 textField: true,
                 excludeSemantics: true,
                 child: TextFormField(
                   initialValue: currentIv.toString(),
+                  enabled: !isLocked,
                   keyboardType: TextInputType.number,
                   decoration: InputDecoration(
                     labelText: stat,
@@ -49,6 +62,7 @@ class IvEditorPanel extends StatelessWidget {
                     border: const OutlineInputBorder(),
                   ),
                   onChanged: (val) {
+                    if (isLocked) return;
                     final parsed = int.tryParse(val) ?? 31;
                     final updated = Map<String, int>.from(ivs);
                     updated[stat] = parsed.clamp(0, 31);
