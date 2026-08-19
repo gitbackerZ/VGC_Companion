@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
-class EvEditorPanel extends StatefulWidget {
+class EvEditorPanel extends StatelessWidget {
   final Map<String, int> evs;
   final ValueChanged<Map<String, int>> onChanged;
 
@@ -11,108 +10,71 @@ class EvEditorPanel extends StatefulWidget {
     required this.onChanged,
   });
 
-  @override
-  State<EvEditorPanel> createState() => _EvEditorPanelState();
-}
+  static const _statsOrder = ['HP', 'Atk', 'Def', 'SpA', 'SpD', 'Spe'];
 
-class _EvEditorPanelState extends State<EvEditorPanel> {
-  late final Map<String, TextEditingController> _controllers;
-  late final Map<String, FocusNode> _nodes;
-
-  @override
-  void initState() {
-    super.initState();
-    _controllers = widget.evs.map(
-      (stat, val) => MapEntry(stat, TextEditingController(text: val.toString())),
-    );
-    _nodes = widget.evs.map((stat, _) {
-      final node = FocusNode();
-      node.addListener(() {
-        if (!node.hasFocus) _commitStat(stat);
-      });
-      return MapEntry(stat, node);
-    });
-  }
-
-  void _commitStat(String stat) {
-    final parsed = int.tryParse(_controllers[stat]!.text.trim()) ?? 0;
-    final statClamped = parsed.clamp(0, 252);
-
-    // Enforce the shared 510 EV budget across all stats, not just the
-    // per-stat 0-252 cap - previously any stat could be set up to 252
-    // regardless of what the other five stats already totaled, allowing
-    // an illegal total well past 510.
-    final otherTotal = widget.evs.entries
-        .where((e) => e.key != stat)
-        .fold(0, (sum, e) => sum + e.value);
-    final maxAllowed = (510 - otherTotal).clamp(0, 252);
-    final finalValue = statClamped > maxAllowed ? maxAllowed : statClamped;
-
-    final updated = Map<String, int>.from(widget.evs);
-    updated[stat] = finalValue;
-
-    widget.onChanged(updated);
-    _controllers[stat]!.text = finalValue.toString();
-  }
-
-  @override
-  void dispose() {
-    for (final c in _controllers.values) {
-      c.dispose();
-    }
-    for (final n in _nodes.values) {
-      n.dispose();
-    }
-    super.dispose();
-  }
+  int get totalEvs => evs.values.fold(0, (a, b) => a + b);
 
   @override
   Widget build(BuildContext context) {
-    final total = widget.evs.values.fold(0, (a, b) => a + b);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text('Effort Values (EVs)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-            Text(
-              '$total/510 total',
-              style: TextStyle(
-                fontSize: 13,
-                color: total > 510 ? Colors.red : Theme.of(context).colorScheme.onSurfaceVariant,
+    return Padding(
+      padding: const EdgeInsets.all(12.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('EV Allocation', style: TextStyle(fontWeight: FontWeight.bold)),
+              Semantics(
+                label: 'Total EVs allocated: $totalEvs out of 510 maximum',
+                child: Text(
+                  'Total: $totalEvs / 510',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: totalEvs > 510 ? Colors.red : Colors.green,
+                  ),
+                ),
               ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // 2 Rows x 3 Columns Layout
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              childAspectRatio: 2.2,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
             ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        GridView.count(
-          crossAxisCount: 2,
-          childAspectRatio: 3.2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 6,
-          crossAxisSpacing: 8,
-          children: widget.evs.keys.map((stat) {
-            return TextField(
-              controller: _controllers[stat],
-              focusNode: _nodes[stat],
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: InputDecoration(
-                labelText: '$stat EVs (0-252)',
-                isDense: true,
-                border: const OutlineInputBorder(),
-              ),
-              onEditingComplete: () {
-                _commitStat(stat);
-                _nodes[stat]?.unfocus();
-              },
-            );
-          }).toList(),
-        ),
-      ],
+            itemCount: _statsOrder.length,
+            itemBuilder: (context, index) {
+              final stat = _statsOrder[index];
+              final currentEv = evs[stat] ?? 0;
+
+              return Semantics(
+                label: 'Effort Value for $stat: current value $currentEv',
+                child: TextFormField(
+                  initialValue: currentEv.toString(),
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: stat,
+                    isDense: true,
+                    border: const OutlineInputBorder(),
+                  ),
+                  onChanged: (val) {
+                    final parsed = int.tryParse(val) ?? 0;
+                    final updated = Map<String, int>.from(evs);
+                    updated[stat] = parsed.clamp(0, 252);
+                    onChanged(updated);
+                  },
+                ),
+              );
+            },
+          ),
+        ],
+      ),
     );
   }
 }
