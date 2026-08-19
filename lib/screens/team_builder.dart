@@ -35,7 +35,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   final Map<TeamMember, List<Map<String, dynamic>>> _abilitiesCache = {};
   final Map<TeamMember, String?> _activePanels = {};
   final Set<TeamMember> _collapsedCards = {};
-  final Map<TeamMember, TextEditingController> _levelControllers = {};
 
   bool _loading = true;
   String _statusMessage = '';
@@ -51,9 +50,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     _searchController.dispose();
     _searchFocusNode.dispose();
     _importController.dispose();
-    for (final controller in _levelControllers.values) {
-      controller.dispose();
-    }
     super.dispose();
   }
 
@@ -99,7 +95,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         _loading = false;
         for (final member in _team) {
           _collapsedCards.add(member);
-          _levelControllers[member] = TextEditingController(text: member.level.toString());
         }
       });
     } catch (e, stack) {
@@ -234,7 +229,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       setState(() {
         _team.add(newMember);
         _collapsedCards.add(newMember);
-        _levelControllers[newMember] = TextEditingController(text: newMember.level.toString());
         _searchController.clear();
         _filtered = [];
       });
@@ -251,31 +245,63 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
   Future<void> _toggleMegaForm(int index) async {
     final member = _team[index];
-    final cleanBaseName = member.name.toLowerCase().split('-')[0];
-
     try {
-      final megaMap = await _service.getAllMegaBaseStats(cleanBaseName);
-      if (megaMap.isEmpty && !member.name.contains('-Mega')) {
-        _announce('No Mega forms available for ${member.name}.');
+      final megaList = await _service.getMegaFormes(member.name);
+      
+      if (megaList.isEmpty && !member.name.contains('-Mega')) {
+        _announce('No Mega evolution forms found for ${member.name}.');
         return;
       }
 
-      String targetForm;
+      String targetFormName;
+
       if (member.name.contains('-Mega')) {
-        targetForm = cleanBaseName;
+        // Revert to base species
+        final baseData = await _service.getPokemon(member.name);
+        targetFormName = baseData['baseSpecies'] ?? member.name.split('-')[0];
+      } else if (megaList.length == 1) {
+        targetFormName = megaList.first['name'];
       } else {
-        targetForm = megaMap.keys.first;
+        // Multiple mega forms (e.g., Charizard X / Y)
+        final chosen = await showDialog<String>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Select Mega Form for ${member.name}', style: const TextStyle(fontSize: 14)),
+                _buildCloseDialogButton(context),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: megaList.map((m) {
+                final String mName = m['name'];
+                final List<String> mTypes = List<String>.from(m['types'] ?? []);
+                final String reqItem = m['requiredItem'] ?? '';
+                return ListTile(
+                  dense: true,
+                  title: Text(mName, style: const TextStyle(fontSize: 12)),
+                  subtitle: Text('Types: ${mTypes.join('/')}${reqItem.isNotEmpty ? " | Requires $reqItem" : ""}', style: const TextStyle(fontSize: 10)),
+                  onTap: () => Navigator.pop(context, mName),
+                );
+              }).toList(),
+            ),
+          ),
+        );
+        if (!mounted || chosen == null) return;
+        targetFormName = chosen;
       }
 
-      final data = await _service.getPokemon(targetForm);
+      final data = await _service.getPokemon(targetFormName);
       if (!mounted) return;
 
       final newTypes = List<String>.from(data['types'] ?? []);
-      final abilities = await _service.getAbilitiesForPokemon(targetForm);
+      final abilities = await _service.getAbilitiesForPokemon(targetFormName);
       final newAbility = abilities.isNotEmpty ? abilities.first['name'] : member.ability;
 
       setState(() {
-        member.name = data['name'] ?? targetForm;
+        member.name = data['name'] ?? targetFormName;
         member.types = newTypes;
         if (newAbility != null) member.ability = newAbility;
         _movesCache.remove(member);
@@ -289,6 +315,40 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       if (!mounted) return;
       _announce('Could not toggle Mega form.');
     }
+  }
+
+  Future<void> _showLevelDialog(TeamMember member) async {
+    final controller = TextEditingController(text: member.level.toString());
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('Set Level for ${member.name}', style: const TextStyle(fontSize: 14)),
+            _buildCloseDialogButton(context),
+          ],
+        ),
+        content: _buildLightGrayTextField(
+          controller: controller,
+          labelText: 'Level (1 - 100)',
+          keyboardType: TextInputType.number,
+        ),
+        actions: [
+          _buildLightGrayButton(
+            label: 'Save',
+            onPressed: () async {
+              final parsed = int.tryParse(controller.text);
+              if (parsed != null && parsed >= 1 && parsed <= 100) {
+                setState(() => member.level = parsed);
+                await _saveTeam();
+              }
+              if (context.mounted) Navigator.pop(context);
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _showImportDialog() async {
@@ -310,7 +370,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _buildInverseTextField(
+              _buildLightGrayTextField(
                 controller: _importController,
                 labelText: 'Paste Showdown Team Text',
                 maxLines: 8,
@@ -319,14 +379,14 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           ),
         ),
         actions: [
-          _buildInverseButton(
+          _buildLightGrayButton(
             label: 'Add to Team',
             onPressed: () async {
               Navigator.pop(context);
               await _processImport(replace: false);
             },
           ),
-          _buildInverseButton(
+          _buildLightGrayButton(
             label: 'Replace Team',
             onPressed: () async {
               Navigator.pop(context);
@@ -352,13 +412,11 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       setState(() {
         if (replace) {
           _team.clear();
-          _levelControllers.clear();
         }
         for (final m in importedMembers) {
           if (_team.length < 6) {
             _team.add(m);
             _collapsedCards.add(m);
-            _levelControllers[m] = TextEditingController(text: m.level.toString());
           }
         }
       });
@@ -401,7 +459,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           ),
         ),
         actions: [
-          _buildInverseButton(
+          _buildLightGrayButton(
             label: 'Copy',
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: text));
@@ -436,14 +494,15 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     );
   }
 
-  Widget _buildInverseButton({required String label, required VoidCallback onPressed}) {
+  Widget _buildLightGrayButton({required String label, required VoidCallback onPressed}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Semantics(
       label: label,
       button: true,
       child: ElevatedButton(
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.white,
-          foregroundColor: Colors.black,
+          backgroundColor: isDark ? Colors.grey[800] : Colors.grey[300],
+          foregroundColor: isDark ? Colors.white : Colors.black,
           minimumSize: const Size(60, 32),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         ),
@@ -453,21 +512,27 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     );
   }
 
-  Widget _buildInverseTextField({
+  Widget _buildLightGrayTextField({
     required TextEditingController controller,
     required String labelText,
     int maxLines = 1,
+    TextInputType keyboardType = TextInputType.text,
     Function(String)? onChanged,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final fillColor = isDark ? Colors.grey[850] : Colors.grey[200];
+    final textColor = isDark ? Colors.white : Colors.black;
+
     return TextField(
       controller: controller,
       maxLines: maxLines,
-      style: const TextStyle(color: Colors.white, fontSize: 12),
+      keyboardType: keyboardType,
+      style: TextStyle(color: textColor, fontSize: 12),
       decoration: InputDecoration(
         labelText: labelText,
-        labelStyle: const TextStyle(color: Colors.white70, fontSize: 11),
+        labelStyle: TextStyle(color: textColor.withOpacity(0.7), fontSize: 11),
         filled: true,
-        fillColor: Colors.black87,
+        fillColor: fillColor,
         contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
       ),
@@ -516,7 +581,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 6, 8, 4),
-              child: _buildInverseTextField(
+              child: _buildLightGrayTextField(
                 controller: _searchController,
                 labelText: 'Search Base Pokémon...',
                 onChanged: _filter,
@@ -565,118 +630,94 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     final member = _team[index];
     final activePanel = _activePanels[member];
     final isCollapsed = _collapsedCards.contains(member);
-    final levelController = _levelControllers[member] ??= TextEditingController(text: member.level.toString());
 
     final typesStr = member.types.join('/');
     final itemStr = (member.heldItem != null && member.heldItem!.isNotEmpty) ? member.heldItem! : 'None';
+    final movesStr = member.moves.where((m) => m != null && m.isNotEmpty).join(' / ');
+    final int totalEvs = member.evs.values.fold(0, (sum, val) => sum + val);
+
+    final semanticSummary = '${member.name}, Types: $typesStr, Item: $itemStr, Level: ${member.level}, Ability: ${member.ability ?? "None"}, Nature: ${member.nature}, Gender: ${member.gender}, Moves: ${movesStr.isNotEmpty ? movesStr : "None"}, Total EVs: $totalEvs';
 
     return Semantics(
       key: ValueKey('member_card_${member.pokedexNumber}_$index'),
+      label: semanticSummary,
       container: true,
       child: Card(
         margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-        child: Column(
-          children: [
-            // Header Bar
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              color: Colors.grey[900],
-              child: Column(
+        child: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Collapsed View Header
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        '${member.name.toUpperCase()}  $typesStr',
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
-                      ),
-                      Row(
-                        children: [
-                          const Text('LVL.', style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold)),
-                          const SizedBox(width: 4),
-                          SizedBox(
-                            width: 36,
-                            height: 24,
-                            child: TextField(
-                              controller: levelController,
-                              keyboardType: TextInputType.number,
-                              style: const TextStyle(color: Colors.black, fontSize: 10, fontWeight: FontWeight.bold),
-                              textAlign: TextAlign.center,
-                              decoration: InputDecoration(
-                                filled: true,
-                                fillColor: Colors.white,
-                                contentPadding: EdgeInsets.zero,
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(2)),
-                              ),
-                              onChanged: (val) async {
-                                final parsed = int.tryParse(val);
-                                if (parsed != null && parsed >= 1 && parsed <= 100) {
-                                  setState(() => member.level = parsed);
-                                  await _saveTeam();
-                                }
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${member.name.toUpperCase()}  $typesStr',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '@$itemStr  lvl.${member.level}',
+                          style: const TextStyle(fontSize: 10, fontFamily: 'monospace'),
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 2),
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        '@$itemStr',
-                        style: const TextStyle(color: Colors.white70, fontSize: 10, fontFamily: 'monospace'),
+                      _buildEmojiButton(
+                        emoji: '🔼',
+                        semanticLabel: 'Change level for ${member.name}',
+                        onPressed: () => _showLevelDialog(member),
                       ),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _buildEmojiButton(
-                            emoji: 'Ⓜ️',
-                            semanticLabel: 'Toggle Mega or Base Form for ${member.name}',
-                            onPressed: () => _toggleMegaForm(index),
-                          ),
-                          _buildEmojiButton(
-                            emoji: isCollapsed ? '⬇️' : '⬆️',
-                            semanticLabel: isCollapsed ? 'Expand ${member.name} details' : 'Collapse ${member.name} details',
-                            onPressed: () {
-                              setState(() {
-                                if (isCollapsed) {
-                                  _collapsedCards.remove(member);
-                                } else {
-                                  _collapsedCards.add(member);
-                                  _activePanels[member] = null;
-                                }
-                              });
-                            },
-                          ),
-                          _buildEmojiButton(
-                            emoji: '🗑️',
-                            semanticLabel: 'Remove ${member.name} from team',
-                            onPressed: () async {
-                              setState(() {
-                                _team.removeAt(index);
-                                _levelControllers.remove(member);
-                              });
-                              await _saveTeam();
-                            },
-                          ),
-                        ],
+                      _buildEmojiButton(
+                        emoji: 'Ⓜ️',
+                        semanticLabel: 'Toggle Mega or Base Form for ${member.name}',
+                        onPressed: () => _toggleMegaForm(index),
+                      ),
+                      _buildEmojiButton(
+                        emoji: isCollapsed ? '⬇️' : '⬆️',
+                        semanticLabel: isCollapsed ? 'Expand ${member.name} details' : 'Collapse ${member.name} details',
+                        onPressed: () {
+                          setState(() {
+                            if (isCollapsed) {
+                              _collapsedCards.remove(member);
+                            } else {
+                              _collapsedCards.add(member);
+                              _activePanels[member] = null;
+                            }
+                          });
+                        },
+                      ),
+                      _buildEmojiButton(
+                        emoji: '🗑️',
+                        semanticLabel: 'Remove ${member.name} from team',
+                        onPressed: () async {
+                          setState(() => _team.removeAt(index));
+                          await _saveTeam();
+                        },
                       ),
                     ],
                   ),
                 ],
               ),
-            ),
 
-            // Expanded Controls & Editor Panels
-            if (!isCollapsed) ...[
-              Container(
-                color: Colors.grey[850],
-                padding: const EdgeInsets.symmetric(vertical: 2.0),
-                child: Row(
+              // Expanded Details & Action Bar
+              if (!isCollapsed) ...[
+                const Divider(height: 12),
+                Text('Ability: ${member.ability ?? "None"} | Gender: ${member.gender} | Nature: ${member.nature}', style: const TextStyle(fontSize: 10)),
+                Text('Moves: ${movesStr.isNotEmpty ? movesStr : "None"}', style: const TextStyle(fontSize: 10)),
+                Text('Total EVs: $totalEvs / 510', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
                     _buildPanelToggle('⚙️', 'Details', 'Open details editor for ${member.name}', activePanel == 'details', () => _togglePanel(member, 'details')),
@@ -686,10 +727,10 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                     _buildPanelToggle('📊', 'Stats', 'Show stats dialog for ${member.name}', false, () => _showStats(member)),
                   ],
                 ),
-              ),
-              if (activePanel != null) _buildPanelContent(index, activePanel),
+                if (activePanel != null) _buildPanelContent(index, activePanel),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -705,7 +746,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         onTap: onPressed,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-          child: Text(emoji, style: const TextStyle(fontSize: 13)),
+          child: Text(emoji, style: const TextStyle(fontSize: 12)),
         ),
       ),
     );
@@ -719,12 +760,12 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       excludeSemantics: true,
       child: TextButton(
         style: TextButton.styleFrom(
-          minimumSize: const Size(36, 28),
+          minimumSize: const Size(32, 24),
           padding: EdgeInsets.zero,
-          backgroundColor: isActive ? Colors.white24 : Colors.transparent,
+          backgroundColor: isActive ? Theme.of(context).colorScheme.primaryContainer : Colors.transparent,
         ),
         onPressed: onPressed,
-        child: Text(emoji, style: const TextStyle(fontSize: 14)),
+        child: Text(emoji, style: const TextStyle(fontSize: 13)),
       ),
     );
   }
