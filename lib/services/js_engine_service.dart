@@ -16,21 +16,35 @@ class JsEngineService {
 
     _jsRuntime = getJavascriptRuntime();
 
-    final dexJs = await rootBundle.loadString('assets/js/dex.js');
-    _jsRuntime!.evaluate(dexJs);
-
     try {
-      final learnsetsJson = await rootBundle.loadString('assets/js/learnsets.json');
-      _jsRuntime!.evaluate('Dex.data.Learnsets = $learnsetsJson;');
-    } catch (e, stack) {
-      debugPrint('Error loading learnsets.json: $e\n$stack');
-    }
+      final dexJs = await rootBundle.loadString('assets/js/dex.js');
+      _jsRuntime!.evaluate(dexJs);
 
-    _isInitialized = true;
+      final learnsetsJsonText = await rootBundle.loadString('assets/js/learnsets.json');
+      // OPTIMIZATION: Parse as a string literal to prevent AST memory spikes in the JS engine
+      final escapedJson = jsonEncode(learnsetsJsonText);
+      _jsRuntime!.evaluate('Dex.data.Learnsets = JSON.parse($escapedJson);');
+      
+      _isInitialized = true;
+    } catch (e, stack) {
+      debugPrint('Error initializing JS Engine: $e\n$stack');
+    }
   }
 
   /// Helper to check if runtime is ready
   bool get isReady => _isInitialized && _jsRuntime != null;
+
+  /// Standard Showdown ID conversion helper (e.g., "Tapu Koko" -> "tapukoko")
+  String _toId(String text) => text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+
+  /// Safely dispose of the JS Runtime to free memory
+  void dispose() {
+    if (_jsRuntime != null) {
+      _jsRuntime!.dispose();
+      _jsRuntime = null;
+      _isInitialized = false;
+    }
+  }
 
   /// Returns real held item names using Dex.items.all() including Mega Stones & Orbs
   Future<List<String>> getItemList() async {
@@ -102,7 +116,7 @@ class JsEngineService {
   /// Gets non-Mega, non-Gmax varieties for a base species
   Future<List<Map<String, dynamic>>> getFormesForSpecies(String baseName) async {
     if (!isReady) return [];
-    final sanitized = baseName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+    final sanitized = _toId(baseName);
     final script = '''
       (function() {
         var base = Dex.species.get("$sanitized");
@@ -133,10 +147,47 @@ class JsEngineService {
     return list.cast<Map<String, dynamic>>();
   }
 
+  /// Retrieves all Mega evolution variants for a base species or current form
+  Future<List<Map<String, dynamic>>> getMegaFormes(String speciesName) async {
+    if (!isReady) return [];
+    final sanitized = _toId(speciesName);
+    final script = '''
+      (function() {
+        var base = Dex.species.get("$sanitized");
+        if (!base || !base.exists) return JSON.stringify([]);
+        
+        // Resolve back to base species if already a Mega
+        if (base.isMega || (base.forme && base.forme.indexOf('Mega') !== -1)) {
+          base = Dex.species.get(base.baseSpecies || "$sanitized");
+        }
+        
+        var megas = [];
+        if (base.otherFormes) {
+          for (var i = 0; i < base.otherFormes.length; i++) {
+            var fSpec = Dex.species.get(base.otherFormes[i]);
+            if (fSpec && fSpec.exists && (fSpec.isMega || (fSpec.forme && fSpec.forme.indexOf('Mega') !== -1))) {
+              megas.push({
+                'name': fSpec.name,
+                'num': fSpec.num,
+                'types': fSpec.types || [],
+                'requiredItem': fSpec.requiredItem || fSpec.requiredMove || ''
+              });
+            }
+          }
+        }
+        return JSON.stringify(megas);
+      })()
+    ''';
+    final result = _jsRuntime!.evaluate(script);
+    if (result.isError) return [];
+    final List<dynamic> list = json.decode(result.stringResult);
+    return list.cast<Map<String, dynamic>>();
+  }
+
   /// Fetches species data via Dex.species.get()
   Future<Map<String, dynamic>> getPokemon(String name) async {
     if (!isReady) throw Exception('JsEngineService is not initialized');
-    final sanitized = name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+    final sanitized = _toId(name);
     final result = _jsRuntime!.evaluate('JSON.stringify(Dex.species.get("$sanitized"))');
     if (result.isError) throw Exception('Failed to get species data for $name');
     return json.decode(result.stringResult) as Map<String, dynamic>;
@@ -146,7 +197,7 @@ class JsEngineService {
   Future<List<Map<String, dynamic>>> getMovesForSpecies(String name) async {
     if (!isReady) return [];
     try {
-      final sanitized = name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+      final sanitized = _toId(name);
       final script = '''
         (function() {
           try {
@@ -248,7 +299,7 @@ class JsEngineService {
   /// Retrieves base stats for all Mega evolutions associated with a base species
   Future<Map<String, Map<String, int>>> getAllMegaBaseStats(String name) async {
     try {
-      final cleanBaseName = name.toLowerCase().split('-')[0];
+      final cleanBaseName = _toId(name.split('-')[0]);
       final baseData = await getPokemon(cleanBaseName);
       final otherFormes = baseData['otherFormes'] as List? ?? [];
 
@@ -273,7 +324,7 @@ class JsEngineService {
   Future<Map<String, String>> getNatureBoosts(String nature) async {
     if (!isReady) return {'plus': '', 'minus': ''};
     try {
-      final sanitized = nature.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+      final sanitized = _toId(nature);
       final script = '''
         (function() {
           var statNames = {
