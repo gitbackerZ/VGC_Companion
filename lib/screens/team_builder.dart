@@ -7,9 +7,10 @@ import '../models/team_member.dart';
 import '../services/js_engine_service.dart';
 import '../services/stat_calculator.dart';
 import '../services/team_text_codec.dart';
-import '../widgets/ev_editor_panel.dart';
 import '../widgets/details_editor_panel.dart';
-import '../widgets/iv_level_editor_panel.dart';
+import '../widgets/ev_editor_panel.dart';
+import '../widgets/iv_editor_panel.dart';
+import '../widgets/move_editor_panel.dart';
 import '../widgets/stats_dialog.dart';
 
 class TeamBuilderScreen extends StatefulWidget {
@@ -56,6 +57,35 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     FocusScope.of(context).unfocus();
   }
 
+  /// Clean item pool to include Mega Stones/Orbs and filter non-battle junk.
+  List<String> _filterBattleItems(List<String> rawItems) {
+    final junkPattern = RegExp(
+      r'^(tm\d+|hm\d+|tr\d+|key-|mail|letter|old-rod|good-rod|super-rod|bicycle|bike|ticket|pass|card|parcel|pokedex|journal|map|case|pouch)',
+      caseSensitive: false,
+    );
+
+    return rawItems.where((item) {
+      final l = item.toLowerCase().trim();
+      if (l.isEmpty) return false;
+
+      // Always explicitly retain Mega Stones and Primal Orbs
+      if (l.endsWith('ite') ||
+          l.endsWith('ite-x') ||
+          l.endsWith('ite-y') ||
+          l == 'red-orb' ||
+          l == 'blue-orb' ||
+          l == 'red orb' ||
+          l == 'blue orb') {
+        return true;
+      }
+
+      // Exclude junk items
+      if (junkPattern.hasMatch(l)) return false;
+
+      return true;
+    }).toList();
+  }
+
   Future<void> _loadData() async {
     try {
       await _service.init();
@@ -72,7 +102,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
       setState(() {
         _baseSpeciesList = baseList;
-        _itemList = items;
+        _itemList = _filterBattleItems(items);
         _filtered = [];
         _loading = false;
         for (final member in _team) {
@@ -83,7 +113,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       debugPrint('Initialization Error: $e\n$stack');
       if (!mounted) return;
       setState(() {
-        _statusMessage = 'Error loading Pokémon roster: $e';
+        _statusMessage = 'Error loading roster: $e';
         _loading = false;
       });
     }
@@ -133,12 +163,12 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     final int pokedexNumber = baseEntry['num'] as int;
 
     if (_team.any((m) => m.pokedexNumber == pokedexNumber)) {
-      _announce('Species Clause Violation: Pokédex #$pokedexNumber is already on your team.');
+      _announce('Species Clause: Pokédex #$pokedexNumber is already on your team.');
       return;
     }
 
     if (_team.length >= 6) {
-      _announce('Team is full. Maximum of 6 Pokémon allowed.');
+      _announce('Team is full (6 max).');
       return;
     }
 
@@ -241,15 +271,13 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Remove Pokémon?'),
-        content: Text('Remove ${member.name} from your team? This cannot be undone.'),
+        content: Text('Remove ${member.name} from your team?'),
         actions: [
           TextButton(
-            style: _inverseTextButtonStyle,
             onPressed: () => Navigator.pop(context, false),
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: _inverseFilledButtonStyle,
             onPressed: () => Navigator.pop(context, true),
             child: Text('Remove ${member.name}'),
           ),
@@ -299,7 +327,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       );
 
       if (duplicateMember.pokedexNumber != -1) {
-        _announce('Item Clause Violation: ${duplicateMember.name.toUpperCase()} is already holding $cleanItem.');
+        _announce('Item Clause: ${duplicateMember.name.toUpperCase()} is holding $cleanItem.');
         return;
       }
     }
@@ -307,7 +335,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     setState(() => _team[index].heldItem = cleanItem.isEmpty ? null : cleanItem);
     await _saveTeam();
     if (!mounted) return;
-    _announce('${_team[index].name} is now holding ${cleanItem.isEmpty ? "no item" : cleanItem}.');
+    _announce('${_team[index].name} item updated.');
   }
 
   void _togglePanel(TeamMember member, String panelName) async {
@@ -341,7 +369,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       await StatsDialog.show(context, member, _service);
     } catch (_) {
       if (!mounted) return;
-      _announce('Could not load stats for ${member.name}.');
+      _announce('Could not load stats.');
     } finally {
       _unfocus();
     }
@@ -350,82 +378,28 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   Future<void> _showExportDialog() async {
     _unfocus();
     if (_team.isEmpty) {
-      _announce('Your team is empty. Add Pokémon before exporting.');
+      _announce('Your team is empty.');
       return;
     }
 
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const AlertDialog(
-        content: Row(
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(width: 16),
-            Text('Calculating stats...'),
-          ],
-        ),
-      ),
-    );
-
-    final Map<int, Map<String, int>> baseStatsByIndex = {};
-    final Map<int, Map<String, int>?> megaStatsByIndex = {};
-    final Map<int, String?> megaFormNameByIndex = {};
-    final Map<int, String?> megaAbilityByIndex = {};
-
-    for (int i = 0; i < _team.length; i++) {
-      final member = _team[i];
-      try {
-        final natureInfo = await _service.getNatureBoosts(member.nature);
-        if (!mounted) return;
-        final boosted = natureInfo['plus'] ?? '';
-        final lowered = natureInfo['minus'] ?? '';
-
-        final pokemonData = await _service.getPokemon(member.name);
-        if (!mounted) return;
-        final rawStats = pokemonData['baseStats'] as Map<String, dynamic>;
-        final baseStats = rawStats.map((k, v) => MapEntry(k, (v as num).toInt()));
-
-        baseStatsByIndex[i] = StatCalculator.calculate(
-          baseStats: baseStats,
-          evs: member.evs,
-          ivs: member.ivs,
-          level: member.level,
-          natureBoosted: boosted,
-          natureLowered: lowered,
-        );
-      } catch (_) {}
-    }
-
-    if (!mounted) return;
-    Navigator.pop(context); // Dismiss progress dialog
-
-    final text = TeamTextCodec.encodeTeam(
-      _team,
-      baseStatsByIndex,
-      megaStatsByIndex,
-      megaFormNameByIndex,
-      megaAbilityByIndex,
-    );
+    final text = TeamTextCodec.encodeTeam(_team, {}, {}, {}, {});
 
     if (!mounted) return;
     await showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Export Team'),
+        title: const Text('Export Team (Showdown Format)'),
         content: SizedBox(
           width: double.maxFinite,
           child: SingleChildScrollView(
             child: Semantics(
-              label: 'Team export text',
+              label: 'Showdown team sheet export text',
               child: SelectableText(text, style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
             ),
           ),
         ),
         actions: [
           FilledButton(
-            style: _inverseFilledButtonStyle,
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: text));
               if (context.mounted) {
@@ -437,7 +411,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
             child: const Text('Copy'),
           ),
           TextButton(
-            style: _inverseTextButtonStyle,
             onPressed: () => Navigator.pop(context),
             child: const Text('Close'),
           ),
@@ -449,6 +422,23 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
   void _announce(String message) {
     setState(() => _statusMessage = message);
+  }
+
+  /// Generates visual Showdown style summary text block for member cards.
+  String _buildShowdownSummary(TeamMember m) {
+    final header = m.heldItem != null && m.heldItem!.isNotEmpty ? '${m.name} @ ${m.heldItem}' : m.name;
+    final ability = 'Ability: ${m.ability ?? "None"} | Level: ${m.level}';
+
+    final evsList = <String>[];
+    m.evs.forEach((k, v) {
+      if (v > 0) evsList.add('$v $k');
+    });
+    final evStr = evsList.isNotEmpty ? 'EVs: ${evsList.join(' / ')}' : 'EVs: None';
+
+    final movesList = m.moves.where((mv) => mv != null && mv.isNotEmpty).join(' / ');
+    final movesStr = movesList.isNotEmpty ? 'Moves: $movesList' : 'Moves: None';
+
+    return '$header\n$ability\n$evStr | ${m.nature} Nature\n$movesStr';
   }
 
   @override
@@ -466,15 +456,23 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         appBar: AppBar(
           title: const Text('Team Builder'),
           actions: [
-            TextButton.icon(
-              onPressed: _applyVgcPreset,
-              icon: const Icon(Icons.flash_on, size: 18),
-              label: const Text('VGC Preset', style: TextStyle(fontSize: 12)),
+            Semantics(
+              label: 'Apply VGC Preset to set all members to level 50 and 31 IVs',
+              button: true,
+              child: TextButton.icon(
+                onPressed: _applyVgcPreset,
+                icon: const Icon(Icons.flash_on, size: 18),
+                label: const Text('VGC Preset', style: TextStyle(fontSize: 12)),
+              ),
             ),
-            IconButton(
-              icon: const Icon(Icons.upload_outlined),
-              tooltip: 'Export Team',
-              onPressed: _showExportDialog,
+            Semantics(
+              label: 'Export Team in Showdown format',
+              button: true,
+              child: IconButton(
+                icon: const Icon(Icons.upload_outlined),
+                tooltip: 'Export Team',
+                onPressed: _showExportDialog,
+              ),
             ),
           ],
         ),
@@ -485,7 +483,10 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
               child: TextField(
                 controller: _searchController,
                 focusNode: _searchFocusNode,
-                decoration: _adaptiveInputDecoration('Search Base Pokémon').copyWith(
+                decoration: InputDecoration(
+                  labelText: 'Search Base Pokémon',
+                  isDense: true,
+                  border: const OutlineInputBorder(),
                   prefixIcon: const Icon(Icons.search),
                   suffixIcon: _searchController.text.isNotEmpty
                       ? IconButton(
@@ -554,21 +555,33 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     final isCollapsed = _collapsedCards.contains(member);
 
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
       child: Column(
         children: [
           ListTile(
             title: Text('${member.name.toUpperCase()} #${member.pokedexNumber}'),
+            subtitle: Text(
+              _buildShowdownSummary(member),
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+            ),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                IconButton(
-                  icon: Icon(isCollapsed ? Icons.expand_more : Icons.expand_less),
-                  onPressed: () => _toggleCardCollapsed(member),
+                Semantics(
+                  label: isCollapsed ? 'Expand ${member.name} options' : 'Collapse ${member.name} options',
+                  button: true,
+                  child: IconButton(
+                    icon: Icon(isCollapsed ? Icons.expand_more : Icons.expand_less),
+                    onPressed: () => _toggleCardCollapsed(member),
+                  ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                  onPressed: () => _confirmRemoveFromTeam(index),
+                Semantics(
+                  label: 'Remove ${member.name} from team',
+                  button: true,
+                  child: IconButton(
+                    icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                    onPressed: () => _confirmRemoveFromTeam(index),
+                  ),
                 ),
               ],
             ),
@@ -576,14 +589,45 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           if (!isCollapsed) ...[
             Container(
               color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
+              padding: const EdgeInsets.symmetric(vertical: 4.0),
+              child: Column(
                 children: [
-                  _buildToolbarToggle('⚙️', 'Details', activePanel == 'details', () => _togglePanel(member, 'details')),
-                  _buildToolbarToggle('⚔️', 'Moves', activePanel == 'moves', () => _togglePanel(member, 'moves')),
-                  _buildToolbarToggle('📈', 'EVs', activePanel == 'evs', () => _togglePanel(member, 'evs')),
-                  _buildToolbarToggle('🎚️', 'IVs', activePanel == 'ivlevel', () => _togglePanel(member, 'ivlevel')),
-                  _buildToolbarToggle('📊', 'Stats', false, () => _showStats(member)),
+                  // Level Quick Control Bar (Bug 4)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 2.0),
+                    child: Row(
+                      children: [
+                        const Text('Level:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                        Expanded(
+                          child: Semantics(
+                            label: 'Level slider for ${member.name}, current level ${member.level}',
+                            child: Slider(
+                              value: member.level.toDouble(),
+                              min: 1,
+                              max: 100,
+                              divisions: 99,
+                              label: '${member.level}',
+                              onChanged: (val) async {
+                                setState(() => member.level = val.toInt());
+                                await _saveTeam();
+                              },
+                            ),
+                          ),
+                        ),
+                        Text('Lvl ${member.level}', style: const TextStyle(fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _buildToolbarToggle('⚙️', 'Details', 'Open details editor for ${member.name}', activePanel == 'details', () => _togglePanel(member, 'details')),
+                      _buildToolbarToggle('⚔️', 'Moves', 'Open move editor for ${member.name}', activePanel == 'moves', () => _togglePanel(member, 'moves')),
+                      _buildToolbarToggle('📈', 'EVs', 'Open EV allocation for ${member.name}', activePanel == 'evs', () => _togglePanel(member, 'evs')),
+                      _buildToolbarToggle('🎚️', 'IVs', 'Open IV allocation for ${member.name}', activePanel == 'ivs', () => _togglePanel(member, 'ivs')),
+                      _buildToolbarToggle('📊', 'Stats', 'Show stats dialog for ${member.name}', false, () => _showStats(member)),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -594,24 +638,17 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     );
   }
 
-  Widget _buildToolbarToggle(String emoji, String label, bool isActive, VoidCallback onPressed) {
-    return IconButton(
-      icon: Text(emoji, style: const TextStyle(fontSize: 20)),
-      color: isActive ? Theme.of(context).colorScheme.primary : null,
-      onPressed: onPressed,
+  Widget _buildToolbarToggle(String emoji, String label, String semanticLabel, bool isActive, VoidCallback onPressed) {
+    return Semantics(
+      label: semanticLabel,
+      button: true,
+      child: IconButton(
+        icon: Text(emoji, style: const TextStyle(fontSize: 20)),
+        color: isActive ? Theme.of(context).colorScheme.primary : null,
+        onPressed: onPressed,
+      ),
     );
   }
-
-  InputDecoration _adaptiveInputDecoration(String labelText) {
-    return InputDecoration(
-      labelText: labelText,
-      isDense: true,
-      border: const OutlineInputBorder(),
-    );
-  }
-
-  ButtonStyle get _inverseFilledButtonStyle => FilledButton.styleFrom();
-  ButtonStyle get _inverseTextButtonStyle => TextButton.styleFrom();
 
   Widget _buildPanelContent(int index, String panelName) {
     final member = _team[index];
@@ -635,6 +672,17 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       );
     }
 
+    if (panelName == 'moves') {
+      return MoveEditorPanel(
+        moves: member.moves,
+        availableMoves: _movesCache[member] ?? [],
+        onChanged: (moves) async {
+          setState(() => member.moves = moves);
+          await _saveTeam();
+        },
+      );
+    }
+
     if (panelName == 'evs') {
       return EvEditorPanel(
         evs: member.evs,
@@ -645,15 +693,10 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       );
     }
 
-    if (panelName == 'ivlevel') {
-      return IvLevelEditorPanel(
-        level: member.level,
+    if (panelName == 'ivs') {
+      return IvEditorPanel(
         ivs: member.ivs,
-        onLevelChanged: (level) async {
-          setState(() => member.level = level);
-          await _saveTeam();
-        },
-        onIvsChanged: (ivs) async {
+        onChanged: (ivs) async {
           setState(() => member.ivs = ivs);
           await _saveTeam();
         },
