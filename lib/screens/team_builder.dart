@@ -5,7 +5,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/team_member.dart';
 import '../services/js_engine_service.dart';
-import '../services/stat_calculator.dart';
 import '../services/team_text_codec.dart';
 import '../widgets/details_editor_panel.dart';
 import '../widgets/ev_editor_panel.dart';
@@ -57,30 +56,31 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     FocusScope.of(context).unfocus();
   }
 
-  /// Clean item pool to include Mega Stones/Orbs and filter non-battle junk.
+  /// Filters item pool to explicitly include Mega Stones/Orbs and remove non-battle junk.
   List<String> _filterBattleItems(List<String> rawItems) {
+    final megaAndOrbPattern = RegExp(
+      r'ite($|[\s\-_]*[xy]|\b)|red[\s\-_]*orb|blue[\s\-_]*orb',
+      caseSensitive: false,
+    );
+
     final junkPattern = RegExp(
       r'^(tm\d+|hm\d+|tr\d+|key-|mail|letter|old-rod|good-rod|super-rod|bicycle|bike|ticket|pass|card|parcel|pokedex|journal|map|case|pouch)',
       caseSensitive: false,
     );
 
     return rawItems.where((item) {
-      final l = item.toLowerCase().trim();
-      if (l.isEmpty) return false;
+      final trimmed = item.trim();
+      if (trimmed.isEmpty) return false;
 
-      // Always explicitly retain Mega Stones and Primal Orbs
-      if (l.endsWith('ite') ||
-          l.endsWith('ite-x') ||
-          l.endsWith('ite-y') ||
-          l == 'red-orb' ||
-          l == 'blue-orb' ||
-          l == 'red orb' ||
-          l == 'blue orb') {
+      // 1. Explicitly retain Mega Stones and Primal Orbs
+      if (megaAndOrbPattern.hasMatch(trimmed)) {
         return true;
       }
 
-      // Exclude junk items
-      if (junkPattern.hasMatch(l)) return false;
+      // 2. Exclude non-battle junk items
+      if (junkPattern.hasMatch(trimmed.toLowerCase())) {
+        return false;
+      }
 
       return true;
     }).toList();
@@ -424,21 +424,28 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     setState(() => _statusMessage = message);
   }
 
-  /// Generates visual Showdown style summary text block for member cards.
+  /// Formats member details as a Pokémon Showdown visual summary.
   String _buildShowdownSummary(TeamMember m) {
-    final header = m.heldItem != null && m.heldItem!.isNotEmpty ? '${m.name} @ ${m.heldItem}' : m.name;
-    final ability = 'Ability: ${m.ability ?? "None"} | Level: ${m.level}';
+    final header = (m.heldItem != null && m.heldItem!.isNotEmpty)
+        ? '${m.name} @ ${_capitalize(m.heldItem!)}'
+        : m.name;
+    final abilityStr = 'Ability: ${m.ability ?? "None"} | Lvl: ${m.level}';
 
-    final evsList = <String>[];
+    final evParts = <String>[];
     m.evs.forEach((k, v) {
-      if (v > 0) evsList.add('$v $k');
+      if (v > 0) evParts.add('$v $k');
     });
-    final evStr = evsList.isNotEmpty ? 'EVs: ${evsList.join(' / ')}' : 'EVs: None';
+    final evStr = evParts.isNotEmpty ? 'EVs: ${evParts.join(' / ')}' : 'EVs: None';
 
-    final movesList = m.moves.where((mv) => mv != null && mv.isNotEmpty).join(' / ');
-    final movesStr = movesList.isNotEmpty ? 'Moves: $movesList' : 'Moves: None';
+    final validMoves = m.moves.where((mv) => mv != null && mv.isNotEmpty).join(' / ');
+    final movesStr = validMoves.isNotEmpty ? 'Moves: $validMoves' : 'Moves: None';
 
-    return '$header\n$ability\n$evStr | ${m.nature} Nature\n$movesStr';
+    return '$header\n$abilityStr\n$evStr | ${m.nature} Nature\n$movesStr';
+  }
+
+  String _capitalize(String text) {
+    if (text.isEmpty) return text;
+    return text.split('-').map((s) => s.isEmpty ? '' : s[0].toUpperCase() + s.substring(1)).join(' ');
   }
 
   @override
@@ -592,7 +599,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
               padding: const EdgeInsets.symmetric(vertical: 4.0),
               child: Column(
                 children: [
-                  // Level Quick Control Bar (Bug 4)
+                  // Level Quick Control Bar
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 2.0),
                     child: Row(
