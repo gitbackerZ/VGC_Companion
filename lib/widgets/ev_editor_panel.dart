@@ -38,7 +38,6 @@ class EvEditorPanel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          // 2 Rows x 3 Columns Layout
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
@@ -54,12 +53,15 @@ class EvEditorPanel extends StatelessWidget {
               final currentEv = evs[stat] ?? 0;
 
               return Semantics(
-                label: 'Effort Value for $stat: current value $currentEv',
+                label: 'Effort Value for $stat, current value $currentEv',
+                textField: true,
+                excludeSemantics: true,
                 child: TextFormField(
                   initialValue: currentEv.toString(),
                   keyboardType: TextInputType.number,
                   decoration: InputDecoration(
                     labelText: stat,
+                    floatingLabelBehavior: FloatingLabelBehavior.always,
                     isDense: true,
                     border: const OutlineInputBorder(),
                   ),

@@ -1,6 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/team_member.dart';
@@ -25,6 +28,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   final _searchFocusNode = FocusNode();
   final _importController = TextEditingController();
   static const _storageKey = 'saved_team';
+  static const _exportFileName = 'showdown_team.txt';
 
   List<Map<String, dynamic>> _baseSpeciesList = [];
   List<Map<String, dynamic>> _filtered = [];
@@ -38,6 +42,62 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
   bool _loading = true;
   String _statusMessage = '';
+
+  /// Produce a copy of the team with every member forced to its base species
+  /// so that only base Pokémon information is recorded on export.
+  Future<List<TeamMember>> _teamAsBaseForms() async {
+    final result = <TeamMember>[];
+    for (final m in _team) {
+      if (!m.name.contains('-Mega')) {
+        result.add(m);
+        continue;
+      }
+      try {
+        final data = await _service.getPokemon(m.name);
+        final baseName = data['baseSpecies'] as String? ?? m.name.split('-')[0];
+        final baseData = await _service.getPokemon(baseName);
+        final baseTypes = List<String>.from(baseData['types'] ?? m.types);
+        final baseMember = TeamMember(
+          name: baseName,
+          pokedexNumber: m.pokedexNumber,
+          types: baseTypes,
+          ability: m.ability,
+          moves: List<String?>.from(m.moves),
+          gender: m.gender,
+          genderRate: m.genderRate,
+        )
+          ..level = m.level
+          ..heldItem = m.heldItem
+          ..nature = m.nature
+          ..evs = Map<String, int>.from(m.evs)
+          ..ivs = Map<String, int>.from(m.ivs);
+        result.add(baseMember);
+      } catch (_) {
+        final fallback = m.name.split('-Mega').first;
+        final copy = TeamMember(
+          name: fallback,
+          pokedexNumber: m.pokedexNumber,
+          types: m.types,
+          ability: m.ability,
+          moves: List<String?>.from(m.moves),
+          gender: m.gender,
+          genderRate: m.genderRate,
+        )
+          ..level = m.level
+          ..heldItem = m.heldItem
+          ..nature = m.nature
+          ..evs = Map<String, int>.from(m.evs)
+          ..ivs = Map<String, int>.from(m.ivs);
+        result.add(copy);
+      }
+    }
+    return result;
+  }
+
+  Future<File> _exportFile() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return File('${dir.path}/$_exportFileName');
+  }
 
   @override
   void initState() {
@@ -243,54 +303,66 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     }
   }
 
+  /// Returns true if the held item is a valid Mega Stone / Orb for the given form key.
+  bool _isValidMegaItem(String heldItem, String formKey) {
+    if (heldItem.isEmpty) return false;
+    final item = heldItem.toLowerCase().trim();
+    if (item == 'eviolite') return false;
+
+    if (formKey.contains('-mega-x')) {
+      return item.endsWith('x') && item.contains('ite');
+    } else if (formKey.contains('-mega-y')) {
+      return item.endsWith('y') && item.contains('ite');
+    } else {
+      return item.endsWith('ite') ||
+          item == 'red-orb' ||
+          item == 'blue-orb' ||
+          item == 'red orb' ||
+          item == 'blue orb';
+    }
+  }
+
+  /// Resolve the mega form that matches the member's currently held item (if any).
+  Future<String?> _resolveMegaFormForHeldItem(TeamMember member) async {
+    final heldItem = (member.heldItem ?? '').toLowerCase().trim();
+    if (heldItem.isEmpty) return null;
+
+    final lookupName = member.name.contains('-Mega')
+        ? (await _service.getPokemon(member.name))['baseSpecies'] as String? ?? member.name.split('-')[0]
+        : member.name;
+
+    final allMegaStats = await _service.getAllMegaBaseStats(lookupName);
+    if (allMegaStats.isEmpty) return null;
+
+    for (final entry in allMegaStats.entries) {
+      if (_isValidMegaItem(heldItem, entry.key)) {
+        return entry.key;
+      }
+    }
+    return null;
+  }
+
+  /// Mega toggle is driven solely by the held item ("handshake").
+  /// - If the member is currently Mega → always revert to base form.
+  /// - If the member holds a valid Mega Stone / Orb → switch to that Mega form.
+  /// - Otherwise announce that the correct item is required.
   Future<void> _toggleMegaForm(int index) async {
     final member = _team[index];
     try {
-      final megaList = await _service.getMegaFormes(member.name);
-      
-      if (megaList.isEmpty && !member.name.contains('-Mega')) {
-        _announce('No Mega evolution forms found for ${member.name}.');
-        return;
-      }
-
       String targetFormName;
 
       if (member.name.contains('-Mega')) {
-        // Revert to base species
         final baseData = await _service.getPokemon(member.name);
         targetFormName = baseData['baseSpecies'] ?? member.name.split('-')[0];
-      } else if (megaList.length == 1) {
-        targetFormName = megaList.first['name'];
       } else {
-        // Multiple mega forms (e.g., Charizard X / Y)
-        final chosen = await showDialog<String>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Select Mega Form for ${member.name}', style: const TextStyle(fontSize: 14)),
-                _buildCloseDialogButton(context),
-              ],
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: megaList.map((m) {
-                final String mName = m['name'];
-                final List<String> mTypes = List<String>.from(m['types'] ?? []);
-                final String reqItem = m['requiredItem'] ?? '';
-                return ListTile(
-                  dense: true,
-                  title: Text(mName, style: const TextStyle(fontSize: 12)),
-                  subtitle: Text('Types: ${mTypes.join('/')}${reqItem.isNotEmpty ? " | Requires $reqItem" : ""}', style: const TextStyle(fontSize: 10)),
-                  onTap: () => Navigator.pop(context, mName),
-                );
-              }).toList(),
-            ),
-          ),
-        );
-        if (!mounted || chosen == null) return;
-        targetFormName = chosen;
+        final megaForm = await _resolveMegaFormForHeldItem(member);
+        if (megaForm == null) {
+          _announce(
+            'Hold the correct Mega Stone or Orb on ${member.name} to Mega Evolve.',
+          );
+          return;
+        }
+        targetFormName = megaForm;
       }
 
       final data = await _service.getPokemon(targetFormName);
@@ -380,6 +452,35 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         ),
         actions: [
           _buildLightGrayButton(
+            label: 'Load from File',
+            onPressed: () async {
+              try {
+                final file = await _exportFile();
+                if (await file.exists()) {
+                  final content = await file.readAsString();
+                  _importController.text = content;
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Loaded team sheet from file')),
+                    );
+                  }
+                } else {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('No saved team file found')),
+                    );
+                  }
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Could not load file: $e')),
+                  );
+                }
+              }
+            },
+          ),
+          _buildLightGrayButton(
             label: 'Add to Team',
             onPressed: () async {
               Navigator.pop(context);
@@ -436,7 +537,9 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       return;
     }
 
-    final text = TeamTextCodec.encodeTeam(_team, {}, {}, {}, {});
+    // Always export base-species forms only.
+    final baseTeam = await _teamAsBaseForms();
+    final text = TeamTextCodec.encodeTeam(baseTeam, {}, {}, {}, {});
 
     if (!mounted) return;
     await showDialog(
@@ -467,6 +570,26 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Copied to clipboard')),
                 );
+              }
+            },
+          ),
+          _buildLightGrayButton(
+            label: 'Save as File',
+            onPressed: () async {
+              try {
+                final file = await _exportFile();
+                await file.writeAsString(text);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Saved to ${file.path}')),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Could not save file: $e')),
+                  );
+                }
               }
             },
           ),
@@ -680,7 +803,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                       ),
                       _buildEmojiButton(
                         emoji: 'Ⓜ️',
-                        semanticLabel: 'Toggle Mega or Base Form for ${member.name}',
+                        semanticLabel: 'Toggle Mega form based on held item for ${member.name}',
                         onPressed: () => _toggleMegaForm(index),
                       ),
                       _buildEmojiButton(
@@ -746,7 +869,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         onTap: onPressed,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-          child: Text(emoji, style: const TextStyle(fontSize: 12)),
+          // 75% larger than the previous 12 → 21
+          child: Text(emoji, style: const TextStyle(fontSize: 21)),
         ),
       ),
     );

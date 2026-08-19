@@ -21,7 +21,6 @@ class IvEditorPanel extends StatelessWidget {
         children: [
           const Text('Individual Values (IVs)', style: TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
-          // 2 Rows x 3 Columns Layout
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
@@ -37,12 +36,15 @@ class IvEditorPanel extends StatelessWidget {
               final currentIv = ivs[stat] ?? 31;
 
               return Semantics(
-                label: 'Individual Value for $stat: current value $currentIv',
+                label: 'Individual Value for $stat, current value $currentIv',
+                textField: true,
+                excludeSemantics: true,
                 child: TextFormField(
                   initialValue: currentIv.toString(),
                   keyboardType: TextInputType.number,
                   decoration: InputDecoration(
                     labelText: stat,
+                    floatingLabelBehavior: FloatingLabelBehavior.always,
                     isDense: true,
                     border: const OutlineInputBorder(),
                   ),
