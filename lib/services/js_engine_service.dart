@@ -21,7 +21,6 @@ class JsEngineService {
       _jsRuntime!.evaluate(dexJs);
 
       final learnsetsJsonText = await rootBundle.loadString('assets/js/learnsets.json');
-      // OPTIMIZATION: Parse as a string literal to prevent AST memory spikes in the JS engine
       final escapedJson = jsonEncode(learnsetsJsonText);
       _jsRuntime!.evaluate('Dex.data.Learnsets = JSON.parse($escapedJson);');
       
@@ -31,13 +30,10 @@ class JsEngineService {
     }
   }
 
-  /// Helper to check if runtime is ready
   bool get isReady => _isInitialized && _jsRuntime != null;
 
-  /// Standard Showdown ID conversion helper (e.g., "Tapu Koko" -> "tapukoko")
   String _toId(String text) => text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
 
-  /// Safely dispose of the JS Runtime to free memory
   void dispose() {
     if (_jsRuntime != null) {
       _jsRuntime!.dispose();
@@ -46,7 +42,48 @@ class JsEngineService {
     }
   }
 
-  /// Returns real held item names using Dex.items.all() including Mega Stones & Orbs
+  /// Direct Showdown lookup to find Mega or Primal form matching a held item
+  Future<String?> getMegaFormForHeldItem(String speciesName, String heldItem) async {
+    if (!isReady || heldItem.trim().isEmpty) return null;
+    final sanitizedSpecies = _toId(speciesName);
+    final sanitizedItem = _toId(heldItem);
+
+    final script = '''
+      (function() {
+        var base = Dex.species.get("$sanitizedSpecies");
+        if (!base || !base.exists) return null;
+        if (base.isMega || (base.forme && base.forme.indexOf('Mega') !== -1)) {
+          base = Dex.species.get(base.baseSpecies || "$sanitizedSpecies");
+        }
+        if (!base || !base.otherFormes) return null;
+
+        for (var i = 0; i < base.otherFormes.length; i++) {
+          var fSpec = Dex.species.get(base.otherFormes[i]);
+          if (!fSpec || !fSpec.exists) continue;
+          
+          var reqItem = (fSpec.requiredItem || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          var reqItems = (fSpec.requiredItems || []).map(function(x) {
+            return x.toLowerCase().replace(/[^a-z0-9]/g, '');
+          });
+          
+          if (reqItem === "$sanitizedItem" || reqItems.indexOf("$sanitizedItem") !== -1) {
+            return fSpec.name;
+          }
+        }
+        return null;
+      })()
+    ''';
+
+    final result = _jsRuntime!.evaluate(script);
+    if (result.isError || result.stringResult == 'null' || result.stringResult.isEmpty) return null;
+    try {
+      final decoded = json.decode(result.stringResult);
+      return decoded?.toString();
+    } catch (_) {
+      return result.stringResult.replaceAll('"', '');
+    }
+  }
+
   Future<List<String>> getItemList() async {
     if (!isReady) return [];
     final script = '''
@@ -58,7 +95,6 @@ class JsEngineService {
           var item = items[i];
           if (!item || !item.exists) continue;
           
-          // Allow standard items OR past-gen items (Mega Stones / Primal Orbs)
           var isPastGen = item.isNonstandard === 'Past';
           var isMegaStone = !!item.megaStone || !!item.megaEvolves;
           var isStandard = !item.isNonstandard;
@@ -76,7 +112,6 @@ class JsEngineService {
     return list.cast<String>();
   }
 
-  /// Returns base species only (1 per Dex number), excluding Megas and Gmax
   Future<List<Map<String, dynamic>>> getBaseSpeciesList() async {
     if (!isReady) return [];
     final script = '''
@@ -113,7 +148,6 @@ class JsEngineService {
     return list.cast<Map<String, dynamic>>();
   }
 
-  /// Gets non-Mega, non-Gmax varieties for a base species
   Future<List<Map<String, dynamic>>> getFormesForSpecies(String baseName) async {
     if (!isReady) return [];
     final sanitized = _toId(baseName);
@@ -147,7 +181,6 @@ class JsEngineService {
     return list.cast<Map<String, dynamic>>();
   }
 
-  /// Retrieves all Mega evolution variants for a base species or current form
   Future<List<Map<String, dynamic>>> getMegaFormes(String speciesName) async {
     if (!isReady) return [];
     final sanitized = _toId(speciesName);
@@ -156,7 +189,6 @@ class JsEngineService {
         var base = Dex.species.get("$sanitized");
         if (!base || !base.exists) return JSON.stringify([]);
         
-        // Resolve back to base species if already a Mega
         if (base.isMega || (base.forme && base.forme.indexOf('Mega') !== -1)) {
           base = Dex.species.get(base.baseSpecies || "$sanitized");
         }
@@ -184,7 +216,6 @@ class JsEngineService {
     return list.cast<Map<String, dynamic>>();
   }
 
-  /// Fetches species data via Dex.species.get()
   Future<Map<String, dynamic>> getPokemon(String name) async {
     if (!isReady) throw Exception('JsEngineService is not initialized');
     final sanitized = _toId(name);
@@ -193,7 +224,6 @@ class JsEngineService {
     return json.decode(result.stringResult) as Map<String, dynamic>;
   }
 
-  /// Returns learnable moves for a species including pre-evolutions using Dex.moves.get()
   Future<List<Map<String, dynamic>>> getMovesForSpecies(String name) async {
     if (!isReady) return [];
     try {
@@ -255,7 +285,6 @@ class JsEngineService {
     }
   }
 
-  /// Returns formatted ability list for a given species name
   Future<List<Map<String, dynamic>>> getAbilitiesForPokemon(String name) async {
     try {
       final data = await getPokemon(name);
@@ -272,7 +301,6 @@ class JsEngineService {
     }
   }
 
-  /// Returns female gender rate in 8ths (-1 = Genderless, 0 = 100% Male, 8 = 100% Female)
   Future<int> getGenderRate(String name) async {
     try {
       final data = await getPokemon(name);
@@ -296,7 +324,6 @@ class JsEngineService {
     }
   }
 
-  /// Retrieves base stats for all Mega evolutions associated with a base species
   Future<Map<String, Map<String, int>>> getAllMegaBaseStats(String name) async {
     try {
       final cleanBaseName = _toId(name.split('-')[0]);
@@ -320,7 +347,6 @@ class JsEngineService {
     }
   }
 
-  /// Fetches stat modifiers (+10% / -10%) using Dex.natures.get()
   Future<Map<String, String>> getNatureBoosts(String nature) async {
     if (!isReady) return {'plus': '', 'minus': ''};
     try {
