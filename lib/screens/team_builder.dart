@@ -45,7 +45,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   final Map<TeamMember, String?> _activePanels = {};
   final Set<TeamMember> _collapsedCards = {};
 
-  // Track initial state when EV or IV panels open to report changes when dismissed
   final Map<TeamMember, Map<String, int>> _initialEvs = {};
   final Map<TeamMember, Map<String, int>> _initialIvs = {};
 
@@ -78,14 +77,13 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     SemanticsService.announce(message, TextDirection.ltr);
   }
 
-  /// Flushes pending EV/IV change announcements when panels close or new actions start
   void _flushPendingPanelUpdates([TeamMember? targetMember]) {
     final membersToFlush = targetMember != null ? [targetMember] : List<TeamMember>.from(_team);
     for (final member in membersToFlush) {
       final initialEv = _initialEvs[member];
       if (initialEv != null) {
         if (!_mapsEqual(initialEv, member.evs)) {
-          _announce('${member.name} EV values updated');
+          _announce('${member.name} ev values updated');
         }
         _initialEvs.remove(member);
       }
@@ -93,7 +91,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       final initialIv = _initialIvs[member];
       if (initialIv != null) {
         if (!_mapsEqual(initialIv, member.ivs)) {
-          _announce('${member.name} IV values updated');
+          _announce('${member.name} iv values updated');
         }
         _initialIvs.remove(member);
       }
@@ -108,6 +106,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     return true;
   }
 
+  /// Reverts Megas/Primals back to base species name and base species ability for Showdown exports
   Future<List<TeamMember>> _teamAsBaseForms() async {
     final result = <TeamMember>[];
     for (final m in _team) {
@@ -120,11 +119,21 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         final baseName = data['baseSpecies'] as String? ?? m.name.split('-')[0];
         final baseData = await _service.getPokemon(baseName);
         final baseTypes = List<String>.from(baseData['types'] ?? m.types);
+
+        final baseAbilities = await _service.getAbilitiesForPokemon(baseName);
+        String baseAbility = m.ability ?? '';
+        if (baseAbilities.isNotEmpty) {
+          final baseAbilityNames = baseAbilities.map((a) => a['name'].toString()).toList();
+          if (!baseAbilityNames.contains(baseAbility)) {
+            baseAbility = baseAbilityNames.first;
+          }
+        }
+
         final baseMember = TeamMember(
           name: baseName,
           pokedexNumber: m.pokedexNumber,
           types: baseTypes,
-          ability: m.ability,
+          ability: baseAbility,
           moves: List<String?>.from(m.moves),
           gender: m.gender,
           genderRate: m.genderRate,
@@ -155,11 +164,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       }
     }
     return result;
-  }
-
-  Future<File> _exportFile() async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/$_exportFileName');
   }
 
   List<String> _filterBattleItems(List<String> rawItems) {
@@ -382,7 +386,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     }
   }
 
-  /// Mega toggle driven strictly by Showdown Dex matching against held items
   Future<void> _toggleMegaForm(int index) async {
     _flushPendingPanelUpdates();
     final member = _team[index];
@@ -462,7 +465,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
               if (parsed != null && parsed >= 1 && parsed <= 100) {
                 setState(() => member.level = parsed);
                 await _saveTeam();
-                _announce('${member.name} level changed to $parsed');
+                _announce('${member.name} level change to $parsed');
               }
               if (context.mounted) Navigator.pop(context);
             },
@@ -477,74 +480,133 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     _unfocus();
     _importController.clear();
 
+    final docDir = await getApplicationDocumentsDirectory();
+    final filePathController = TextEditingController(text: '${docDir.path}/$_exportFileName');
+
+    List<FileSystemEntity> availableFiles = [];
+    try {
+      if (await docDir.exists()) {
+        availableFiles = docDir
+            .listSync()
+            .where((entity) => entity.path.endsWith('.txt'))
+            .toList();
+      }
+    } catch (_) {}
+
+    if (!mounted) return;
     await showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text('Import Showdown Team', style: TextStyle(fontSize: 14)),
-            _buildCloseDialogButton(context),
-          ],
-        ),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildLightGrayTextField(
-                controller: _importController,
-                labelText: 'Paste Showdown Team Text',
-                maxLines: 8,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Import Showdown Team', style: TextStyle(fontSize: 14)),
+                _buildCloseDialogButton(context),
+              ],
+            ),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildLightGrayTextField(
+                      controller: _importController,
+                      labelText: 'Paste Showdown Team Text',
+                      maxLines: 5,
+                    ),
+                    const SizedBox(height: 10),
+                    const Divider(),
+                    const SizedBox(height: 6),
+                    _buildLightGrayTextField(
+                      controller: filePathController,
+                      labelText: 'Device Storage File Path',
+                    ),
+                    if (availableFiles.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      const Text('Select Local Storage File:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 4),
+                      SizedBox(
+                        height: 90,
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: availableFiles.length,
+                          itemBuilder: (context, idx) {
+                            final file = availableFiles[idx];
+                            final name = file.path.split(Platform.pathSeparator).last;
+                            return ListTile(
+                              dense: true,
+                              visualDensity: VisualDensity.compact,
+                              title: Text(name, style: const TextStyle(fontSize: 11)),
+                              onTap: () async {
+                                filePathController.text = file.path;
+                                final content = await File(file.path).readAsString();
+                                setDialogState(() {
+                                  _importController.text = content;
+                                });
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              _buildLightGrayButton(
+                label: 'Load File',
+                onPressed: () async {
+                  try {
+                    final path = filePathController.text.trim();
+                    final file = File(path);
+                    if (await file.exists()) {
+                      final content = await file.readAsString();
+                      setDialogState(() {
+                        _importController.text = content;
+                      });
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Loaded team sheet from local storage')),
+                        );
+                      }
+                    } else {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('File not found at specified path')),
+                        );
+                      }
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Could not load file: $e')),
+                      );
+                    }
+                  }
+                },
+              ),
+              _buildLightGrayButton(
+                label: 'Add to Team',
+                onPressed: () async {
+                  Navigator.pop(context);
+                  await _processImport(replace: false);
+                },
+              ),
+              _buildLightGrayButton(
+                label: 'Replace Team',
+                onPressed: () async {
+                  Navigator.pop(context);
+                  await _processImport(replace: true);
+                },
               ),
             ],
-          ),
-        ),
-        actions: [
-          _buildLightGrayButton(
-            label: 'Load from File',
-            onPressed: () async {
-              try {
-                final file = await _exportFile();
-                if (await file.exists()) {
-                  final content = await file.readAsString();
-                  _importController.text = content;
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Loaded team sheet from file')),
-                    );
-                  }
-                } else {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('No saved team file found')),
-                    );
-                  }
-                }
-              } catch (e) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Could not load file: $e')),
-                  );
-                }
-              }
-            },
-          ),
-          _buildLightGrayButton(
-            label: 'Add to Team',
-            onPressed: () async {
-              Navigator.pop(context);
-              await _processImport(replace: false);
-            },
-          ),
-          _buildLightGrayButton(
-            label: 'Replace Team',
-            onPressed: () async {
-              Navigator.pop(context);
-              await _processImport(replace: true);
-            },
-          ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -595,6 +657,10 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     final baseTeam = await _teamAsBaseForms();
     final text = TeamTextCodec.encodeTeam(baseTeam, {}, {}, {}, {});
 
+    final docDir = await getApplicationDocumentsDirectory();
+    final fileNameController = TextEditingController(text: _exportFileName);
+    final dirPathController = TextEditingController(text: docDir.path);
+
     if (!mounted) return;
     await showDialog(
       context: context,
@@ -609,9 +675,27 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         content: SizedBox(
           width: double.maxFinite,
           child: SingleChildScrollView(
-            child: SelectableText(
-              text,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SelectableText(
+                  text,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+                ),
+                const SizedBox(height: 10),
+                const Divider(),
+                const SizedBox(height: 6),
+                _buildLightGrayTextField(
+                  controller: dirPathController,
+                  labelText: 'Target Directory',
+                ),
+                const SizedBox(height: 8),
+                _buildLightGrayTextField(
+                  controller: fileNameController,
+                  labelText: 'File Name',
+                ),
+              ],
             ),
           ),
         ),
@@ -628,10 +712,18 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
             },
           ),
           _buildLightGrayButton(
-            label: 'Save as File',
+            label: 'Save File',
             onPressed: () async {
               try {
-                final file = await _exportFile();
+                final dirPath = dirPathController.text.trim();
+                final fileName = fileNameController.text.trim();
+                if (dirPath.isEmpty || fileName.isEmpty) return;
+
+                final dir = Directory(dirPath);
+                if (!await dir.exists()) {
+                  await dir.create(recursive: true);
+                }
+                final file = File('$dirPath/$fileName');
                 await file.writeAsString(text);
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -729,46 +821,45 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Row(
-            children: [
-              const Text('Team Builder', style: TextStyle(fontSize: 15)),
-              const SizedBox(width: 8),
-              Theme(
-                data: Theme.of(context).copyWith(
-                  canvasColor: Theme.of(context).cardColor,
-                ),
-                child: DropdownButton<TeamPreset>(
-                  value: _activePreset,
-                  isDense: true,
-                  underline: const SizedBox.shrink(),
-                  icon: const Icon(Icons.arrow_drop_down, size: 20),
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context).colorScheme.primary,
+          title: DropdownButtonHideUnderline(
+            child: DropdownButton<TeamPreset>(
+              value: _activePreset,
+              isDense: true,
+              icon: const Icon(Icons.arrow_drop_down, size: 22),
+              items: [
+                DropdownMenuItem(
+                  value: TeamPreset.championsVgc,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Text('Team Builder', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      Text('Champions VGC', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                    ],
                   ),
-                  items: const [
-                    DropdownMenuItem(
-                      value: TeamPreset.championsVgc,
-                      child: Text('Champions VGC'),
-                    ),
-                    DropdownMenuItem(
-                      value: TeamPreset.freeform,
-                      child: Text('Freeform'),
-                    ),
-                  ],
-                  onChanged: (preset) {
-                    if (preset != null && preset != _activePreset) {
-                      _applyPreset(preset);
-                    }
-                  },
                 ),
-              ),
-            ],
+                DropdownMenuItem(
+                  value: TeamPreset.freeform,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Text('Team Builder', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      Text('Freeform', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                    ],
+                  ),
+                ),
+              ],
+              onChanged: (preset) {
+                if (preset != null && preset != _activePreset) {
+                  _applyPreset(preset);
+                }
+              },
+            ),
           ),
           actions: [
             Semantics(
-              label: 'Import Team Sheet',
+              label: 'Import team',
               button: true,
               container: true,
               excludeSemantics: true,
@@ -778,7 +869,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
               ),
             ),
             Semantics(
-              label: 'Export Team Sheet',
+              label: 'Export team',
               button: true,
               container: true,
               excludeSemantics: true,
@@ -799,11 +890,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                 onChanged: _filter,
               ),
             ),
-            if (_statusMessage.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 2.0),
-                child: Text(_statusMessage, style: const TextStyle(color: Colors.redAccent, fontSize: 11)),
-              ),
             if (_team.isNotEmpty)
               Expanded(
                 flex: 5,
@@ -832,6 +918,18 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                       },
                     ),
             ),
+            if (_statusMessage.isNotEmpty)
+              Container(
+                width: double.infinity,
+                color: Theme.of(context).brightness == Brightness.dark ? Colors.black26 : Colors.grey[200],
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                child: Text(
+                  _statusMessage,
+                  style: const TextStyle(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.w500),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
           ],
         ),
       ),
@@ -914,8 +1012,10 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                         semanticLabel: 'Remove ${member.name} from team',
                         onPressed: () async {
                           _flushPendingPanelUpdates(member);
+                          final name = member.name;
                           setState(() => _team.removeAt(index));
                           await _saveTeam();
+                          _announce('$name removed from team');
                         },
                       ),
                     ],
@@ -1059,7 +1159,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           }
           if (ability != null) {
             setState(() => member.ability = ability);
-            _announce('${member.name} ability changed to $ability');
+            _announce('${member.name} ability change to $ability');
           }
           if (nature != null) {
             setState(() => member.nature = nature);
@@ -1077,6 +1177,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         onChanged: (moves) async {
           setState(() => member.moves = moves);
           await _saveTeam();
+          _announce('${member.name} moveset updated');
         },
       );
     }
