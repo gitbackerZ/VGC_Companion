@@ -31,7 +31,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   final _searchFocusNode = FocusNode();
   final _importController = TextEditingController();
   static const _storageKey = 'saved_team';
-  static const _exportFileName = 'showdown_team.txt';
 
   TeamPreset _activePreset = TeamPreset.championsVgc;
 
@@ -106,7 +105,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     return true;
   }
 
-  /// Reverts Megas/Primals back to base species name and base species ability for Showdown exports
   Future<List<TeamMember>> _teamAsBaseForms() async {
     final result = <TeamMember>[];
     for (final m in _team) {
@@ -481,7 +479,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     _importController.clear();
 
     final docDir = await getApplicationDocumentsDirectory();
-    final filePathController = TextEditingController(text: '${docDir.path}/$_exportFileName');
 
     List<FileSystemEntity> availableFiles = [];
     try {
@@ -518,19 +515,17 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                       labelText: 'Paste Showdown Team Text',
                       maxLines: 5,
                     ),
-                    const SizedBox(height: 10),
-                    const Divider(),
-                    const SizedBox(height: 6),
-                    _buildLightGrayTextField(
-                      controller: filePathController,
-                      labelText: 'Device Storage File Path',
-                    ),
                     if (availableFiles.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      const Text('Select Local Storage File:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 10),
+                      const Divider(),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'load from file:',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
                       const SizedBox(height: 4),
                       SizedBox(
-                        height: 90,
+                        height: 100,
                         child: ListView.builder(
                           shrinkWrap: true,
                           itemCount: availableFiles.length,
@@ -542,11 +537,19 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                               visualDensity: VisualDensity.compact,
                               title: Text(name, style: const TextStyle(fontSize: 11)),
                               onTap: () async {
-                                filePathController.text = file.path;
-                                final content = await File(file.path).readAsString();
-                                setDialogState(() {
-                                  _importController.text = content;
-                                });
+                                try {
+                                  final content = await File(file.path).readAsString();
+                                  setDialogState(() {
+                                    _importController.text = content;
+                                  });
+                                  _announce('Team sheet loaded from $name');
+                                } catch (e) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Could not read file: $e')),
+                                    );
+                                  }
+                                }
                               },
                             );
                           },
@@ -558,38 +561,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
               ),
             ),
             actions: [
-              _buildLightGrayButton(
-                label: 'Load File',
-                onPressed: () async {
-                  try {
-                    final path = filePathController.text.trim();
-                    final file = File(path);
-                    if (await file.exists()) {
-                      final content = await file.readAsString();
-                      setDialogState(() {
-                        _importController.text = content;
-                      });
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Loaded team sheet from local storage')),
-                        );
-                      }
-                    } else {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('File not found at specified path')),
-                        );
-                      }
-                    }
-                  } catch (e) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Could not load file: $e')),
-                      );
-                    }
-                  }
-                },
-              ),
               _buildLightGrayButton(
                 label: 'Add to Team',
                 onPressed: () async {
@@ -657,9 +628,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     final baseTeam = await _teamAsBaseForms();
     final text = TeamTextCodec.encodeTeam(baseTeam, {}, {}, {}, {});
 
-    final docDir = await getApplicationDocumentsDirectory();
-    final fileNameController = TextEditingController(text: _exportFileName);
-    final dirPathController = TextEditingController(text: docDir.path);
+    final fileNameController = TextEditingController(text: 'Team');
 
     if (!mounted) return;
     await showDialog(
@@ -687,11 +656,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                 const Divider(),
                 const SizedBox(height: 6),
                 _buildLightGrayTextField(
-                  controller: dirPathController,
-                  labelText: 'Target Directory',
-                ),
-                const SizedBox(height: 8),
-                _buildLightGrayTextField(
                   controller: fileNameController,
                   labelText: 'File Name',
                 ),
@@ -704,10 +668,12 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
             label: 'Copy',
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: text));
+              _announce('Team sheet copied to clipboard');
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Copied to clipboard')),
                 );
+                Navigator.pop(context);
               }
             },
           ),
@@ -715,20 +681,20 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
             label: 'Save File',
             onPressed: () async {
               try {
-                final dirPath = dirPathController.text.trim();
-                final fileName = fileNameController.text.trim();
-                if (dirPath.isEmpty || fileName.isEmpty) return;
+                String rawName = fileNameController.text.trim();
+                if (rawName.isEmpty) rawName = 'Team';
+                final fileName = rawName.toLowerCase().endsWith('.txt') ? rawName : '$rawName.txt';
 
-                final dir = Directory(dirPath);
-                if (!await dir.exists()) {
-                  await dir.create(recursive: true);
-                }
-                final file = File('$dirPath/$fileName');
+                final docDir = await getApplicationDocumentsDirectory();
+                final file = File('${docDir.path}/$fileName');
                 await file.writeAsString(text);
+
+                _announce('Team sheet saved as $fileName');
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text('Saved to ${file.path}')),
                   );
+                  Navigator.pop(context);
                 }
               } catch (e) {
                 if (context.mounted) {
@@ -821,40 +787,43 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: DropdownButtonHideUnderline(
-            child: DropdownButton<TeamPreset>(
-              value: _activePreset,
-              isDense: true,
-              icon: const Icon(Icons.arrow_drop_down, size: 22),
-              items: [
-                DropdownMenuItem(
-                  value: TeamPreset.championsVgc,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: const [
-                      Text('Team Builder', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                      Text('Champions VGC', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                    ],
+          title: Semantics(
+            label: 'Select the battle format for team building',
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<TeamPreset>(
+                value: _activePreset,
+                isDense: true,
+                icon: const Icon(Icons.arrow_drop_down, size: 22),
+                items: const [
+                  DropdownMenuItem(
+                    value: TeamPreset.championsVgc,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('Team Builder Preset', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                        Text('Champions VGC', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                      ],
+                    ),
                   ),
-                ),
-                DropdownMenuItem(
-                  value: TeamPreset.freeform,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: const [
-                      Text('Team Builder', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                      Text('Freeform', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                    ],
+                  DropdownMenuItem(
+                    value: TeamPreset.freeform,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('Team Builder Preset', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                        Text('Freeform', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                      ],
+                    ),
                   ),
-                ),
-              ],
-              onChanged: (preset) {
-                if (preset != null && preset != _activePreset) {
-                  _applyPreset(preset);
-                }
-              },
+                ],
+                onChanged: (preset) {
+                  if (preset != null && preset != _activePreset) {
+                    _applyPreset(preset);
+                  }
+                },
+              ),
             ),
           ),
           actions: [
@@ -925,7 +894,11 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 child: Text(
                   _statusMessage,
-                  style: const TextStyle(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.w500),
+                  style: TextStyle(
+                    color: Theme.of(context).brightness == Brightness.dark ? Colors.grey[400] : Colors.grey[700],
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
