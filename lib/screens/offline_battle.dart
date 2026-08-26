@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_js/flutter_js.dart';
+
+enum BattleStage { setup, teamPreview, inBattle, ended }
 
 class OfflineBattleScreen extends StatefulWidget {
   const OfflineBattleScreen({super.key});
@@ -15,15 +18,57 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   JavascriptRuntime? _jsRuntime;
   Timer? _logTimer;
   bool _isLoading = true;
+  BattleStage _stage = BattleStage.setup;
+
   final List<String> _rawLogs = [];
-  
   Map<String, dynamic>? _currentRequest;
-  int _p1Slot1Move = 1;
-  int _p1Slot2Move = 1;
+
+  final TextEditingController _p1TeamController = TextEditingController();
+  final TextEditingController _p2TeamController = TextEditingController();
+
+  // Team Preview
+  List<dynamic> _p1TeamList = [];
+  List<dynamic> _p2TeamList = [];
+  final List<int> _selectedPreviewSlots = [];
+
+  // Active State Tracker
+  final Map<String, String> _activeHp = {};
+  final Map<String, String> _activeNames = {};
+
+  // Slot 1 Action State
+  bool _s1IsSwitch = false;
+  int _s1MoveChoice = 1;
+  int _s1Target = 1; // 1: P2a, 2: P2b, -2: P1b
+  int _s1SwitchChoice = 1;
+  bool _s1Mega = false;
+
+  // Slot 2 Action State
+  bool _s2IsSwitch = false;
+  int _s2MoveChoice = 1;
+  int _s2Target = 1;
+  int _s2SwitchChoice = 1;
+  bool _s2Mega = false;
+
+  String _statusMessage = 'Engine initializing...';
+
+  // Teams configured with Mega Evolution Mega Stones
+  static const String _defaultP1Team = 
+      'Charizard @ Charizardite Y|Drought|heatwave,solarbeam,overheat,protect|Timid|0,0,4,252,0,252'
+      ']Tapu Koko @ Life Orb|Electric Surge|thunderbolt,dazzlinggleam,voltswitch,protect|Timid|0,0,4,252,0,252'
+      ']Landorus-Therian @ Choice Scarf|Intimidate|earthquake,rockslide,superpower,uturn|Jolly|0,252,4,0,0,252'
+      ']Incineroar @ Sitrus Berry|Intimidate|fakeout,flareblitz,knockoff,partingshot|Careful|252,0,156,0,100,0';
+
+  static const String _defaultP2Team = 
+      'Metagross @ Metagrossite|Tough Claws|ironhead,zenheadbutt,stompingtantrum,protect|Jolly|0,252,4,0,0,252'
+      ']Tapu Fini @ Wiki Berry|Misty Surge|scald,moonblast,naturepower,protect|Bold|252,0,140,28,0,88'
+      ']Zapdos @ Zap Plate|Pressure|thunderbolt,heatwave,roost,tailwind|Bold|252,0,116,68,60,12'
+      ']Amoonguss @ Rocky Helmet|Regenerator|spore,ragepowder,gigadrain,protect|Bold|252,0,156,0,100,0';
 
   @override
   void initState() {
     super.initState();
+    _p1TeamController.text = _defaultP1Team;
+    _p2TeamController.text = _defaultP2Team;
     _initEngine();
   }
 
@@ -36,22 +81,25 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       setState(() {
         _jsRuntime = runtime;
         _isLoading = false;
-        _rawLogs.add('Engine initialized successfully.');
+        _statusMessage = 'Engine ready. Player vs AI mode active.';
       });
-
+      _announce('Engine initialized successfully in Player vs Computer mode.');
       _startLogPolling();
     } catch (e) {
       setState(() {
         _isLoading = false;
-        _rawLogs.add('Error initializing engine: $e');
+        _statusMessage = 'Error initializing engine: $e';
       });
     }
   }
 
+  void _announce(String message) {
+    if (message.isEmpty) return;
+    SemanticsService.announce(message, TextDirection.ltr);
+  }
+
   void _startLogPolling() {
-    _logTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
-      _fetchLogs();
-    });
+    _logTimer = Timer.periodic(const Duration(milliseconds: 250), (_) => _fetchLogs());
   }
 
   void _fetchLogs() {
@@ -62,12 +110,11 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       if (parsed.isNotEmpty) {
         setState(() {
           for (var chunk in parsed) {
-            final lines = chunk.toString().split('\n');
-            for (var line in lines) {
-              if (line.startsWith('|request|')) {
-                _parseRequest(line.substring(9));
-              }
-              _rawLogs.add(line.trim());
+            for (var line in chunk.toString().split('\n')) {
+              final trimmed = line.trim();
+              if (trimmed.isEmpty) continue;
+              _processProtocolLine(trimmed);
+              _rawLogs.add(trimmed);
             }
           }
         });
@@ -77,274 +124,644 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     }
   }
 
+  void _processProtocolLine(String line) {
+    if (line.startsWith('|request|')) {
+      _parseRequest(line.substring(9));
+      return;
+    }
+
+    final parts = line.split('|');
+    if (parts.length < 3) return;
+
+    switch (parts[1]) {
+      case 'poke':
+        if (parts[2] == 'p2') {
+          final p2Mon = parts[3].split(',')[0];
+          if (!_p2TeamList.contains(p2Mon)) _p2TeamList.add(p2Mon);
+        }
+        break;
+      case 'switch':
+      case 'drag':
+        final slot = parts[2].split(':').first;
+        final name = parts[2].split(': ').last;
+        final hp = parts.length > 4 ? parts[4] : '';
+        _activeNames[slot] = name;
+        _activeHp[slot] = hp;
+        _announce('$name entered battle on $slot.');
+        break;
+      case '-mega':
+        final pokemon = parts[2].split(': ').last;
+        final megaStone = parts[3];
+        _announce('$pokemon Mega Evolved into $megaStone!');
+        break;
+      case '-damage':
+        final slot = parts[2].split(':').first;
+        final name = parts[2].split(': ').last;
+        if (parts.length > 3) _activeHp[slot] = parts[3];
+        _announce('$name took damage. Health is now ${parts[3]}.');
+        break;
+      case 'faint':
+        final slot = parts[2].split(':').first;
+        final name = parts[2].split(': ').last;
+        _activeHp[slot] = '0/100';
+        _announce('$name fainted!');
+        break;
+      case 'win':
+        final winner = parts[2];
+        _announce('Battle finished! Winner is $winner.');
+        setState(() {
+          _stage = BattleStage.ended;
+          _statusMessage = 'Battle ended! Winner: $winner';
+        });
+        break;
+    }
+  }
+
   void _parseRequest(String jsonString) {
     if (jsonString.isEmpty) return;
     try {
       final data = jsonDecode(jsonString);
       setState(() {
         _currentRequest = data;
+
+        if (data.containsKey('teamPreview') && data['teamPreview'] == true) {
+          _stage = BattleStage.teamPreview;
+          _p1TeamList = data['side']['pokemon'] ?? [];
+          _selectedPreviewSlots.clear();
+          _statusMessage = 'Team preview active. Choose 4 Pokémon.';
+          _announce('Team preview started. Select 4 Pokémon for your battle lineup.');
+        } else {
+          _stage = BattleStage.inBattle;
+          _s1IsSwitch = false;
+          _s2IsSwitch = false;
+          _s1Mega = false;
+          _s2Mega = false;
+          _s1MoveChoice = 1;
+          _s2MoveChoice = 1;
+          _statusMessage = 'Waiting for player actions...';
+          _announce('New turn requested. Select moves, switches, or Mega Evolutions for active slots.');
+        }
       });
     } catch (e) {
       debugPrint('Error parsing request JSON: $e');
     }
   }
 
-  void _startBattle() {
-    if (_jsRuntime == null) return;
-    _currentRequest = null;
-    
-    // Test VGC 2v2 Teams
-    const p1Team = 'Incineroar||sitrusberry|intimidate|fakeout,flareblitz,knockoff,partingshot|Careful|252,0,156,0,100,0]Urshifu-Rapid-Strike||focussash|unseenfist|surgingstrikes,closecombat,aquajet,detect|Jolly|0,252,4,0,0,252';
-    const p2Team = 'Flutter Mane||boosterenergy|protosynthesis|dazzlinggleam,shadowball,moonblast,protect|Timid|0,0,4,252,0,252]Ogerpon-Hearthflame||hearthflamemask|moldbreaker|ivycudgel,hornleech,spikyshield,followme|Jolly|0,252,4,0,0,252';
+  String _formatTeamSheet(String rawText) {
+    if (rawText.contains(']')) return rawText.trim();
+    List<String> packedMons = [];
+    for (var block in rawText.split(RegExp(r'\r?\n\r?\n'))) {
+      if (block.trim().isEmpty) continue;
+      final lines = block.split('\n');
+      if (lines.isEmpty) continue;
+      String species = lines[0].split('@')[0].trim();
+      String item = lines[0].contains('@') ? lines[0].split('@')[1].trim().toLowerCase().replaceAll(' ', '') : '';
+      String ability = '';
+      List<String> moves = [];
+      for (var line in lines) {
+        final l = line.trim();
+        if (l.startsWith('Ability:')) ability = l.replaceFirst('Ability:', '').trim().toLowerCase().replaceAll(' ', '');
+        if (l.startsWith('-')) moves.add(l.replaceFirst('-', '').trim().toLowerCase().replaceAll(' ', ''));
+      }
+      packedMons.add('$species||$item|$ability|${moves.join(',')}|||');
+    }
+    return packedMons.join(']');
+  }
 
-    _jsRuntime!.evaluate("globalThis.startVGCBattle('gen9vgc2024', '$p1Team', '$p2Team');");
+  void _startMatch() {
+    if (_jsRuntime == null) return;
+    setState(() {
+      _rawLogs.clear();
+      _p2TeamList.clear();
+      _activeHp.clear();
+      _activeNames.clear();
+      _statusMessage = 'Starting Mega Evolution Double Battle...';
+    });
+    _announce('Starting Mega Evolution Double Battle against computer opponent.');
+    // Format set to gen7doublesou which naturally features Mega Evolution without modern gimmicks
+    _jsRuntime!.evaluate("globalThis.startVGCBattle('gen7doublesou', '${_formatTeamSheet(_p1TeamController.text)}', '${_formatTeamSheet(_p2TeamController.text)}');");
+  }
+
+  void _confirmTeamPreviewSelection() {
+    if (_selectedPreviewSlots.length != 4 || _jsRuntime == null) return;
+    final teamOrder = _selectedPreviewSlots.join('');
+    _jsRuntime!.evaluate("globalThis.sendAction('>p1 team $teamOrder');");
+    // Computer auto selects its team setup
+    _jsRuntime!.evaluate("globalThis.sendAction('>p2 team 1234');");
+    _announce('Submitted team selection. Entering battle turn 1.');
   }
 
   void _sendTurnCommands() {
-    if (_jsRuntime == null) return;
+    if (_jsRuntime == null || _currentRequest == null) return;
 
-    // Send choices for both active Pokemon in doubles
-    final p1Action = '>p1 move $_p1Slot1Move 1, move $_p1Slot2Move 1';
-    const p2Action = '>p2 default'; // AI auto-choice for player 2
+    final isForceSwitch = _currentRequest!.containsKey('forceSwitch');
+    String p1Action = '>p1 ';
 
-    _jsRuntime!.evaluate("globalThis.sendAction('$p1Action');");
-    _jsRuntime!.evaluate("globalThis.sendAction('$p2Action');");
+    if (isForceSwitch) {
+      final forceList = _currentRequest!['forceSwitch'] as List<dynamic>;
+      List<String> switchActions = [];
+      for (int i = 0; i < forceList.length; i++) {
+        if (forceList[i] == true) {
+          final choice = (i == 0) ? _s1SwitchChoice : _s2SwitchChoice;
+          switchActions.add('switch $choice');
+        } else {
+          switchActions.add('pass');
+        }
+      }
+      p1Action += switchActions.join(', ');
+    } else {
+      List<String> slotActions = [];
 
-    setState(() {
-      _currentRequest = null; // Clear decision request until next turn
-    });
-  }
+      // Player Slot 1 Action
+      if (_s1IsSwitch) {
+        slotActions.add('switch $_s1SwitchChoice');
+      } else {
+        String act = 'move $_s1MoveChoice $_s1Target';
+        if (_s1Mega) act += ' mega';
+        slotActions.add(act);
+      }
 
-  String _translateShowdownLog(String rawLine) {
-    final parts = rawLine.split('|');
-    if (parts.length < 2) return '';
-
-    switch (parts[1]) {
-      case 'turn':
-        return 'Turn ${parts[2]}';
-      case 'move':
-        final attacker = parts[2].split(': ').last;
-        final move = parts[3];
-        final target = parts.length > 4 && parts[4].isNotEmpty 
-            ? parts[4].split(': ').last 
-            : null;
-        return target != null 
-            ? '$attacker used $move against $target.' 
-            : '$attacker used $move.';
-      case '-damage':
-        final pokemon = parts[2].split(': ').last;
-        final health = parts[3];
-        return '$pokemon health is now at $health.';
-      case 'faint':
-        final pokemon = parts[2].split(': ').last;
-        return '$pokemon fainted!';
-      case 'switch':
-        final pokemon = parts[2].split(': ').last;
-        return 'Opponent sent out $pokemon.';
-      default:
-        return '';
+      // Player Slot 2 Action
+      final activeList = _currentRequest!['active'] as List<dynamic>? ?? [];
+      if (activeList.length > 1) {
+        if (_s2IsSwitch) {
+          slotActions.add('switch $_s2SwitchChoice');
+        } else {
+          String act = 'move $_s2MoveChoice $_s2Target';
+          if (_s2Mega) act += ' mega';
+          slotActions.add(act);
+        }
+      }
+      p1Action += slotActions.join(', ');
     }
+
+    // 1. Send Player 1 action choices
+    _jsRuntime!.evaluate("globalThis.sendAction('$p1Action');");
+
+    // 2. Computer opponent automatically selects random legal move/switch immediately after
+    _jsRuntime!.evaluate("globalThis.sendAction('>p2 default');");
+
+    _announce('Player actions submitted. Computer opponent executing turn.');
+    setState(() => _currentRequest = null);
   }
 
-  void _showBattleSummary(BuildContext context) {
-    final List<String> readableLogs = _rawLogs
-        .map((line) => _translateShowdownLog(line))
-        .where((translated) => translated.isNotEmpty)
-        .toList();
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) {
-        return Scaffold(
-          appBar: AppBar(
-            title: const Text('Accessible Battle Summary'),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () => Navigator.pop(context),
-                tooltip: 'Close Summary',
-              ),
-            ],
-          ),
-          body: readableLogs.isEmpty
-              ? const Center(child: Text('No battle events logged yet.'))
-              : ListView.builder(
-                  itemCount: readableLogs.length,
-                  itemBuilder: (context, index) {
-                    final log = readableLogs[index];
-                    return Semantics(
-                      container: true,
-                      label: log,
-                      child: ListTile(
-                        title: Text(
-                          log,
-                          style: const TextStyle(fontSize: 16),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-        );
-      },
-    );
-  }
-
-  List<dynamic> _getSlotMoves(int slotIndex) {
-    if (_currentRequest == null || !_currentRequest!.containsKey('active')) return [];
-    final activeList = _currentRequest!['active'] as List<dynamic>;
-    if (slotIndex >= activeList.length) return [];
-    return activeList[slotIndex]['moves'] ?? [];
+  List<dynamic> _getAvailableSwitches() {
+    if (_currentRequest == null || !_currentRequest!.containsKey('side')) return [];
+    final pokemonList = _currentRequest!['side']['pokemon'] as List<dynamic>;
+    List<Map<String, dynamic>> choices = [];
+    for (int i = 0; i < pokemonList.length; i++) {
+      final p = pokemonList[i];
+      if (!(p['active'] ?? false) && !p['condition'].toString().startsWith('0')) {
+        choices.add({
+          'slot': i + 1,
+          'name': p['details'].toString().split(',')[0],
+          'condition': p['condition'],
+        });
+      }
+    }
+    return choices;
   }
 
   @override
   void dispose() {
     _logTimer?.cancel();
     _jsRuntime?.dispose();
+    _p1TeamController.dispose();
+    _p2TeamController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final slot1Moves = _getSlotMoves(0);
-    final slot2Moves = _getSlotMoves(1);
-    final bool isTurnReady = _currentRequest != null && slot1Moves.isNotEmpty;
-
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Offline Battle Simulator'),
+        title: const Text('PvC Mega Evolution Simulator'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.description),
-            tooltip: 'Open Accessible Battle Summary',
-            onPressed: () => _showBattleSummary(context),
-          ),
+          if (_stage != BattleStage.setup)
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              tooltip: 'New Battle Setup',
+              onPressed: () => setState(() => _stage = BattleStage.setup),
+            ),
         ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          : Column(
+              children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(12),
+                    child: _buildStageContent(),
+                  ),
+                ),
+                _buildLiveTerminal(),
+                _buildStatusBar(),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildStageContent() {
+    switch (_stage) {
+      case BattleStage.setup:
+        return _buildSetupStage();
+      case BattleStage.teamPreview:
+        return _buildTeamPreviewStage();
+      case BattleStage.inBattle:
+      case BattleStage.ended:
+        return _buildInBattleStage();
+    }
+  }
+
+  Widget _buildSetupStage() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Semantics(
+          header: true,
+          child: const Text('Setup PvC Battle Teams', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        ),
+        const SizedBox(height: 8),
+        Semantics(
+          label: 'Player 1 Team Input Field',
+          hint: 'Enter packed team or text for your player team',
+          child: TextField(
+            controller: _p1TeamController,
+            maxLines: 4,
+            style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+            decoration: const InputDecoration(labelText: 'Player 1 Team (Human)', border: OutlineInputBorder()),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Semantics(
+          label: 'Computer Team Input Field',
+          hint: 'Enter packed team or text for the AI opponent team',
+          child: TextField(
+            controller: _p2TeamController,
+            maxLines: 4,
+            style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+            decoration: const InputDecoration(labelText: 'Player 2 Team (Computer AI)', border: OutlineInputBorder()),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Semantics(
+          button: true,
+          label: 'Start PvC Match',
+          hint: 'Begins team preview for player vs computer battle',
+          child: SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton.icon(
+              onPressed: _startMatch,
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
+              icon: const Icon(Icons.play_arrow, color: Colors.white),
+              label: const Text('Start PvC Battle', style: TextStyle(color: Colors.white)),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTeamPreviewStage() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Semantics(
+          header: true,
+          child: const Text('Team Preview (Choose 4)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        ),
+        const SizedBox(height: 8),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 2.8, crossAxisSpacing: 8, mainAxisSpacing: 8),
+          itemCount: _p1TeamList.length,
+          itemBuilder: (context, index) {
+            final slotIndex = index + 1;
+            final monName = _p1TeamList[index]['details'].toString().split(',')[0];
+            final selectedPos = _selectedPreviewSlots.indexOf(slotIndex);
+            final String posText = selectedPos == -1
+                ? 'Not selected'
+                : (selectedPos < 2 ? 'Lead Position ${selectedPos + 1}' : 'Back Position ${selectedPos - 1}');
+
+            return Semantics(
+              button: true,
+              label: '$monName. Status: $posText.',
+              hint: 'Double tap to toggle selection for line-up.',
+              child: InkWell(
+                onTap: () {
+                  setState(() {
+                    if (selectedPos != -1) {
+                      _selectedPreviewSlots.removeAt(selectedPos);
+                    } else if (_selectedPreviewSlots.length < 4) {
+                      _selectedPreviewSlots.add(slotIndex);
+                    }
+                  });
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: selectedPos != -1 ? Colors.blue.withOpacity(0.3) : Colors.grey[850],
+                    border: Border.all(color: selectedPos != -1 ? Colors.blue : Colors.grey),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  padding: const EdgeInsets.all(6),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Semantics(
-                        button: true,
-                        label: 'Start VGC Double Battle',
-                        child: ElevatedButton(
-                          onPressed: _startBattle,
-                          child: const Text('Start Test Battle'),
-                        ),
-                      ),
-                      Semantics(
-                        button: true,
-                        label: 'Review Accessible Battle Summary',
-                        child: ElevatedButton.icon(
-                          onPressed: () => _showBattleSummary(context),
-                          icon: const Icon(Icons.subtitles),
-                          label: const Text('Summary'),
-                        ),
-                      ),
+                      Text(monName, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                      if (selectedPos != -1) Text(posText, style: const TextStyle(fontSize: 10, color: Colors.amberAccent)),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  if (isTurnReady) ...[
-                    Card(
-                      color: Colors.deepPurple.shade900,
-                      child: Padding(
-                        padding: const EdgeInsets.all(12.0),
-                        child: Column(
-                          children: [
-                            const Text('Choose Actions for Turn',
-                                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-                            const SizedBox(height: 8),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceAround,
-                              children: [
-                                Column(
-                                  children: [
-                                    const Text('Slot 1 Move', style: TextStyle(color: Colors.white70)),
-                                    DropdownButton<int>(
-                                      value: _p1Slot1Move,
-                                      dropdownColor: Colors.grey[850],
-                                      style: const TextStyle(color: Colors.white),
-                                      items: List.generate(slot1Moves.length, (index) {
-                                        return DropdownMenuItem(
-                                          value: index + 1,
-                                          child: Text(slot1Moves[index]['move']),
-                                        );
-                                      }),
-                                      onChanged: (val) {
-                                        if (val != null) setState(() => _p1Slot1Move = val);
-                                      },
-                                    ),
-                                  ],
-                                ),
-                                if (slot2Moves.isNotEmpty)
-                                  Column(
-                                    children: [
-                                      const Text('Slot 2 Move', style: TextStyle(color: Colors.white70)),
-                                      DropdownButton<int>(
-                                        value: _p1Slot2Move,
-                                        dropdownColor: Colors.grey[850],
-                                        style: const TextStyle(color: Colors.white),
-                                        items: List.generate(slot2Moves.length, (index) {
-                                          return DropdownMenuItem(
-                                            value: index + 1,
-                                            child: Text(slot2Moves[index]['move']),
-                                          );
-                                        }),
-                                        onChanged: (val) {
-                                          if (val != null) setState(() => _p1Slot2Move = val);
-                                        },
-                                      ),
-                                    ],
-                                  ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Semantics(
-                              button: true,
-                              label: 'Submit Selected Turn Actions',
-                              child: ElevatedButton(
-                                onPressed: _sendTurnCommands,
-                                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                                child: const Text('Submit Turn Actions'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                ),
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        Semantics(
+          button: true,
+          enabled: _selectedPreviewSlots.length == 4,
+          label: 'Confirm Lineup Selection',
+          hint: 'Submits selected Pokémon and starts battle turn 1',
+          child: SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: ElevatedButton(
+              onPressed: _selectedPreviewSlots.length == 4 ? _confirmTeamPreviewSelection : null,
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700]),
+              child: Text('Confirm Selection (${_selectedPreviewSlots.length}/4)'),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInBattleStage() {
+    final activeList = (_currentRequest != null && _currentRequest!.containsKey('active')) ? _currentRequest!['active'] as List<dynamic> : [];
+    final movesSlot1 = activeList.isNotEmpty ? (activeList[0]['moves'] as List<dynamic>? ?? []) : [];
+    final movesSlot2 = activeList.length > 1 ? (activeList[1]['moves'] as List<dynamic>? ?? []) : [];
+    final availableSwitches = _getAvailableSwitches();
+    final isForceSwitch = _currentRequest != null && _currentRequest!.containsKey('forceSwitch');
+
+    return Column(
+      children: [
+        Card(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Column(
+              children: [
+                _buildActiveSlotRow('Computer', ['p2a', 'p2b'], Colors.redAccent),
+                const Divider(height: 10),
+                _buildActiveSlotRow('Player', ['p1a', 'p1b'], Colors.blueAccent),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        if (_stage == BattleStage.inBattle && _currentRequest != null) ...[
+          Card(
+            margin: EdgeInsets.zero,
+            child: Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Semantics(
+                    header: true,
+                    child: Text(
+                      isForceSwitch ? 'Select Replacement Pokémon' : 'Select Player Turn Actions',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                     ),
-                    const SizedBox(height: 12),
+                  ),
+                  const SizedBox(height: 6),
+                  _buildSlotActionControl(
+                    slotTitle: 'Slot 1 (${_activeNames['p1a'] ?? 'Active 1'})',
+                    moves: movesSlot1,
+                    switches: availableSwitches,
+                    isForceSwitch: isForceSwitch,
+                    isSwitch: _s1IsSwitch,
+                    selectedMove: _s1MoveChoice,
+                    selectedTarget: _s1Target,
+                    selectedSwitch: _s1SwitchChoice,
+                    isMega: _s1Mega,
+                    canMega: activeList.isNotEmpty && (activeList[0]['canMegaEvolve'] == true),
+                    onToggleSwitch: (v) => setState(() => _s1IsSwitch = v),
+                    onMoveChanged: (v) => setState(() => _s1MoveChoice = v!),
+                    onTargetChanged: (v) => setState(() => _s1Target = v!),
+                    onSwitchChanged: (v) => setState(() => _s1SwitchChoice = v!),
+                    onMegaToggled: (v) => setState(() => _s1Mega = v!),
+                  ),
+                  if (!isForceSwitch && movesSlot2.isNotEmpty) ...[
+                    const Divider(height: 16),
+                    _buildSlotActionControl(
+                      slotTitle: 'Slot 2 (${_activeNames['p1b'] ?? 'Active 2'})',
+                      moves: movesSlot2,
+                      switches: availableSwitches,
+                      isForceSwitch: isForceSwitch,
+                      isSwitch: _s2IsSwitch,
+                      selectedMove: _s2MoveChoice,
+                      selectedTarget: _s2Target,
+                      selectedSwitch: _s2SwitchChoice,
+                      isMega: _s2Mega,
+                      canMega: activeList.length > 1 && (activeList[1]['canMegaEvolve'] == true),
+                      onToggleSwitch: (v) => setState(() => _s2IsSwitch = v),
+                      onMoveChanged: (v) => setState(() => _s2MoveChoice = v!),
+                      onTargetChanged: (v) => setState(() => _s2Target = v!),
+                      onSwitchChanged: (v) => setState(() => _s2SwitchChoice = v!),
+                      onMegaToggled: (v) => setState(() => _s2Mega = v!),
+                    ),
                   ],
-                  Expanded(
-                    child: Container(
+                  const SizedBox(height: 10),
+                  Semantics(
+                    button: true,
+                    label: 'Submit Player Actions to Engine',
+                    hint: 'Locks in player actions and triggers opponent turn selection',
+                    child: SizedBox(
                       width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[900],
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: ListView.builder(
-                        itemCount: _rawLogs.length,
-                        itemBuilder: (context, index) {
-                          return Text(
-                            '> ${_rawLogs[index]}',
-                            style: const TextStyle(
-                              color: Colors.greenAccent,
-                              fontFamily: 'monospace',
-                            ),
-                          );
-                        },
+                      child: ElevatedButton(
+                        onPressed: _sendTurnCommands,
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700]),
+                        child: const Text('Submit Actions (Trigger AI)', style: TextStyle(color: Colors.white)),
                       ),
                     ),
                   ),
                 ],
               ),
             ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildSlotActionControl({
+    required String slotTitle,
+    required List<dynamic> moves,
+    required List<dynamic> switches,
+    required bool isForceSwitch,
+    required bool isSwitch,
+    required int selectedMove,
+    required int selectedTarget,
+    required int selectedSwitch,
+    required bool isMega,
+    required bool canMega,
+    required ValueChanged<bool> onToggleSwitch,
+    required ValueChanged<int?> onMoveChanged,
+    required ValueChanged<int?> onTargetChanged,
+    required ValueChanged<int?> onSwitchChanged,
+    required ValueChanged<bool> onMegaToggled,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(slotTitle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+            if (!isForceSwitch && switches.isNotEmpty)
+              Semantics(
+                button: true,
+                label: isSwitch ? 'Switch to Move selection' : 'Switch to Pokémon replacement',
+                child: TextButton(
+                  onPressed: () => onToggleSwitch(!isSwitch),
+                  child: Text(isSwitch ? 'Use Move' : 'Switch Out', style: const TextStyle(fontSize: 11)),
+                ),
+              ),
+          ],
+        ),
+        if (isSwitch || isForceSwitch) ...[
+          Semantics(
+            label: '$slotTitle Switch Pokémon Selection Dropdown',
+            child: DropdownButton<int>(
+              isExpanded: true,
+              value: switches.isEmpty ? 1 : (selectedSwitch > switches.length ? switches.first['slot'] as int : selectedSwitch),
+              items: switches.map((s) {
+                return DropdownMenuItem<int>(
+                  value: s['slot'] as int,
+                  child: Text('Switch to: ${s['name']} (${s['condition']})', style: const TextStyle(fontSize: 11)),
+                );
+              }).toList(),
+              onChanged: onSwitchChanged,
+            ),
+          ),
+        ] else ...[
+          Row(
+            children: [
+              Expanded(
+                child: Semantics(
+                  label: '$slotTitle Move Selection Dropdown',
+                  child: DropdownButton<int>(
+                    isExpanded: true,
+                    value: moves.isEmpty ? 1 : (selectedMove > moves.length ? 1 : selectedMove),
+                    items: List.generate(moves.length, (idx) {
+                      final m = moves[idx];
+                      return DropdownMenuItem<int>(
+                        value: idx + 1,
+                        child: Text(m['move'], style: const TextStyle(fontSize: 11)),
+                      );
+                    }),
+                    onChanged: onMoveChanged,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Semantics(
+                  label: '$slotTitle Opponent Target Selection Dropdown',
+                  child: DropdownButton<int>(
+                    isExpanded: true,
+                    value: selectedTarget,
+                    items: const [
+                      DropdownMenuItem(value: 1, child: Text('Target: Computer 1 (p2a)', style: TextStyle(fontSize: 10))),
+                      DropdownMenuItem(value: 2, child: Text('Target: Computer 2 (p2b)', style: TextStyle(fontSize: 10))),
+                      DropdownMenuItem(value: -2, child: Text('Target: Ally Slot 2', style: TextStyle(fontSize: 10))),
+                    ],
+                    onChanged: onTargetChanged,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (canMega)
+            Semantics(
+              label: 'Mega Evolution Toggle Checkbox',
+              value: isMega ? 'Mega Evolution Enabled' : 'Mega Evolution Disabled',
+              child: Row(
+                children: [
+                  Checkbox(value: isMega, onChanged: (v) => onMegaToggled(v ?? false)),
+                  const Text('Mega Evolve', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.purpleAccent)),
+                ],
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildActiveSlotRow(String title, List<String> slots, Color color) {
+    return Row(
+      children: [
+        SizedBox(width: 70, child: Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: color))),
+        Expanded(
+          child: Row(
+            children: slots.map((slot) {
+              final name = _activeNames[slot] ?? 'Empty';
+              final hp = _activeHp[slot] ?? '100/100';
+              return Expanded(
+                child: Semantics(
+                  container: true,
+                  label: '$title slot $slot: $name, Health $hp',
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 2),
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(color: Colors.grey[850], borderRadius: BorderRadius.circular(4)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(name, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                        Text('HP: $hp', style: const TextStyle(fontSize: 9, fontFamily: 'monospace')),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLiveTerminal() {
+    return Semantics(
+      label: 'Live Battle Protocol Terminal Logs',
+      child: Container(
+        height: 100,
+        width: double.infinity,
+        margin: const EdgeInsets.all(8),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(6)),
+        child: ListView.builder(
+          itemCount: _rawLogs.length,
+          itemBuilder: (context, index) {
+            return Text(_rawLogs[index], style: const TextStyle(color: Colors.greenAccent, fontFamily: 'monospace', fontSize: 10));
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusBar() {
+    return Container(
+      width: double.infinity,
+      color: Colors.grey[900],
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      child: Text(_statusMessage, style: const TextStyle(color: Colors.grey, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
     );
   }
 }
