@@ -106,7 +106,12 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   void _fetchLogs() {
     if (_jsRuntime == null) return;
     try {
-      final String rawJson = _jsRuntime!.evaluate("globalThis.getLogs();").stringResult;
+      final JsEvalResult result = _jsRuntime!.evaluate("globalThis.getLogs();");
+      if (result.isError) {
+        debugPrint("JS Error during getLogs: ${result.stringResult}");
+        return;
+      }
+      final String rawJson = result.stringResult;
       final List<dynamic> parsed = jsonDecode(rawJson);
       if (parsed.isNotEmpty) {
         setState(() {
@@ -219,14 +224,24 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       _p2TeamList.clear();
       _activeHp.clear();
       _activeNames.clear();
-      _statusMessage = 'Starting Mega Evolution Double Battle...';
+      _statusMessage = 'Starting Double Battle...';
     });
-    _announce('Starting Mega Evolution Double Battle against computer opponent.');
+    _announce('Starting Double Battle against computer opponent.');
 
     final p1Packed = jsonEncode(_formatTeamSheet(_p1TeamController.text));
     final p2Packed = jsonEncode(_formatTeamSheet(_p2TeamController.text));
 
-    _jsRuntime!.evaluate("globalThis.startVGCBattle('gen7doublesou', $p1Packed, $p2Packed);");
+    // Uses gen7doublescustomgame to bypass validator crashes on custom teams
+    final JsEvalResult result = _jsRuntime!.evaluate(
+      "globalThis.startVGCBattle('gen7doublescustomgame', $p1Packed, $p2Packed);"
+    );
+
+    if (result.isError) {
+      setState(() {
+        _statusMessage = 'Error starting battle: ${result.stringResult}';
+      });
+      _announce('Failed to start battle due to JS error.');
+    }
   }
 
   void _confirmTeamPreviewSelection() {
