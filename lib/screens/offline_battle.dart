@@ -52,18 +52,115 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
   String _statusMessage = 'Engine initializing...';
 
-  // Default Mega Evolution Team Sheets
-  static const String _defaultP1Team = 
-      'Charizard @ Charizardite Y\nAbility: Drought\nEVs: 252 SpA / 4 SpD / 252 Spe\nTimid Nature\n- Heat Wave\n- Solar Beam\n- Overheat\n- Protect\n\n'
-      'Tapu Koko @ Life Orb\nAbility: Electric Surge\nEVs: 252 SpA / 4 SpD / 252 Spe\nTimid Nature\n- Thunderbolt\n- Dazzling Gleam\n- Volt Switch\n- Protect\n\n'
-      'Landorus-Therian @ Choice Scarf\nAbility: Intimidate\nEVs: 252 Atk / 4 Def / 252 Spe\nJolly Nature\n- Earthquake\n- Rock Slide\n- Superpower\n- U-turn\n\n'
-      'Incineroar @ Sitrus Berry\nAbility: Intimidate\nEVs: 252 HP / 156 Def / 100 SpD\nCareful Nature\n- Fake Out\n- Flare Blitz\n- Knock Off\n- Parting Shot';
+  // Default Gen 9 Custom Team Sheets
+  static const String _defaultP1Team = '''
+Raichu @ Raichunite X
+Ability: Static
+Level: 50
+Gender: F
+EVs: 252 Atk / 252 SpA / 4 Spe
+Hardy Nature
+- Fake Out
+- Rising Voltage
+- Volt Tackle
+- Volt Switch
 
-  static const String _defaultP2Team = 
-      'Metagross @ Metagrossite\nAbility: Tough Claws\nEVs: 252 Atk / 4 Def / 252 Spe\nJolly Nature\n- Iron Head\n- Zen Headbutt\n- Stomping Tantrum\n- Protect\n\n'
-      'Tapu Fini @ Wiki Berry\nAbility: Misty Surge\nEVs: 252 HP / 140 Def / 28 SpA / 88 Spe\nBold Nature\n- Scald\n- Moonblast\n- Nature Power\n- Protect\n\n'
-      'Zapdos @ Zap Plate\nAbility: Pressure\nEVs: 252 HP / 116 Def / 68 SpA / 60 SpD / 12 Spe\nBold Nature\n- Thunderbolt\n- Heat Wave\n- Roost\n- Tailwind\n\n'
-      'Amoonguss @ Rocky Helmet\nAbility: Regenerator\nEVs: 252 HP / 156 Def / 100 SpD\nBold Nature\n- Spore\n- Rage Powder\n- Giga Drain\n- Protect';
+Bellibolt @ Sitrus Berry
+Ability: Electromorphosis
+Level: 50
+Gender: M
+EVs: 252 Def / 4 SpA / 252 SpD
+Bold Nature
+- Soak
+- Light Screen
+- Thunder
+- Parabolic Charge
+
+Pelipper @ Damp Rock
+Ability: Drizzle
+Level: 50
+Gender: M
+EVs: 252 HP / 252 Def / 4 SpD
+Bold Nature
+- Hurricane
+- Tailwind
+- Soak
+- Wide Guard
+
+Archaludon @ Light Clay
+Ability: Stamina
+Level: 50
+Gender: M
+EVs: 252 HP / 252 SpA / 4 Spe
+Modest Nature
+- Dragon Pulse
+- Body Press
+- Electro Shot
+- Steel Beam
+
+Basculegion @ Life Orb
+Ability: Swift Swim
+Level: 50
+Gender: M
+EVs: 4 HP / 252 Atk / 252 Spe
+Jolly Nature
+- Wave Crash
+- Last Respects
+- Soak
+- Protect
+
+Whimsicott @ Focus Sash
+Ability: Prankster
+Level: 50
+Gender: M
+EVs: 252 SpA / 4 SpD / 252 Spe
+Modest Nature
+- Tailwind
+- Worry Seed
+- Beat Up
+- Energy Ball''';
+
+  static const String _defaultP2Team = '''
+Miraidon @ Choice Specs
+Ability: Hadron Engine
+Level: 50
+EVs: 252 SpA / 4 SpD / 252 Spe
+Timid Nature
+- Electro Drift
+- Draco Meteor
+- Volt Switch
+- Dazzling Gleam
+
+Iron Bundle @ Booster Energy
+Ability: Quark Drive
+Level: 50
+EVs: 252 SpA / 4 SpD / 252 Spe
+Timid Nature
+- Freeze-Dry
+- Hydro Pump
+- Icy Wind
+- Protect
+
+Ogerpon-Hearthflame @ Hearthflame Mask
+Ability: Mold Breaker
+Level: 50
+Gender: F
+EVs: 252 Atk / 4 Def / 252 Spe
+Jolly Nature
+- Ivy Cudgel
+- Horn Leech
+- Spiky Shield
+- Follow Me
+
+Flutter Mane @ Focus Sash
+Ability: Protosynthesis
+Level: 50
+EVs: 252 SpA / 4 SpD / 252 Spe
+Timid Nature
+- Moonblast
+- Shadow Ball
+- Dazzling Gleam
+- Protect''';
 
   @override
   void initState() {
@@ -82,9 +179,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       setState(() {
         _jsRuntime = runtime;
         _isLoading = false;
-        _statusMessage = 'Engine ready. Player vs AI mode active.';
+        _statusMessage = 'Engine ready. Gen 9 Custom Doubles Active.';
       });
-      _announce('Engine initialized successfully in Player vs Computer mode.');
+      _announce('Engine initialized successfully in Gen 9 Custom Double Battle mode.');
       _startLogPolling();
     } catch (e) {
       setState(() {
@@ -108,7 +205,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     try {
       final JsEvalResult result = _jsRuntime!.evaluate("globalThis.getLogs();");
       if (result.isError) {
-        debugPrint("JS Error during getLogs: ${result.stringResult}");
+        debugPrint("JS Error: ${result.stringResult}");
         return;
       }
       final String rawJson = result.stringResult;
@@ -131,6 +228,14 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   }
 
   void _processProtocolLine(String line) {
+    if (line.startsWith('|error|')) {
+      setState(() {
+        _statusMessage = line.substring(7);
+      });
+      _announce('Engine Error: ${_statusMessage}');
+      return;
+    }
+
     if (line.startsWith('|request|')) {
       _parseRequest(line.substring(9));
       return;
@@ -205,7 +310,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           _s1MoveChoice = 1;
           _s2MoveChoice = 1;
           _statusMessage = 'Waiting for player actions...';
-          _announce('New turn requested. Select moves, switches, or Mega Evolutions for active slots.');
+          _announce('New turn requested. Select moves, switches, or Mega Evolutions.');
         }
       });
     } catch (e) {
@@ -224,23 +329,23 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       _p2TeamList.clear();
       _activeHp.clear();
       _activeNames.clear();
-      _statusMessage = 'Starting Double Battle...';
+      _statusMessage = 'Starting Gen 9 Custom Double Battle...';
     });
-    _announce('Starting Double Battle against computer opponent.');
+    _announce('Starting Gen 9 Custom Double Battle.');
 
     final p1Packed = jsonEncode(_formatTeamSheet(_p1TeamController.text));
     final p2Packed = jsonEncode(_formatTeamSheet(_p2TeamController.text));
 
-    // Uses gen7doublescustomgame to bypass validator crashes on custom teams
+    // Force gen9doublescustomgame
     final JsEvalResult result = _jsRuntime!.evaluate(
-      "globalThis.startVGCBattle('gen7doublescustomgame', $p1Packed, $p2Packed);"
+      "globalThis.startVGCBattle('gen9doublescustomgame', $p1Packed, $p2Packed);"
     );
 
     if (result.isError) {
       setState(() {
-        _statusMessage = 'Error starting battle: ${result.stringResult}';
+        _statusMessage = 'JS Evaluation Error: ${result.stringResult}';
       });
-      _announce('Failed to start battle due to JS error.');
+      _announce('Failed to start battle.');
     }
   }
 
@@ -333,7 +438,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('PvC Mega Evolution Simulator'),
+        title: const Text('Gen 9 PvC Double Battle'),
         actions: [
           if (_stage != BattleStage.setup)
             IconButton(
@@ -378,7 +483,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       children: [
         Semantics(
           header: true,
-          child: const Text('Setup PvC Battle Teams', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          child: const Text('Setup PvC Gen 9 Teams', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         ),
         const SizedBox(height: 12),
         const Text('Player 1 Team (Human)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blueAccent)),
