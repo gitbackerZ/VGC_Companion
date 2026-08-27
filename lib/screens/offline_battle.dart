@@ -173,15 +173,74 @@ Timid Nature
   Future<void> _initEngine() async {
     try {
       final runtime = getJavascriptRuntime();
+      
+      // 1. Load pure unmodified engine JS asset
       final engineCode = await rootBundle.loadString('assets/engine.js');
       runtime.evaluate(engineCode);
+
+      // 2. Inject runtime wrapper patch directly into global JS scope
+      const String jsPatchCode = '''
+        globalThis.logBuffer = [];
+
+        globalThis.getLogs = function() {
+          const logs = JSON.stringify(globalThis.logBuffer);
+          globalThis.logBuffer = [];
+          return logs;
+        };
+
+        globalThis.sendAction = function(action) {
+          if (!globalThis.battle) return;
+          try {
+            globalThis.battle.choose(action);
+          } catch (err) {
+            globalThis.logBuffer.push('|error| Action Exception: ' + (err.stack || err.message));
+          }
+        };
+
+        globalThis.startVGCBattle = function(formatId, p1Team, p2Team) {
+          globalThis.logBuffer = [];
+          try {
+            const targetFormat = formatId || 'gen9doublescustomgame';
+            
+            // Flexibly bind to Sim or Dex constructor exports
+            const SimModule = globalThis.Sim || globalThis.Dex || {};
+            const BattleConstructor = SimModule.Battle || globalThis.Battle;
+
+            if (!BattleConstructor) {
+              throw new Error('Battle constructor not found on global scope.');
+            }
+
+            globalThis.battle = new BattleConstructor({
+              formatid: targetFormat,
+              p1: { name: 'Player 1', team: p1Team },
+              p2: { name: 'Computer AI', team: p2Team },
+              send: function(type, data) {
+                if (Array.isArray(data)) {
+                  globalThis.logBuffer.push(data.join('\\n'));
+                } else if (data) {
+                  globalThis.logBuffer.push(data);
+                }
+              }
+            });
+
+            globalThis.battle.start();
+          } catch (err) {
+            globalThis.logBuffer.push('|error| Engine Crash: ' + (err.stack || err.message));
+          }
+        };
+      ''';
+
+      final patchResult = runtime.evaluate(jsPatchCode);
+      if (patchResult.isError) {
+        throw Exception('JS Patch Injection Failed: ${patchResult.stringResult}');
+      }
 
       setState(() {
         _jsRuntime = runtime;
         _isLoading = false;
-        _statusMessage = 'Engine ready. Gen 9 Custom Doubles Active.';
+        _statusMessage = 'Engine & Patch ready. Gen 9 Custom Doubles Active.';
       });
-      _announce('Engine initialized successfully in Gen 9 Custom Double Battle mode.');
+      _announce('Engine initialized successfully with Dart-side JS patch.');
       _startLogPolling();
     } catch (e) {
       setState(() {
@@ -336,7 +395,6 @@ Timid Nature
     final p1Packed = jsonEncode(_formatTeamSheet(_p1TeamController.text));
     final p2Packed = jsonEncode(_formatTeamSheet(_p2TeamController.text));
 
-    // Force gen9doublescustomgame
     final JsEvalResult result = _jsRuntime!.evaluate(
       "globalThis.startVGCBattle('gen9doublescustomgame', $p1Packed, $p2Packed);"
     );
