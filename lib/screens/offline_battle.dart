@@ -174,13 +174,38 @@ Timid Nature
     try {
       final runtime = getJavascriptRuntime();
       
-      // 1. Load pure unmodified engine JS asset
-      final engineCode = await rootBundle.loadString('assets/engine.js');
-      runtime.evaluate(engineCode);
+      // 1. Inject CommonJS & Node environment polyfills BEFORE engine.js loads
+      const String envPolyfill = '''
+        var global = globalThis;
+        var window = globalThis;
+        var exports = globalThis;
+        var module = { exports: globalThis };
+        var process = { env: { NODE_ENV: 'production' }, argv: [], cwd: function() { return '/'; } };
+      ''';
+      runtime.evaluate(envPolyfill);
 
-      // 2. Inject runtime wrapper patch directly into global JS scope
+      // 2. Load pure unmodified engine JS asset
+      final engineCode = await rootBundle.loadString('assets/engine.js');
+      final engineResult = runtime.evaluate(engineCode);
+      if (engineResult.isError) {
+        throw Exception('Engine JS Evaluation Failed: ${engineResult.stringResult}');
+      }
+
+      // 3. Inject runtime wrapper patch with dynamic export resolution
       const String jsPatchCode = '''
         globalThis.logBuffer = [];
+
+        globalThis.getBattleConstructor = function() {
+          if (globalThis.Battle) return globalThis.Battle;
+          if (globalThis.Sim && globalThis.Sim.Battle) return globalThis.Sim.Battle;
+          if (globalThis.Dex && globalThis.Dex.Battle) return globalThis.Dex.Battle;
+          if (typeof module !== 'undefined' && module.exports) {
+            if (module.exports.Battle) return module.exports.Battle;
+            if (module.exports.Sim && module.exports.Sim.Battle) return module.exports.Sim.Battle;
+          }
+          if (typeof exports !== 'undefined' && exports.Battle) return exports.Battle;
+          return null;
+        };
 
         globalThis.getLogs = function() {
           const logs = JSON.stringify(globalThis.logBuffer);
@@ -201,10 +226,7 @@ Timid Nature
           globalThis.logBuffer = [];
           try {
             const targetFormat = formatId || 'gen9doublescustomgame';
-            
-            // Flexibly bind to Sim or Dex constructor exports
-            const SimModule = globalThis.Sim || globalThis.Dex || {};
-            const BattleConstructor = SimModule.Battle || globalThis.Battle;
+            const BattleConstructor = globalThis.getBattleConstructor();
 
             if (!BattleConstructor) {
               throw new Error('Battle constructor not found on global scope.');
