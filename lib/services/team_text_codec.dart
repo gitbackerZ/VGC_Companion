@@ -36,7 +36,7 @@ class TeamTextCodec {
         buffer.writeln('Gender: F');
       }
 
-      // EVs (only non-zero EVs)
+      // EVs
       final evParts = <String>[];
       final statKeys = ['HP', 'Atk', 'Def', 'SpA', 'SpD', 'Spe'];
       for (final stat in statKeys) {
@@ -48,9 +48,10 @@ class TeamTextCodec {
       }
 
       // Nature
-      buffer.writeln('${_capitalize(m.nature)} Nature');
+      final cleanNature = _cleanNatureName(m.nature);
+      buffer.writeln('$cleanNature Nature');
 
-      // IVs (only non-31 IVs in Showdown style)
+      // IVs
       final ivParts = <String>[];
       for (final stat in statKeys) {
         final val = m.ivs[stat] ?? 31;
@@ -101,7 +102,7 @@ class TeamTextCodec {
         .map((move) => _cleanId(move!))
         .join(',');
 
-    final nature = _capitalize(m.nature);
+    final nature = _cleanNatureName(m.nature);
 
     final statKeys = ['HP', 'Atk', 'Def', 'SpA', 'SpD', 'Spe'];
     final evsList = statKeys.map((s) => (m.evs[s] ?? 0).toString()).join(',');
@@ -118,6 +119,12 @@ class TeamTextCodec {
 
     // Showdown packed structure: name|species|item|ability|moves|nature|evs|gender|ivs|shiny|level|happiness
     return '$species||$item|$ability|$validMoves|$nature|$evsString|$gender|$ivsString||$level|';
+  }
+
+  static String _cleanNatureName(String text) {
+    String clean = text.replaceAll(RegExp(r'\s*Nature\s*', caseSensitive: false), '').trim();
+    if (clean.isEmpty) return 'Hardy';
+    return _capitalize(clean);
   }
 
   static String _cleanId(String text) {
@@ -146,7 +153,7 @@ class TeamTextCodec {
         final item = parts.length > 2 ? parts[2].trim() : '';
         final ability = parts.length > 3 ? parts[3].trim() : '';
         final movesList = parts.length > 4 ? parts[4].split(',').map((m) => m.trim()).toList() : <String>[];
-        final nature = (parts.length > 5 && parts[5].trim().isNotEmpty) ? parts[5].trim() : 'Hardy';
+        final nature = (parts.length > 5 && parts[5].trim().isNotEmpty) ? _cleanNatureName(parts[5]) : 'Hardy';
 
         final Map<String, int> evs = {'HP': 0, 'Atk': 0, 'Def': 0, 'SpA': 0, 'SpD': 0, 'Spe': 0};
         if (parts.length > 6 && parts[6].trim().isNotEmpty) {
@@ -228,7 +235,7 @@ class TeamTextCodec {
           final g = line.substring('Gender:'.length).trim().toUpperCase();
           gender = g == 'F' ? 'Female' : (g == 'M' ? 'Male' : 'Genderless');
         } else if (line.endsWith('Nature')) {
-          nature = line.replaceAll('Nature', '').trim();
+          nature = _cleanNatureName(line);
         } else if (line.startsWith('EVs:')) {
           final raw = line.substring('EVs:'.length).trim();
           final parts = raw.split('/');
