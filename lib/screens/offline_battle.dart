@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_js/flutter_js.dart';
+import '../services/team_text_codec.dart';
 
 enum BattleStage { setup, teamPreview, inBattle, ended }
 
@@ -51,18 +52,18 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
   String _statusMessage = 'Engine initializing...';
 
-  // Teams configured with Mega Evolution Mega Stones
+  // Default Mega Evolution Team Sheets
   static const String _defaultP1Team = 
-      'Charizard @ Charizardite Y|Drought|heatwave,solarbeam,overheat,protect|Timid|0,0,4,252,0,252'
-      ']Tapu Koko @ Life Orb|Electric Surge|thunderbolt,dazzlinggleam,voltswitch,protect|Timid|0,0,4,252,0,252'
-      ']Landorus-Therian @ Choice Scarf|Intimidate|earthquake,rockslide,superpower,uturn|Jolly|0,252,4,0,0,252'
-      ']Incineroar @ Sitrus Berry|Intimidate|fakeout,flareblitz,knockoff,partingshot|Careful|252,0,156,0,100,0';
+      'Charizard @ Charizardite Y\nAbility: Drought\nEVs: 252 SpA / 4 SpD / 252 Spe\nTimid Nature\n- Heat Wave\n- Solar Beam\n- Overheat\n- Protect\n\n'
+      'Tapu Koko @ Life Orb\nAbility: Electric Surge\nEVs: 252 SpA / 4 SpD / 252 Spe\nTimid Nature\n- Thunderbolt\n- Dazzling Gleam\n- Volt Switch\n- Protect\n\n'
+      'Landorus-Therian @ Choice Scarf\nAbility: Intimidate\nEVs: 252 Atk / 4 Def / 252 Spe\nJolly Nature\n- Earthquake\n- Rock Slide\n- Superpower\n- U-turn\n\n'
+      'Incineroar @ Sitrus Berry\nAbility: Intimidate\nEVs: 252 HP / 156 Def / 100 SpD\nCareful Nature\n- Fake Out\n- Flare Blitz\n- Knock Off\n- Parting Shot';
 
   static const String _defaultP2Team = 
-      'Metagross @ Metagrossite|Tough Claws|ironhead,zenheadbutt,stompingtantrum,protect|Jolly|0,252,4,0,0,252'
-      ']Tapu Fini @ Wiki Berry|Misty Surge|scald,moonblast,naturepower,protect|Bold|252,0,140,28,0,88'
-      ']Zapdos @ Zap Plate|Pressure|thunderbolt,heatwave,roost,tailwind|Bold|252,0,116,68,60,12'
-      ']Amoonguss @ Rocky Helmet|Regenerator|spore,ragepowder,gigadrain,protect|Bold|252,0,156,0,100,0';
+      'Metagross @ Metagrossite\nAbility: Tough Claws\nEVs: 252 Atk / 4 Def / 252 Spe\nJolly Nature\n- Iron Head\n- Zen Headbutt\n- Stomping Tantrum\n- Protect\n\n'
+      'Tapu Fini @ Wiki Berry\nAbility: Misty Surge\nEVs: 252 HP / 140 Def / 28 SpA / 88 Spe\nBold Nature\n- Scald\n- Moonblast\n- Nature Power\n- Protect\n\n'
+      'Zapdos @ Zap Plate\nAbility: Pressure\nEVs: 252 HP / 116 Def / 68 SpA / 60 SpD / 12 Spe\nBold Nature\n- Thunderbolt\n- Heat Wave\n- Roost\n- Tailwind\n\n'
+      'Amoonguss @ Rocky Helmet\nAbility: Regenerator\nEVs: 252 HP / 156 Def / 100 SpD\nBold Nature\n- Spore\n- Rage Powder\n- Giga Drain\n- Protect';
 
   @override
   void initState() {
@@ -208,24 +209,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   }
 
   String _formatTeamSheet(String rawText) {
-    if (rawText.contains(']')) return rawText.trim();
-    List<String> packedMons = [];
-    for (var block in rawText.split(RegExp(r'\r?\n\r?\n'))) {
-      if (block.trim().isEmpty) continue;
-      final lines = block.split('\n');
-      if (lines.isEmpty) continue;
-      String species = lines[0].split('@')[0].trim();
-      String item = lines[0].contains('@') ? lines[0].split('@')[1].trim().toLowerCase().replaceAll(' ', '') : '';
-      String ability = '';
-      List<String> moves = [];
-      for (var line in lines) {
-        final l = line.trim();
-        if (l.startsWith('Ability:')) ability = l.replaceFirst('Ability:', '').trim().toLowerCase().replaceAll(' ', '');
-        if (l.startsWith('-')) moves.add(l.replaceFirst('-', '').trim().toLowerCase().replaceAll(' ', ''));
-      }
-      packedMons.add('$species||$item|$ability|${moves.join(',')}|||');
-    }
-    return packedMons.join(']');
+    return TeamTextCodec.toPackedFormat(rawText);
   }
 
   void _startMatch() {
@@ -238,15 +222,17 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       _statusMessage = 'Starting Mega Evolution Double Battle...';
     });
     _announce('Starting Mega Evolution Double Battle against computer opponent.');
-    // Format set to gen7doublesou which naturally features Mega Evolution without modern gimmicks
-    _jsRuntime!.evaluate("globalThis.startVGCBattle('gen7doublesou', '${_formatTeamSheet(_p1TeamController.text)}', '${_formatTeamSheet(_p2TeamController.text)}');");
+
+    final p1Packed = jsonEncode(_formatTeamSheet(_p1TeamController.text));
+    final p2Packed = jsonEncode(_formatTeamSheet(_p2TeamController.text));
+
+    _jsRuntime!.evaluate("globalThis.startVGCBattle('gen7doublesou', $p1Packed, $p2Packed);");
   }
 
   void _confirmTeamPreviewSelection() {
     if (_selectedPreviewSlots.length != 4 || _jsRuntime == null) return;
     final teamOrder = _selectedPreviewSlots.join('');
     _jsRuntime!.evaluate("globalThis.sendAction('>p1 team $teamOrder');");
-    // Computer auto selects its team setup
     _jsRuntime!.evaluate("globalThis.sendAction('>p2 team 1234');");
     _announce('Submitted team selection. Entering battle turn 1.');
   }
@@ -295,10 +281,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       p1Action += slotActions.join(', ');
     }
 
-    // 1. Send Player 1 action choices
     _jsRuntime!.evaluate("globalThis.sendAction('$p1Action');");
-
-    // 2. Computer opponent automatically selects random legal move/switch immediately after
     _jsRuntime!.evaluate("globalThis.sendAction('>p2 default');");
 
     _announce('Player actions submitted. Computer opponent executing turn.');
@@ -382,32 +365,44 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           header: true,
           child: const Text('Setup PvC Battle Teams', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
+        const Text('Player 1 Team (Human)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blueAccent)),
+        const SizedBox(height: 4),
         Semantics(
-          label: 'Player 1 Team Input Field',
-          hint: 'Enter packed team or text for your player team',
+          label: 'Player 1 Human Team Input Text Area',
+          hint: 'Paste standard Pokémon Showdown export or packed team text for your team',
           child: TextField(
             controller: _p1TeamController,
-            maxLines: 4,
+            maxLines: 5,
             style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
-            decoration: const InputDecoration(labelText: 'Player 1 Team (Human)', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: 'Player 1 Team Sheet',
+              hintText: 'Paste standard Showdown team sheet here...',
+              border: OutlineInputBorder(),
+            ),
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
+        const Text('Player 2 Team (Computer AI)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.redAccent)),
+        const SizedBox(height: 4),
         Semantics(
-          label: 'Computer Team Input Field',
-          hint: 'Enter packed team or text for the AI opponent team',
+          label: 'Player 2 Computer AI Team Input Text Area',
+          hint: 'Paste standard Pokémon Showdown export or packed team text for the computer opponent',
           child: TextField(
             controller: _p2TeamController,
-            maxLines: 4,
+            maxLines: 5,
             style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
-            decoration: const InputDecoration(labelText: 'Player 2 Team (Computer AI)', border: OutlineInputBorder()),
+            decoration: const InputDecoration(
+              labelText: 'Computer Team Sheet',
+              hintText: 'Paste standard Showdown team sheet here...',
+              border: OutlineInputBorder(),
+            ),
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
         Semantics(
           button: true,
-          label: 'Start PvC Match',
+          label: 'Start Player versus Computer Battle',
           hint: 'Begins team preview for player vs computer battle',
           child: SizedBox(
             width: double.infinity,
@@ -416,7 +411,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               onPressed: _startMatch,
               style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
               icon: const Icon(Icons.play_arrow, color: Colors.white),
-              label: const Text('Start PvC Battle', style: TextStyle(color: Colors.white)),
+              label: const Text('Start PvC Battle', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             ),
           ),
         ),
