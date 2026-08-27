@@ -24,7 +24,10 @@ jobs:
 
       - run: flutter pub get
 
-      - run: flutter build apk --release -- --max-workers=2
+      - name: Build Release APK
+        run: flutter build apk --release
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.workers.max=2 -Dorg.gradle.parallel=false"
 
       - uses: actions/upload-artifact@v4
         with:
