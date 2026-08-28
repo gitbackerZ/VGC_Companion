@@ -89,7 +89,7 @@ class TeamTextCodec {
       final members = decodeTeam(trimmed);
       return encodePackedTeam(members);
     } catch (_) {
-      return trimmed;
+      return '';
     }
   }
 
@@ -126,6 +126,10 @@ class TeamTextCodec {
   static List<TeamMember> decodeTeam(String text) {
     final List<TeamMember> result = [];
     final trimmed = text.trim();
+
+    if (trimmed.isEmpty) {
+      throw const FormatException('Team text is empty.');
+    }
 
     if (trimmed.contains(']')) {
       final packedBlocks = trimmed.split(']');
@@ -178,6 +182,10 @@ class TeamTextCodec {
           ));
         }
       }
+
+      if (result.isEmpty) {
+        throw const FormatException('No valid Pokémon found in packed format.');
+      }
       return result;
     }
 
@@ -186,6 +194,10 @@ class TeamTextCodec {
     for (final block in blocks) {
       if (block.trim().isEmpty) continue;
       final lines = block.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
+
+      // Find the first non-move line to use as the header
+      final headerIndex = lines.indexWhere((line) => !line.startsWith('-'));
+      if (headerIndex == -1) continue; // Ignore blocks containing only moves
 
       String? species;
       String? heldItem;
@@ -201,7 +213,7 @@ class TeamTextCodec {
       for (int i = 0; i < lines.length; i++) {
         final line = lines[i];
 
-        if (i == 0) {
+        if (i == headerIndex) {
           final headerData = _parseHeaderLine(line);
           species = headerData['species'];
           heldItem = headerData['item'];
@@ -251,7 +263,7 @@ class TeamTextCodec {
         }
       }
 
-      if (species != null && species.isNotEmpty) {
+      if (species != null && species.isNotEmpty && !species.startsWith('-')) {
         result.add(TeamMember(
           name: species,
           pokedexNumber: 0,
