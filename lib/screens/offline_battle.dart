@@ -138,6 +138,12 @@ Timid Nature
       const String jsPatchCode = '''
         globalThis.logBuffer = [];
 
+        globalThis.toID = function(text) {
+          if (text && text.id) return text.id;
+          if (typeof text !== 'string' && typeof text !== 'number') return '';
+          return ('' + text).toLowerCase().replace(/[^a-z0-9]/g, '');
+        };
+
         globalThis.getBattleConstructor = function() {
           if (globalThis.Battle) return globalThis.Battle;
           if (globalThis.Sim && globalThis.Sim.Battle) return globalThis.Sim.Battle;
@@ -177,23 +183,22 @@ Timid Nature
           if (!teamData) return [];
           if (Array.isArray(teamData)) return teamData;
 
-          // 1. Attempt native Showdown unpacker
+          const dex = globalThis.getDexObject();
+
+          // 1. Native Dex Unpacker
           try {
-            const dex = globalThis.getDexObject();
+            if (dex && typeof dex.unpackTeam === 'function' && typeof teamData === 'string') {
+              const res = dex.unpackTeam(teamData);
+              if (Array.isArray(res) && res.length > 0) return res;
+            }
             const TeamsObj = globalThis.Teams || (dex && dex.teams) || (globalThis.PokemonShowdown && globalThis.PokemonShowdown.Teams);
-            if (TeamsObj) {
-              if (typeof TeamsObj.unpack === 'function' && typeof teamData === 'string' && teamData.includes('|')) {
-                const res = TeamsObj.unpack(teamData);
-                if (Array.isArray(res) && res.length > 0) return res;
-              }
-              if (typeof TeamsObj.import === 'function' && typeof teamData === 'string' && teamData.includes('\\n')) {
-                const res = TeamsObj.import(teamData);
-                if (Array.isArray(res) && res.length > 0) return res;
-              }
+            if (TeamsObj && typeof TeamsObj.unpack === 'function' && typeof teamData === 'string') {
+              const res = TeamsObj.unpack(teamData);
+              if (Array.isArray(res) && res.length > 0) return res;
             }
           } catch (e) {}
 
-          // 2. Pure JS Unpacker for Packed Format Strings ("Mon1]Mon2...")
+          // 2. Pure JS Unpacker for Packed Format ("Mon1]Mon2...")
           if (typeof teamData === 'string' && teamData.includes('|')) {
             const team = [];
             const blocks = teamData.split(']');
@@ -204,9 +209,9 @@ Timid Nature
               
               const name = parts[0] || '';
               const species = parts[1] || name;
-              const item = parts[2] || '';
-              const ability = parts[3] || '';
-              const moves = parts[4] ? parts[4].split(',').filter(Boolean) : [];
+              const item = globalThis.toID(parts[2] || '');
+              const ability = globalThis.toID(parts[3] || '');
+              const moves = parts[4] ? parts[4].split(',').map(globalThis.toID).filter(Boolean) : [];
               const nature = parts[5] || 'Hardy';
               
               const evParts = parts[6] ? parts[6].split(',') : [];
@@ -236,7 +241,7 @@ Timid Nature
               if (species || name) {
                 team.push({
                   name: name || species,
-                  species: species || name,
+                  species: globalThis.toID(species || name),
                   item: item,
                   ability: ability,
                   moves: moves,
@@ -251,7 +256,7 @@ Timid Nature
             if (team.length > 0) return team;
           }
 
-          // 3. Pure JS Fallback Importer for Standard Multiline Text
+          // 3. Fallback Multiline Importer
           if (typeof teamData === 'string') {
             const team = [];
             const blocks = teamData.split(/\\n\\s*\\n/);
@@ -308,16 +313,16 @@ Timid Nature
                     }
                   });
                 } else if (line.startsWith('-')) {
-                  moves.push(line.substring(1).trim());
+                  moves.push(globalThis.toID(line.substring(1).trim()));
                 }
               }
 
               if (species) {
                 team.push({
                   name: species,
-                  species: species,
-                  item: item,
-                  ability: ability,
+                  species: globalThis.toID(species),
+                  item: globalThis.toID(item),
+                  ability: globalThis.toID(ability),
                   moves: moves,
                   nature: nature,
                   evs: evs,
@@ -346,15 +351,16 @@ Timid Nature
               throw new Error('Player 2 team is empty or invalid.');
             }
 
-            const targetFormat = formatId || 'gen9doublescustomgame';
             const BattleConstructor = globalThis.getBattleConstructor();
-
             if (!BattleConstructor) {
               throw new Error('Battle constructor not found on global scope.');
             }
 
+            const targetFormat = formatId || 'gen9customgame';
+
             globalThis.battle = new BattleConstructor({
               formatid: targetFormat,
+              gameType: 'doubles',
               p1: { name: 'Player 1', team: p1Team },
               p2: { name: 'Computer AI', team: p2Team },
               send: function(type, data) {
@@ -496,8 +502,8 @@ Timid Nature
           _stage = BattleStage.teamPreview;
           _p1TeamList = data['side']['pokemon'] ?? [];
           _selectedPreviewSlots.clear();
-          _statusMessage = 'Team preview active. Choose 4 Pokémon.';
-          _announce('Team preview started. Select 4 Pokémon for your battle lineup.');
+          _statusMessage = 'Team preview active. Choose Pokémon.';
+          _announce('Team preview started.');
         } else {
           _stage = BattleStage.inBattle;
           _s1IsSwitch = false;
@@ -507,7 +513,7 @@ Timid Nature
           _s1MoveChoice = 1;
           _s2MoveChoice = 1;
           _statusMessage = 'Waiting for player actions...';
-          _announce('New turn requested. Select moves, switches, or Mega Evolutions.');
+          _announce('New turn requested.');
         }
       });
     } catch (e) {
@@ -530,7 +536,7 @@ Timid Nature
     final p2Packed = jsonEncode(TeamTextCodec.toPackedFormat(_p2TeamController.text));
 
     final JsEvalResult result = _jsRuntime!.evaluate(
-      "globalThis.startVGCBattle('gen9doublescustomgame', $p1Packed, $p2Packed);"
+      "globalThis.startVGCBattle('gen9customgame', $p1Packed, $p2Packed);"
     );
 
     if (result.isError) {
