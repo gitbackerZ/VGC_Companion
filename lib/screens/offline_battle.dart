@@ -221,6 +221,7 @@ Timid Nature
           if (globalThis.Dex) return globalThis.Dex;
           if (globalThis.Sim && globalThis.Sim.Dex) return globalThis.Sim.Dex;
           if (typeof module !== 'undefined' && module.exports && module.exports.Dex) return module.exports.Dex;
+          if (globalThis.PokemonShowdown && globalThis.PokemonShowdown.Dex) return globalThis.PokemonShowdown.Dex;
           return null;
         };
 
@@ -235,10 +236,16 @@ Timid Nature
           // 1. Register Item
           dex.data.Items['raichunitex'] = {
             name: "Raichunite X",
-            spritenum: 575,
+            spritenum: 608,
             megaStone: "Raichu-Mega-X",
             megaEvolves: "Raichu",
             itemUser: ["Raichu"],
+            onTakeItem: function(item, pokemon, source) {
+              if ((source && source.baseSpecies.baseSpecies === 'Raichu') || pokemon.baseSpecies.baseSpecies === 'Raichu') {
+                return false;
+              }
+              return true;
+            },
             num: -1001,
             gen: 9,
             exists: true,
@@ -306,10 +313,22 @@ Timid Nature
           }
         };
 
-        globalThis.startVGCBattle = function(formatId, p1Team, p2Team) {
+        globalThis.startVGCBattle = function(formatId, p1RawText, p2RawText) {
           globalThis.logBuffer = [];
           try {
-            globalThis.ensureCustomDexEntries(globalThis.getDexObject());
+            const dex = globalThis.getDexObject();
+            if (globalThis.ensureCustomDexEntries) {
+              globalThis.ensureCustomDexEntries(dex);
+            }
+
+            // Parse teams natively inside JS to preserve custom items/formats
+            const p1Team = (dex && dex.teams && typeof dex.teams.import === 'function') 
+              ? dex.teams.import(p1RawText) 
+              : p1RawText;
+              
+            const p2Team = (dex && dex.teams && typeof dex.teams.import === 'function') 
+              ? dex.teams.import(p2RawText) 
+              : p2RawText;
 
             const targetFormat = formatId || 'gen9doublescustomgame';
             const BattleConstructor = globalThis.getBattleConstructor();
@@ -403,7 +422,7 @@ Timid Nature
       setState(() {
         _statusMessage = line.substring(7);
       });
-      _announce('Engine Error: ${_statusMessage}');
+      _announce('Engine Error: $_statusMessage');
       return;
     }
 
@@ -490,7 +509,11 @@ Timid Nature
   }
 
   String _formatTeamSheet(String rawText) {
-    return TeamTextCodec.toPackedFormat(rawText);
+    try {
+      return TeamTextCodec.toPackedFormat(rawText);
+    } catch (_) {
+      return rawText;
+    }
   }
 
   void _startMatch() {
@@ -504,11 +527,11 @@ Timid Nature
     });
     _announce('Starting Gen 9 Custom Double Battle.');
 
-    final p1Packed = jsonEncode(_formatTeamSheet(_p1TeamController.text));
-    final p2Packed = jsonEncode(_formatTeamSheet(_p2TeamController.text));
+    final p1Raw = jsonEncode(_p1TeamController.text.trim());
+    final p2Raw = jsonEncode(_p2TeamController.text.trim());
 
     final JsEvalResult result = _jsRuntime!.evaluate(
-      "globalThis.startVGCBattle('gen9doublescustomgame', $p1Packed, $p2Packed);"
+      "globalThis.startVGCBattle('gen9doublescustomgame', $p1Raw, $p2Raw);"
     );
 
     if (result.isError) {
