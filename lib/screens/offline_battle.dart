@@ -184,14 +184,29 @@ Timid Nature
       ''';
       runtime.evaluate(envPolyfill);
 
-      // 2. Load pure unmodified engine JS asset
+      // 2. Load core battle engine JS asset
       final engineCode = await rootBundle.loadString('assets/engine.js');
       final engineResult = runtime.evaluate(engineCode);
       if (engineResult.isError) {
         throw Exception('Engine JS Evaluation Failed: ${engineResult.stringResult}');
       }
 
-      // 3. Inject runtime wrapper patch with dynamic export resolution
+      // 3. Load standalone dex.js and learnsets.json if available
+      try {
+        final dexJs = await rootBundle.loadString('assets/js/dex.js');
+        runtime.evaluate(dexJs);
+      } catch (e) {
+        debugPrint('dex.js asset load warning: $e');
+      }
+
+      try {
+        final learnsetsJson = await rootBundle.loadString('assets/js/learnsets.json');
+        runtime.evaluate('if (typeof Dex !== "undefined") { Dex.data = Dex.data || {}; Dex.data.Learnsets = $learnsetsJson; }');
+      } catch (e) {
+        debugPrint('learnsets.json asset load warning: $e');
+      }
+
+      // 4. Inject runtime wrapper patch with custom Dex handling and dynamic export resolution
       const String jsPatchCode = '''
         globalThis.logBuffer = [];
 
@@ -205,6 +220,52 @@ Timid Nature
           }
           if (typeof exports !== 'undefined' && exports.Battle) return exports.Battle;
           return null;
+        };
+
+        globalThis.getDexObject = function() {
+          if (globalThis.Dex) return globalThis.Dex;
+          if (globalThis.Sim && globalThis.Sim.Dex) return globalThis.Sim.Dex;
+          if (typeof module !== 'undefined' && module.exports && module.exports.Dex) return module.exports.Dex;
+          return null;
+        };
+
+        globalThis.ensureCustomDexEntries = function() {
+          const dex = globalThis.getDexObject();
+          if (!dex) return;
+          
+          if (dex.data) {
+            dex.data.Items = dex.data.Items || {};
+            dex.data.Pokedex = dex.data.Pokedex || {};
+
+            if (!dex.data.Items['raichunitex']) {
+              dex.data.Items['raichunitex'] = {
+                name: "Raichunite X",
+                spritenum: 575,
+                megaStone: "Raichu-Mega-X",
+                megaEvolves: "Raichu",
+                itemUser: ["Raichu"],
+                num: -1001,
+                gen: 9,
+                exists: true
+              };
+            }
+
+            if (!dex.data.Pokedex['raichumegax']) {
+              dex.data.Pokedex['raichumegax'] = {
+                num: 26,
+                name: "Raichu-Mega-X",
+                baseSpecies: "Raichu",
+                forme: "Mega-X",
+                types: ["Electric", "Fighting"],
+                baseStats: { hp: 60, atk: 120, def: 75, spa: 110, spd: 80, spe: 125 },
+                abilities: { 0: "Lightning Rod" },
+                heightm: 0.8,
+                weightkg: 30.0,
+                eggGroups: ["Field", "Fairy"],
+                requiredItem: "Raichunite X"
+              };
+            }
+          }
         };
 
         globalThis.getLogs = function() {
@@ -225,6 +286,8 @@ Timid Nature
         globalThis.startVGCBattle = function(formatId, p1Team, p2Team) {
           globalThis.logBuffer = [];
           try {
+            globalThis.ensureCustomDexEntries();
+
             const targetFormat = formatId || 'gen9doublescustomgame';
             const BattleConstructor = globalThis.getBattleConstructor();
 
@@ -260,9 +323,9 @@ Timid Nature
       setState(() {
         _jsRuntime = runtime;
         _isLoading = false;
-        _statusMessage = 'Engine & Patch ready. Gen 9 Custom Doubles Active.';
+        _statusMessage = 'Engine & Custom Dex ready. Gen 9 Custom Doubles Active.';
       });
-      _announce('Engine initialized successfully with Dart-side JS patch.');
+      _announce('Engine initialized successfully with custom Dex support.');
       _startLogPolling();
     } catch (e) {
       setState(() {
