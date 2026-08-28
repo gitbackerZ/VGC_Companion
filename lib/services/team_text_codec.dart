@@ -1,7 +1,7 @@
 import '../models/team_member.dart';
 
 class TeamTextCodec {
-  /// Encodes a team into standard Pokémon Showdown text format.
+  /// Encodes a team into standard Pokémon Showdown multiline text format.
   static String encodeTeam(
     List<TeamMember> team, [
     Map<int, Map<String, int>>? baseStatsByIndex,
@@ -79,9 +79,10 @@ class TeamTextCodec {
     return team.map((m) => _memberToPacked(m)).join(']');
   }
 
-  /// Converts standard Showdown text into Showdown Packed format.
+  /// Converts standard Showdown multiline text into Showdown Packed format.
   static String toPackedFormat(String text) {
     final trimmed = text.trim();
+    if (trimmed.isEmpty) return '';
     if (trimmed.contains(']')) return trimmed; // Already in packed format
 
     try {
@@ -121,21 +122,6 @@ class TeamTextCodec {
     return '$species||$item|$ability|$validMoves|$nature|$evsString|$gender|$ivsString||$level|';
   }
 
-  static String _cleanNatureName(String text) {
-    String clean = text.replaceAll(RegExp(r'\s*Nature\s*', caseSensitive: false), '').trim();
-    if (clean.isEmpty) return 'Hardy';
-    return _capitalize(clean);
-  }
-
-  static String _cleanId(String text) {
-    return text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-  }
-
-  static String _capitalize(String text) {
-    if (text.isEmpty) return text;
-    return text.split(RegExp(r'[\s-]')).map((s) => s.isEmpty ? '' : s[0].toUpperCase() + s.substring(1)).join(' ');
-  }
-
   /// Parses Pokémon Showdown formatted text or packed strings into TeamMember instances.
   static List<TeamMember> decodeTeam(String text) {
     final List<TeamMember> result = [];
@@ -167,9 +153,9 @@ class TeamTextCodec {
         final genderRaw = parts.length > 7 ? parts[7].trim().toUpperCase() : '';
         final gender = genderRaw == 'F' ? 'Female' : (genderRaw == 'M' ? 'Male' : 'Genderless');
 
-        int level = 50;
+        int level = 100;
         if (parts.length > 10 && parts[10].trim().isNotEmpty) {
-          level = int.tryParse(parts[10].trim()) ?? 50;
+          level = int.tryParse(parts[10].trim()) ?? 100;
         }
 
         List<String?> moves = List.filled(4, null);
@@ -216,12 +202,11 @@ class TeamTextCodec {
         final line = lines[i];
 
         if (i == 0) {
-          if (line.contains('@')) {
-            final parts = line.split('@');
-            species = parts[0].trim();
-            heldItem = parts[1].trim().toLowerCase();
-          } else {
-            species = line.trim();
+          final headerData = _parseHeaderLine(line);
+          species = headerData['species'];
+          heldItem = headerData['item'];
+          if (headerData['gender']!.isNotEmpty) {
+            gender = headerData['gender']!;
           }
           continue;
         }
@@ -286,5 +271,53 @@ class TeamTextCodec {
       throw const FormatException('No valid Pokémon Showdown team blocks found.');
     }
     return result;
+  }
+
+  static Map<String, String> _parseHeaderLine(String line) {
+    String remaining = line.trim();
+    String item = '';
+    String gender = '';
+    String species = '';
+
+    if (remaining.contains('@')) {
+      final parts = remaining.split('@');
+      remaining = parts[0].trim();
+      item = parts.sublist(1).join('@').trim();
+    }
+
+    final genderMatch = RegExp(r'\s*\(([MF])\)$', caseSensitive: false).firstMatch(remaining);
+    if (genderMatch != null) {
+      final g = genderMatch.group(1)!.toUpperCase();
+      gender = g == 'F' ? 'Female' : 'Male';
+      remaining = remaining.substring(0, genderMatch.start).trim();
+    }
+
+    final speciesMatch = RegExp(r'^(.*?)\s*\(([^)]+)\)$').firstMatch(remaining);
+    if (speciesMatch != null) {
+      species = speciesMatch.group(2)!.trim();
+    } else {
+      species = remaining.trim();
+    }
+
+    return {
+      'species': species,
+      'item': item,
+      'gender': gender,
+    };
+  }
+
+  static String _cleanNatureName(String text) {
+    String clean = text.replaceAll(RegExp(r'\s*Nature\s*', caseSensitive: false), '').trim();
+    if (clean.isEmpty) return 'Hardy';
+    return _capitalize(clean);
+  }
+
+  static String _cleanId(String text) {
+    return text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+  }
+
+  static String _capitalize(String text) {
+    if (text.isEmpty) return text;
+    return text.split(RegExp(r'[\s-]')).map((s) => s.isEmpty ? '' : s[0].toUpperCase() + s.substring(1)).join(' ');
   }
 }
