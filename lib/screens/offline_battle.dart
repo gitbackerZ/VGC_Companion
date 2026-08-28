@@ -224,8 +224,8 @@ Timid Nature
           return null;
         };
 
-        globalThis.ensureCustomDexEntries = function() {
-          const dex = globalThis.getDexObject();
+        globalThis.ensureCustomDexEntries = function(targetDex) {
+          const dex = targetDex || globalThis.getDexObject();
           if (!dex) return;
           
           dex.data = dex.data || {};
@@ -241,7 +241,8 @@ Timid Nature
             itemUser: ["Raichu"],
             num: -1001,
             gen: 9,
-            exists: true
+            exists: true,
+            isNonstandard: null
           };
 
           // 2. Register Form Species
@@ -250,13 +251,15 @@ Timid Nature
             name: "Raichu-Mega-X",
             baseSpecies: "Raichu",
             forme: "Mega-X",
+            isMega: true,
             types: ["Electric", "Fighting"],
             baseStats: { hp: 60, atk: 120, def: 75, spa: 110, spd: 80, spe: 125 },
             abilities: { 0: "Lightning Rod" },
             heightm: 0.8,
             weightkg: 30.0,
             eggGroups: ["Field", "Fairy"],
-            requiredItem: "Raichunite X"
+            requiredItem: "Raichunite X",
+            exists: true
           };
 
           // 3. Link form back to base species formes list
@@ -270,13 +273,21 @@ Timid Nature
             }
           }
 
-          // 4. Flush internal lookup caches if they exist
+          // 4. Clear internal lookup caches so fresh objects are loaded
           if (dex.items && dex.items.cache) {
-            dex.items.cache.delete('raichunitex');
+            if (typeof dex.items.cache.clear === 'function') {
+              dex.items.cache.clear();
+            } else if (typeof dex.items.cache.delete === 'function') {
+              dex.items.cache.delete('raichunitex');
+            }
           }
           if (dex.species && dex.species.cache) {
-            dex.species.cache.delete('raichumegax');
-            dex.species.cache.delete('raichu');
+            if (typeof dex.species.cache.clear === 'function') {
+              dex.species.cache.clear();
+            } else if (typeof dex.species.cache.delete === 'function') {
+              dex.species.cache.delete('raichumegax');
+              dex.species.cache.delete('raichu');
+            }
           }
         };
 
@@ -298,7 +309,7 @@ Timid Nature
         globalThis.startVGCBattle = function(formatId, p1Team, p2Team) {
           globalThis.logBuffer = [];
           try {
-            globalThis.ensureCustomDexEntries();
+            globalThis.ensureCustomDexEntries(globalThis.getDexObject());
 
             const targetFormat = formatId || 'gen9doublescustomgame';
             const BattleConstructor = globalThis.getBattleConstructor();
@@ -320,39 +331,8 @@ Timid Nature
               }
             });
 
-            // Re-apply custom dex to the active battle's local Dex instance
             if (globalThis.battle.dex) {
-              const bDex = globalThis.battle.dex;
-              bDex.data.Items['raichunitex'] = {
-                name: "Raichunite X",
-                spritenum: 575,
-                megaStone: "Raichu-Mega-X",
-                megaEvolves: "Raichu",
-                itemUser: ["Raichu"],
-                num: -1001,
-                gen: 9,
-                exists: true
-              };
-              bDex.data.Pokedex['raichumegax'] = {
-                num: 26,
-                name: "Raichu-Mega-X",
-                baseSpecies: "Raichu",
-                forme: "Mega-X",
-                types: ["Electric", "Fighting"],
-                baseStats: { hp: 60, atk: 120, def: 75, spa: 110, spd: 80, spe: 125 },
-                abilities: { 0: "Lightning Rod" },
-                heightm: 0.8,
-                weightkg: 30.0,
-                eggGroups: ["Field", "Fairy"],
-                requiredItem: "Raichunite X"
-              };
-              var base = bDex.species.get('raichu');
-              if (base && base.exists) {
-                base.otherFormes = base.otherFormes || [];
-                if (base.otherFormes.indexOf('Raichu-Mega-X') === -1) {
-                  base.otherFormes.push('Raichu-Mega-X');
-                }
-              }
+              globalThis.ensureCustomDexEntries(globalThis.battle.dex);
             }
 
             globalThis.battle.start();
