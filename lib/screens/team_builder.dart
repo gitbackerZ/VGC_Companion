@@ -911,7 +911,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
   Widget _buildTeamCard(int index) {
     final member = _team[index];
-    final activePanel = _activePanels[member];
     final isCollapsed = _collapsedCards.contains(member);
 
     final typesStr = member.types.join('/');
@@ -927,94 +926,91 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       container: true,
       child: Card(
         margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-        child: Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+        child: InkWell(
+          onTap: () {
+            _flushPendingPanelUpdates(member);
+            setState(() {
+              if (isCollapsed) {
+                _collapsedCards.remove(member);
+              } else {
+                _collapsedCards.add(member);
+                _activePanels[member] = null;
+              }
+            });
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${member.name.toUpperCase()}  $typesStr',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '@$itemStr  lvl.${member.level}',
+                            style: const TextStyle(fontSize: 10, fontFamily: 'monospace'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          '${member.name.toUpperCase()}  $typesStr',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                        _buildEmojiButton(
+                          emoji: '🔼',
+                          semanticLabel: 'Change level for ${member.name}',
+                          onPressed: () => _showLevelDialog(member),
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '@$itemStr  lvl.${member.level}',
-                          style: const TextStyle(fontSize: 10, fontFamily: 'monospace'),
+                        _buildEmojiButton(
+                          emoji: 'Ⓜ️',
+                          semanticLabel: 'Toggle Mega form based on held item for ${member.name}',
+                          onPressed: () => _toggleMegaForm(index),
+                        ),
+                        _buildEmojiButton(
+                          emoji: '🗑️',
+                          semanticLabel: 'Remove ${member.name} from team',
+                          onPressed: () async {
+                            _flushPendingPanelUpdates(member);
+                            final name = member.name;
+                            setState(() => _team.removeAt(index));
+                            await _saveTeam();
+                            _announce('$name removed from team');
+                          },
                         ),
                       ],
                     ),
-                  ),
+                  ],
+                ),
+
+                if (!isCollapsed) ...[
+                  const Divider(height: 12),
+                  Text('Ability: ${member.ability ?? "None"} | Gender: ${member.gender} | Nature: ${member.nature}', style: const TextStyle(fontSize: 10)),
+                  Text('Moves: ${movesStr.isNotEmpty ? movesStr : "None"}', style: const TextStyle(fontSize: 10)),
+                  Text('Total EVs: $totalEvs / 510', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
                   Row(
-                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
-                      _buildEmojiButton(
-                        emoji: '🔼',
-                        semanticLabel: 'Change level for ${member.name}',
-                        onPressed: () => _showLevelDialog(member),
-                      ),
-                      _buildEmojiButton(
-                        emoji: 'Ⓜ️',
-                        semanticLabel: 'Toggle Mega form based on held item for ${member.name}',
-                        onPressed: () => _toggleMegaForm(index),
-                      ),
-                      _buildEmojiButton(
-                        emoji: isCollapsed ? '⬇️' : '⬆️',
-                        semanticLabel: isCollapsed ? 'Expand ${member.name} details' : 'Collapse ${member.name} details',
-                        onPressed: () {
-                          _flushPendingPanelUpdates(member);
-                          setState(() {
-                            if (isCollapsed) {
-                              _collapsedCards.remove(member);
-                            } else {
-                              _collapsedCards.add(member);
-                              _activePanels[member] = null;
-                            }
-                          });
-                        },
-                      ),
-                      _buildEmojiButton(
-                        emoji: '🗑️',
-                        semanticLabel: 'Remove ${member.name} from team',
-                        onPressed: () async {
-                          _flushPendingPanelUpdates(member);
-                          final name = member.name;
-                          setState(() => _team.removeAt(index));
-                          await _saveTeam();
-                          _announce('$name removed from team');
-                        },
-                      ),
+                      _buildPanelToggle('⚙️', 'Details', 'Open details editor for ${member.name}', false, () => _openPanelDialog(member, 'details')),
+                      _buildPanelToggle('⚔️', 'Moves', 'Open move editor for ${member.name}', false, () => _openPanelDialog(member, 'moves')),
+                      _buildPanelToggle('📈', 'EVs', 'Open EV allocation for ${member.name}', false, () => _openPanelDialog(member, 'evs')),
+                      _buildPanelToggle('🎚️', 'IVs', 'Open IV allocation for ${member.name}', false, () => _openPanelDialog(member, 'ivs')),
+                      _buildPanelToggle('📊', 'Stats', 'Show stats dialog for ${member.name}', false, () => _showStats(member)),
                     ],
                   ),
                 ],
-              ),
-
-              if (!isCollapsed) ...[
-                const Divider(height: 12),
-                Text('Ability: ${member.ability ?? "None"} | Gender: ${member.gender} | Nature: ${member.nature}', style: const TextStyle(fontSize: 10)),
-                Text('Moves: ${movesStr.isNotEmpty ? movesStr : "None"}', style: const TextStyle(fontSize: 10)),
-                Text('Total EVs: $totalEvs / 510', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 6),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    _buildPanelToggle('⚙️', 'Details', 'Open details editor for ${member.name}', activePanel == 'details', () => _togglePanel(member, 'details')),
-                    _buildPanelToggle('⚔️', 'Moves', 'Open move editor for ${member.name}', activePanel == 'moves', () => _togglePanel(member, 'moves')),
-                    _buildPanelToggle('📈', 'EVs', 'Open EV allocation for ${member.name}', activePanel == 'evs', () => _togglePanel(member, 'evs')),
-                    _buildPanelToggle('🎚️', 'IVs', 'Open IV allocation for ${member.name}', activePanel == 'ivs', () => _togglePanel(member, 'ivs')),
-                    _buildPanelToggle('📊', 'Stats', 'Show stats dialog for ${member.name}', false, () => _showStats(member)),
-                  ],
-                ),
-                if (activePanel != null) _buildPanelContent(index, activePanel),
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -1055,39 +1051,156 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     );
   }
 
-  void _togglePanel(TeamMember member, String panelName) async {
+  Future<void> _openPanelDialog(TeamMember member, String panelName) async {
     _unfocus();
     _flushPendingPanelUpdates(member);
 
-    final isOpening = _activePanels[member] != panelName;
-
-    setState(() {
-      _activePanels[member] = isOpening ? panelName : null;
-    });
-
-    if (isOpening) {
-      if (panelName == 'evs') {
-        _initialEvs[member] = Map<String, int>.from(member.evs);
-      } else if (panelName == 'ivs') {
-        _initialIvs[member] = Map<String, int>.from(member.ivs);
-      }
-
-      if (!_movesCache.containsKey(member)) {
-        try {
-          final movesData = await _service.getMovesForSpecies(member.name);
-          if (!mounted) return;
-          final moves = movesData.map((m) => m['name'].toString()).toList();
-          setState(() => _movesCache[member] = moves);
-        } catch (_) {}
-      }
-      if (!_abilitiesCache.containsKey(member)) {
-        try {
-          final abilities = await _service.getAbilitiesForPokemon(member.name);
-          if (!mounted) return;
-          setState(() => _abilitiesCache[member] = abilities);
-        } catch (_) {}
-      }
+    if (panelName == 'evs') {
+      _initialEvs[member] = Map<String, int>.from(member.evs);
+    } else if (panelName == 'ivs') {
+      _initialIvs[member] = Map<String, int>.from(member.ivs);
     }
+
+    if (!_movesCache.containsKey(member)) {
+      try {
+        final movesData = await _service.getMovesForSpecies(member.name);
+        if (!mounted) return;
+        final moves = movesData.map((m) => m['name'].toString()).toList();
+        setState(() => _movesCache[member] = moves);
+      } catch (_) {}
+    }
+    if (!_abilitiesCache.containsKey(member)) {
+      try {
+        final abilities = await _service.getAbilitiesForPokemon(member.name);
+        if (!mounted) return;
+        setState(() => _abilitiesCache[member] = abilities);
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+
+    final String title;
+    switch (panelName) {
+      case 'details':
+        title = 'Details for ${member.name}';
+        break;
+      case 'moves':
+        title = 'Moves for ${member.name}';
+        break;
+      case 'evs':
+        title = 'EVs for ${member.name}';
+        break;
+      case 'ivs':
+        title = 'IVs for ${member.name}';
+        break;
+      default:
+        return;
+    }
+
+    await showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          Widget content;
+          switch (panelName) {
+            case 'details':
+              content = DetailsEditorPanel(
+                heldItem: member.heldItem,
+                gender: member.gender,
+                genderRate: member.genderRate,
+                ability: member.ability,
+                abilities: _abilitiesCache[member],
+                nature: member.nature,
+                itemList: _itemList,
+                onChanged: ({heldItem, gender, ability, nature}) async {
+                  if (heldItem != null) {
+                    final trimmed = heldItem.trim();
+                    if (_activePreset == TeamPreset.championsVgc && trimmed.isNotEmpty) {
+                      final isDuplicate = _team.any((m) => m != member && (m.heldItem ?? '').toLowerCase().trim() == trimmed.toLowerCase());
+                      if (isDuplicate) {
+                        _announce('Item Clause: $trimmed is already held by another Pokémon.');
+                        return;
+                      }
+                    }
+                    setState(() => member.heldItem = trimmed);
+                    setDialogState(() {});
+                    _announce('${member.name} is now holding ${trimmed.isEmpty ? "no item" : trimmed}');
+                  }
+                  if (gender != null) {
+                    setState(() => member.gender = gender);
+                    setDialogState(() {});
+                    _announce('${member.name} gender set to $gender');
+                  }
+                  if (ability != null) {
+                    setState(() => member.ability = ability);
+                    setDialogState(() {});
+                    _announce('${member.name} ability change to $ability');
+                  }
+                  if (nature != null) {
+                    setState(() => member.nature = nature);
+                    setDialogState(() {});
+                    _announce('${member.name} nature set to $nature');
+                  }
+                  await _saveTeam();
+                },
+              );
+              break;
+            case 'moves':
+              content = MoveEditorPanel(
+                moves: member.moves,
+                availableMoves: _movesCache[member] ?? [],
+                onChanged: (moves) async {
+                  setState(() => member.moves = moves);
+                  setDialogState(() {});
+                  await _saveTeam();
+                  _announce('${member.name} moveset updated');
+                },
+              );
+              break;
+            case 'evs':
+              content = EvEditorPanel(
+                evs: member.evs,
+                onChanged: (evs) async {
+                  setState(() => member.evs = evs);
+                  setDialogState(() {});
+                  await _saveTeam();
+                },
+              );
+              break;
+            case 'ivs':
+              content = IvEditorPanel(
+                ivs: member.ivs,
+                isLocked: _activePreset == TeamPreset.championsVgc,
+                onChanged: (ivs) async {
+                  if (_activePreset == TeamPreset.championsVgc) return;
+                  setState(() => member.ivs = ivs);
+                  setDialogState(() {});
+                  await _saveTeam();
+                },
+              );
+              break;
+            default:
+              content = const SizedBox.shrink();
+          }
+
+          return AlertDialog(
+            title: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Flexible(child: Text(title, style: const TextStyle(fontSize: 14))),
+                _buildCloseDialogButton(dialogContext),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: content,
+            ),
+          );
+        },
+      ),
+    );
+
+    // Flush after dialog closes (for EV/IV change announcements)
+    _flushPendingPanelUpdates(member);
   }
 
   Future<void> _showStats(TeamMember member) async {
@@ -1099,84 +1212,5 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       if (!mounted) return;
       _announce('Could not load stats.');
     }
-  }
-
-  Widget _buildPanelContent(int index, String panelName) {
-    final member = _team[index];
-
-    if (panelName == 'details') {
-      return DetailsEditorPanel(
-        heldItem: member.heldItem,
-        gender: member.gender,
-        genderRate: member.genderRate,
-        ability: member.ability,
-        abilities: _abilitiesCache[member],
-        nature: member.nature,
-        itemList: _itemList,
-        onChanged: ({heldItem, gender, ability, nature}) async {
-          if (heldItem != null) {
-            final trimmed = heldItem.trim();
-            if (_activePreset == TeamPreset.championsVgc && trimmed.isNotEmpty) {
-              final isDuplicate = _team.any((m) => m != member && (m.heldItem ?? '').toLowerCase().trim() == trimmed.toLowerCase());
-              if (isDuplicate) {
-                _announce('Item Clause: $trimmed is already held by another Pokémon.');
-                return;
-              }
-            }
-            setState(() => member.heldItem = trimmed);
-            _announce('${member.name} is now holding ${trimmed.isEmpty ? "no item" : trimmed}');
-          }
-          if (gender != null) {
-            setState(() => member.gender = gender);
-            _announce('${member.name} gender set to $gender');
-          }
-          if (ability != null) {
-            setState(() => member.ability = ability);
-            _announce('${member.name} ability change to $ability');
-          }
-          if (nature != null) {
-            setState(() => member.nature = nature);
-            _announce('${member.name} nature set to $nature');
-          }
-          await _saveTeam();
-        },
-      );
-    }
-
-    if (panelName == 'moves') {
-      return MoveEditorPanel(
-        moves: member.moves,
-        availableMoves: _movesCache[member] ?? [],
-        onChanged: (moves) async {
-          setState(() => member.moves = moves);
-          await _saveTeam();
-          _announce('${member.name} moveset updated');
-        },
-      );
-    }
-
-    if (panelName == 'evs') {
-      return EvEditorPanel(
-        evs: member.evs,
-        onChanged: (evs) async {
-          setState(() => member.evs = evs);
-          await _saveTeam();
-        },
-      );
-    }
-
-    if (panelName == 'ivs') {
-      return IvEditorPanel(
-        ivs: member.ivs,
-        isLocked: _activePreset == TeamPreset.championsVgc,
-        onChanged: (ivs) async {
-          if (_activePreset == TeamPreset.championsVgc) return;
-          setState(() => member.ivs = ivs);
-          await _saveTeam();
-        },
-      );
-    }
-
-    return const SizedBox.shrink();
   }
 }

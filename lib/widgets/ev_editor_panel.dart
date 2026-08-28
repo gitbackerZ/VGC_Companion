@@ -68,7 +68,9 @@ class EvEditorPanel extends StatelessWidget {
                   onChanged: (val) {
                     final parsed = int.tryParse(val) ?? 0;
                     final updated = Map<String, int>.from(evs);
-                    updated[stat] = parsed.clamp(0, 252);
+                    final otherTotal = totalEvs - currentEv;
+                    final maxAllowed = (510 - otherTotal).clamp(0, 252);
+                    updated[stat] = parsed.clamp(0, maxAllowed);
                     onChanged(updated);
                   },
                 ),
