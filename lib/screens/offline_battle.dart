@@ -53,113 +53,46 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   String _statusMessage = 'Engine initializing...';
 
   static const String _defaultP1Team = '''
-Raichu @ Raichunite X
-Ability: Static
-Level: 50
-Gender: F
-EVs: 252 Atk / 252 SpA / 4 Spe
-Hardy Nature
-- Fake Out
-- Rising Voltage
-- Volt Tackle
-- Volt Switch
-
-Bellibolt @ Sitrus Berry
-Ability: Electromorphosis
-Level: 50
-Gender: M
-EVs: 252 Def / 4 SpA / 252 SpD
-Bold Nature
-- Soak
-- Light Screen
-- Thunder
-- Parabolic Charge
-
-Pelipper @ Damp Rock
-Ability: Drizzle
-Level: 50
-Gender: M
-EVs: 252 HP / 252 Def / 4 SpD
-Bold Nature
-- Hurricane
-- Tailwind
-- Soak
-- Wide Guard
-
-Archaludon @ Light Clay
-Ability: Stamina
-Level: 50
-Gender: M
-EVs: 252 HP / 252 SpA / 4 Spe
-Modest Nature
-- Dragon Pulse
-- Body Press
-- Electro Shot
-- Steel Beam
-
-Basculegion @ Life Orb
-Ability: Swift Swim
-Level: 50
-Gender: M
-EVs: 4 HP / 252 Atk / 252 Spe
-Jolly Nature
-- Wave Crash
-- Last Respects
-- Soak
-- Protect
-
 Whimsicott @ Focus Sash
 Ability: Prankster
 Level: 50
-Gender: M
 EVs: 252 SpA / 4 SpD / 252 Spe
-Modest Nature
+Timid Nature
+- Energy Ball
 - Tailwind
-- Worry Seed
 - Beat Up
-- Energy Ball''';
+- Worry Seed
+
+Urshifu-Rapid-Strike @ Choice Scarf
+Ability: Unseen Fist
+Level: 50
+EVs: 252 Atk / 4 SpD / 252 Spe
+Jolly Nature
+- Surging Strikes
+- Close Combat
+- Aqua Jet
+- U-turn''';
 
   static const String _defaultP2Team = '''
-Miraidon @ Choice Specs
-Ability: Hadron Engine
+Raichu @ Life Orb
+Ability: Lightning Rod
 Level: 50
-EVs: 252 SpA / 4 SpD / 252 Spe
+EVs: 4 HP / 252 SpA / 252 Spe
 Timid Nature
-- Electro Drift
-- Draco Meteor
+- Thunderbolt
 - Volt Switch
-- Dazzling Gleam
-
-Iron Bundle @ Booster Energy
-Ability: Quark Drive
-Level: 50
-EVs: 252 SpA / 4 SpD / 252 Spe
-Timid Nature
-- Freeze-Dry
-- Hydro Pump
-- Icy Wind
+- Fake Out
 - Protect
 
-Ogerpon-Hearthflame @ Hearthflame Mask
-Ability: Mold Breaker
-Level: 50
-Gender: F
-EVs: 252 Atk / 4 Def / 252 Spe
-Jolly Nature
-- Ivy Cudgel
-- Horn Leech
-- Spiky Shield
-- Follow Me
-
-Flutter Mane @ Focus Sash
-Ability: Protosynthesis
+Gholdengo @ Choice Specs
+Ability: Good as Gold
 Level: 50
 EVs: 252 SpA / 4 SpD / 252 Spe
 Timid Nature
-- Moonblast
+- Make It Rain
 - Shadow Ball
-- Dazzling Gleam
-- Protect''';
+- Focus Blast
+- Trick''';
 
   @override
   void initState() {
@@ -225,79 +158,6 @@ Timid Nature
           return null;
         };
 
-        globalThis.ensureCustomDexEntries = function(targetDex) {
-          const dex = targetDex || globalThis.getDexObject();
-          if (!dex) return;
-          
-          dex.data = dex.data || {};
-          dex.data.Items = dex.data.Items || {};
-          dex.data.Pokedex = dex.data.Pokedex || {};
-
-          // 1. Register Item
-          dex.data.Items['raichunitex'] = {
-            name: "Raichunite X",
-            spritenum: 608,
-            megaStone: "Raichu-Mega-X",
-            megaEvolves: "Raichu",
-            itemUser: ["Raichu"],
-            onTakeItem: function(item, pokemon, source) {
-              if ((source && source.baseSpecies.baseSpecies === 'Raichu') || pokemon.baseSpecies.baseSpecies === 'Raichu') {
-                return false;
-              }
-              return true;
-            },
-            num: -1001,
-            gen: 9,
-            exists: true,
-            isNonstandard: null
-          };
-
-          // 2. Register Form Species
-          dex.data.Pokedex['raichumegax'] = {
-            num: 26,
-            name: "Raichu-Mega-X",
-            baseSpecies: "Raichu",
-            forme: "Mega-X",
-            isMega: true,
-            types: ["Electric", "Fighting"],
-            baseStats: { hp: 60, atk: 120, def: 75, spa: 110, spd: 80, spe: 125 },
-            abilities: { 0: "Lightning Rod" },
-            heightm: 0.8,
-            weightkg: 30.0,
-            eggGroups: ["Field", "Fairy"],
-            requiredItem: "Raichunite X",
-            exists: true
-          };
-
-          // 3. Link form back to base species formes list
-          if (dex.species && typeof dex.species.get === 'function') {
-            var base = dex.species.get('raichu');
-            if (base && base.exists) {
-              base.otherFormes = base.otherFormes || [];
-              if (base.otherFormes.indexOf('Raichu-Mega-X') === -1) {
-                base.otherFormes.push('Raichu-Mega-X');
-              }
-            }
-          }
-
-          // 4. Clear internal lookup caches so fresh objects are loaded
-          if (dex.items && dex.items.cache) {
-            if (typeof dex.items.cache.clear === 'function') {
-              dex.items.cache.clear();
-            } else if (typeof dex.items.cache.delete === 'function') {
-              dex.items.cache.delete('raichunitex');
-            }
-          }
-          if (dex.species && dex.species.cache) {
-            if (typeof dex.species.cache.clear === 'function') {
-              dex.species.cache.clear();
-            } else if (typeof dex.species.cache.delete === 'function') {
-              dex.species.cache.delete('raichumegax');
-              dex.species.cache.delete('raichu');
-            }
-          }
-        };
-
         globalThis.getLogs = function() {
           const logs = JSON.stringify(globalThis.logBuffer);
           globalThis.logBuffer = [];
@@ -317,30 +177,174 @@ Timid Nature
           if (!teamData) return [];
           if (Array.isArray(teamData)) return teamData;
 
-          const dex = globalThis.getDexObject();
-          const TeamsObj = globalThis.Teams || (dex && dex.teams) || (globalThis.PokemonShowdown && globalThis.PokemonShowdown.Teams);
+          // 1. Attempt native Showdown unpacker
+          try {
+            const dex = globalThis.getDexObject();
+            const TeamsObj = globalThis.Teams || (dex && dex.teams) || (globalThis.PokemonShowdown && globalThis.PokemonShowdown.Teams);
+            if (TeamsObj) {
+              if (typeof TeamsObj.unpack === 'function' && typeof teamData === 'string' && teamData.includes('|')) {
+                const res = TeamsObj.unpack(teamData);
+                if (Array.isArray(res) && res.length > 0) return res;
+              }
+              if (typeof TeamsObj.import === 'function' && typeof teamData === 'string' && teamData.includes('\\n')) {
+                const res = TeamsObj.import(teamData);
+                if (Array.isArray(res) && res.length > 0) return res;
+              }
+            }
+          } catch (e) {}
 
-          if (TeamsObj) {
-            if (typeof TeamsObj.import === 'function' && typeof teamData === 'string' && teamData.includes('\\n')) {
-              try { return TeamsObj.import(teamData); } catch (e) {}
+          // 2. Pure JS Unpacker for Packed Format Strings ("Mon1]Mon2...")
+          if (typeof teamData === 'string' && teamData.includes('|')) {
+            const team = [];
+            const blocks = teamData.split(']');
+            for (let b = 0; b < blocks.length; b++) {
+              const block = blocks[b].trim();
+              if (!block) continue;
+              const parts = block.split('|');
+              
+              const name = parts[0] || '';
+              const species = parts[1] || name;
+              const item = parts[2] || '';
+              const ability = parts[3] || '';
+              const moves = parts[4] ? parts[4].split(',').filter(Boolean) : [];
+              const nature = parts[5] || 'Hardy';
+              
+              const evParts = parts[6] ? parts[6].split(',') : [];
+              const evs = {
+                hp: parseInt(evParts[0]) || 0,
+                atk: parseInt(evParts[1]) || 0,
+                def: parseInt(evParts[2]) || 0,
+                spa: parseInt(evParts[3]) || 0,
+                spd: parseInt(evParts[4]) || 0,
+                spe: parseInt(evParts[5]) || 0
+              };
+
+              const gender = parts[7] || '';
+
+              const ivParts = parts[8] ? parts[8].split(',') : [];
+              const ivs = {
+                hp: ivParts[0] !== undefined && ivParts[0] !== '' ? parseInt(ivParts[0]) : 31,
+                atk: ivParts[1] !== undefined && ivParts[1] !== '' ? parseInt(ivParts[1]) : 31,
+                def: ivParts[2] !== undefined && ivParts[2] !== '' ? parseInt(ivParts[2]) : 31,
+                spa: ivParts[3] !== undefined && ivParts[3] !== '' ? parseInt(ivParts[3]) : 31,
+                spd: ivParts[4] !== undefined && ivParts[4] !== '' ? parseInt(ivParts[4]) : 31,
+                spe: ivParts[5] !== undefined && ivParts[5] !== '' ? parseInt(ivParts[5]) : 31
+              };
+
+              const level = parseInt(parts[10]) || 50;
+
+              if (species || name) {
+                team.push({
+                  name: name || species,
+                  species: species || name,
+                  item: item,
+                  ability: ability,
+                  moves: moves,
+                  nature: nature,
+                  evs: evs,
+                  ivs: ivs,
+                  gender: gender,
+                  level: level
+                });
+              }
             }
-            if (typeof TeamsObj.unpack === 'function' && typeof teamData === 'string' && teamData.includes('|')) {
-              try { return TeamsObj.unpack(teamData); } catch (e) {}
-            }
+            if (team.length > 0) return team;
           }
-          return teamData;
+
+          // 3. Pure JS Fallback Importer for Standard Multiline Text
+          if (typeof teamData === 'string') {
+            const team = [];
+            const blocks = teamData.split(/\\n\\s*\\n/);
+            for (let b = 0; b < blocks.length; b++) {
+              const lines = blocks[b].split('\\n').map(l => l.trim()).filter(Boolean);
+              if (lines.length === 0) continue;
+
+              let species = '';
+              let item = '';
+              let ability = '';
+              let level = 50;
+              let gender = '';
+              let nature = 'Hardy';
+              const moves = [];
+              const evs = { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };
+              const ivs = { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 };
+
+              for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                if (i === 0) {
+                  let header = line;
+                  if (header.includes('@')) {
+                    const parts = header.split('@');
+                    header = parts[0].trim();
+                    item = parts[1].trim();
+                  }
+                  const gMatch = header.match(/\\s*\\(([MF])\\)\$/i);
+                  if (gMatch) {
+                    gender = gMatch[1].toUpperCase();
+                    header = header.substring(0, gMatch.index).trim();
+                  }
+                  const sMatch = header.match(/^(.*?)\\s*\\(([^)]+)\\)\$/);
+                  if (sMatch) {
+                    species = sMatch[2].trim();
+                  } else {
+                    species = header.trim();
+                  }
+                } else if (line.startsWith('Ability:')) {
+                  ability = line.replace('Ability:', '').trim();
+                } else if (line.startsWith('Level:')) {
+                  level = parseInt(line.replace('Level:', '').trim()) || 50;
+                } else if (line.startsWith('Gender:')) {
+                  gender = line.replace('Gender:', '').trim().toUpperCase();
+                } else if (line.endsWith('Nature')) {
+                  nature = line.replace(/Nature/i, '').trim() || 'Hardy';
+                } else if (line.startsWith('EVs:')) {
+                  const parts = line.replace('EVs:', '').trim().split('/');
+                  parts.forEach(p => {
+                    const tok = p.trim().split(' ');
+                    if (tok.length === 2) {
+                      const val = parseInt(tok[0]) || 0;
+                      const stat = tok[1].toLowerCase();
+                      if (stat in evs) evs[stat] = val;
+                    }
+                  });
+                } else if (line.startsWith('-')) {
+                  moves.push(line.substring(1).trim());
+                }
+              }
+
+              if (species) {
+                team.push({
+                  name: species,
+                  species: species,
+                  item: item,
+                  ability: ability,
+                  moves: moves,
+                  nature: nature,
+                  evs: evs,
+                  ivs: ivs,
+                  gender: gender,
+                  level: level
+                });
+              }
+            }
+            if (team.length > 0) return team;
+          }
+
+          return [];
         };
 
         globalThis.startVGCBattle = function(formatId, p1TeamData, p2TeamData) {
           globalThis.logBuffer = [];
           try {
-            const dex = globalThis.getDexObject();
-            if (globalThis.ensureCustomDexEntries) {
-              globalThis.ensureCustomDexEntries(dex);
-            }
-
             const p1Team = globalThis.parseTeam(p1TeamData);
             const p2Team = globalThis.parseTeam(p2TeamData);
+
+            if (!p1Team || p1Team.length === 0) {
+              throw new Error('Player 1 team is empty or invalid.');
+            }
+            if (!p2Team || p2Team.length === 0) {
+              throw new Error('Player 2 team is empty or invalid.');
+            }
 
             const targetFormat = formatId || 'gen9doublescustomgame';
             const BattleConstructor = globalThis.getBattleConstructor();
@@ -362,10 +366,6 @@ Timid Nature
               }
             });
 
-            if (globalThis.battle.dex) {
-              globalThis.ensureCustomDexEntries(globalThis.battle.dex);
-            }
-
             globalThis.battle.start();
           } catch (err) {
             globalThis.logBuffer.push('|error| Engine Crash: ' + (err.stack || err.message));
@@ -381,9 +381,9 @@ Timid Nature
       setState(() {
         _jsRuntime = runtime;
         _isLoading = false;
-        _statusMessage = 'Engine & Custom Dex ready. Gen 9 Custom Doubles Active.';
+        _statusMessage = 'Engine ready. Gen 9 Custom Doubles Active.';
       });
-      _announce('Engine initialized successfully with custom Dex support.');
+      _announce('Engine initialized successfully.');
       _startLogPolling();
     } catch (e) {
       setState(() {
@@ -462,11 +462,6 @@ Timid Nature
         _activeHp[slot] = hp;
         _announce('$name entered battle on $slot.');
         break;
-      case '-mega':
-        final pokemon = parts[2].split(': ').last;
-        final megaStone = parts[3];
-        _announce('$pokemon Mega Evolved into $megaStone!');
-        break;
       case '-damage':
         final slot = parts[2].split(':').first;
         final name = parts[2].split(': ').last;
@@ -520,14 +515,6 @@ Timid Nature
     }
   }
 
-  String _formatTeamSheet(String rawText) {
-    try {
-      return TeamTextCodec.toPackedFormat(rawText);
-    } catch (_) {
-      return rawText;
-    }
-  }
-
   void _startMatch() {
     if (_jsRuntime == null) return;
     setState(() {
@@ -539,8 +526,8 @@ Timid Nature
     });
     _announce('Starting Gen 9 Custom Double Battle.');
 
-    final p1Packed = jsonEncode(_formatTeamSheet(_p1TeamController.text));
-    final p2Packed = jsonEncode(_formatTeamSheet(_p2TeamController.text));
+    final p1Packed = jsonEncode(TeamTextCodec.toPackedFormat(_p1TeamController.text));
+    final p2Packed = jsonEncode(TeamTextCodec.toPackedFormat(_p2TeamController.text));
 
     final JsEvalResult result = _jsRuntime!.evaluate(
       "globalThis.startVGCBattle('gen9doublescustomgame', $p1Packed, $p2Packed);"
@@ -555,7 +542,7 @@ Timid Nature
   }
 
   void _confirmTeamPreviewSelection() {
-    if (_selectedPreviewSlots.length != 4 || _jsRuntime == null) return;
+    if (_selectedPreviewSlots.length < 2 || _jsRuntime == null) return;
     final teamOrder = _selectedPreviewSlots.join('');
     _jsRuntime!.evaluate("globalThis.sendAction('>p1 team $teamOrder');");
     _jsRuntime!.evaluate("globalThis.sendAction('>p2 team 1234');");
@@ -748,7 +735,7 @@ Timid Nature
       children: [
         Semantics(
           header: true,
-          child: const Text('Team Preview (Choose 4)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          child: const Text('Team Preview (Choose Lineup)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         ),
         const SizedBox(height: 8),
         GridView.builder(
@@ -773,7 +760,7 @@ Timid Nature
                   setState(() {
                     if (selectedPos != -1) {
                       _selectedPreviewSlots.removeAt(selectedPos);
-                    } else if (_selectedPreviewSlots.length < 4) {
+                    } else if (_selectedPreviewSlots.length < _p1TeamList.length) {
                       _selectedPreviewSlots.add(slotIndex);
                     }
                   });
@@ -800,16 +787,16 @@ Timid Nature
         const SizedBox(height: 12),
         Semantics(
           button: true,
-          enabled: _selectedPreviewSlots.length == 4,
+          enabled: _selectedPreviewSlots.length >= 2,
           label: 'Confirm Lineup Selection',
           hint: 'Submits selected Pokémon and starts battle turn 1',
           child: SizedBox(
             width: double.infinity,
             height: 44,
             child: ElevatedButton(
-              onPressed: _selectedPreviewSlots.length == 4 ? _confirmTeamPreviewSelection : null,
+              onPressed: _selectedPreviewSlots.length >= 2 ? _confirmTeamPreviewSelection : null,
               style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700]),
-              child: Text('Confirm Selection (${_selectedPreviewSlots.length}/4)'),
+              child: Text('Confirm Selection (${_selectedPreviewSlots.length}/${_p1TeamList.length})'),
             ),
           ),
         ),
