@@ -30,6 +30,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   final _searchController = TextEditingController();
   final _searchFocusNode = FocusNode();
   final _importController = TextEditingController();
+  final _teamScrollController = ScrollController();
   static const _storageKey = 'saved_team';
 
   TeamPreset _activePreset = TeamPreset.championsVgc;
@@ -61,13 +62,23 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     _searchController.dispose();
     _searchFocusNode.dispose();
     _importController.dispose();
+    _teamScrollController.dispose();
     _service.dispose();
     super.dispose();
   }
 
   void _unfocus() {
     _searchFocusNode.unfocus();
+    FocusManager.instance.primaryFocus?.unfocus();
     FocusScope.of(context).unfocus();
+  }
+
+  void _unfocusAfterFrame() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _unfocus();
+      }
+    });
   }
 
   void _announce(String message) {
@@ -315,6 +326,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           ),
         ),
       );
+      _unfocus();
+      _unfocusAfterFrame();
       if (!mounted || chosen == null) return;
       selectedForm = chosen;
     }
@@ -471,6 +484,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         ],
       ),
     );
+    _unfocus();
+    _unfocusAfterFrame();
   }
 
   Future<void> _showImportDialog() async {
@@ -580,6 +595,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         },
       ),
     );
+    _unfocus();
+    _unfocusAfterFrame();
   }
 
   Future<void> _processImport({required bool replace}) async {
@@ -708,6 +725,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         ],
       ),
     );
+    _unfocus();
+    _unfocusAfterFrame();
   }
 
   Widget _buildCloseDialogButton(BuildContext context) {
@@ -749,6 +768,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     int maxLines = 1,
     TextInputType keyboardType = TextInputType.text,
     Function(String)? onChanged,
+    FocusNode? focusNode,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final fillColor = isDark ? Colors.grey[850] : Colors.grey[200];
@@ -756,6 +776,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
     return TextField(
       controller: controller,
+      focusNode: focusNode,
       maxLines: maxLines,
       keyboardType: keyboardType,
       style: TextStyle(color: textColor, fontSize: 12),
@@ -855,6 +876,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
               padding: const EdgeInsets.fromLTRB(8, 6, 8, 4),
               child: _buildLightGrayTextField(
                 controller: _searchController,
+                focusNode: _searchFocusNode,
                 labelText: 'Search Base Pokémon...',
                 onChanged: _filter,
               ),
@@ -863,6 +885,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
               Expanded(
                 flex: 5,
                 child: ListView.builder(
+                  controller: _teamScrollController,
                   itemCount: _team.length,
                   itemBuilder: (context, index) => _buildTeamCard(index),
                 ),
@@ -1201,6 +1224,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
     // Flush after dialog closes (for EV/IV change announcements)
     _flushPendingPanelUpdates(member);
+    _unfocus();
+    _unfocusAfterFrame();
   }
 
   Future<void> _showStats(TeamMember member) async {
@@ -1212,5 +1237,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       if (!mounted) return;
       _announce('Could not load stats.');
     }
+    _unfocus();
+    _unfocusAfterFrame();
   }
 }
