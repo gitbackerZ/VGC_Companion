@@ -39,7 +39,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   // Slot 1 Action State
   bool _s1IsSwitch = false;
   int _s1MoveChoice = 1;
-  int _s1Target = 1; // 1: P2a, 2: P2b, -2: P1b
+  int _s1Target = 1;
   int _s1SwitchChoice = 1;
   bool _s1Mega = false;
 
@@ -52,7 +52,6 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
   String _statusMessage = 'Engine initializing...';
 
-  // Default Gen 9 Custom Team Sheets
   static const String _defaultP1Team = '''
 Raichu @ Raichunite X
 Ability: Static
@@ -173,8 +172,7 @@ Timid Nature
   Future<void> _initEngine() async {
     try {
       final runtime = getJavascriptRuntime();
-      
-      // 1. Inject CommonJS & Node environment polyfills BEFORE engine.js loads
+
       const String envPolyfill = '''
         var global = globalThis;
         var window = globalThis;
@@ -184,14 +182,12 @@ Timid Nature
       ''';
       runtime.evaluate(envPolyfill);
 
-      // 2. Load core battle engine JS asset
       final engineCode = await rootBundle.loadString('assets/engine.js');
       final engineResult = runtime.evaluate(engineCode);
       if (engineResult.isError) {
         throw Exception('Engine JS Evaluation Failed: ${engineResult.stringResult}');
       }
 
-      // 3. Load standalone dex.js and learnsets.json if available
       try {
         final dexJs = await rootBundle.loadString('assets/js/dex.js');
         runtime.evaluate(dexJs);
@@ -206,7 +202,6 @@ Timid Nature
         debugPrint('learnsets.json asset load warning: $e');
       }
 
-      // 4. Inject runtime wrapper patch with custom Dex handling and dynamic export resolution
       const String jsPatchCode = '''
         globalThis.logBuffer = [];
 
@@ -233,38 +228,55 @@ Timid Nature
           const dex = globalThis.getDexObject();
           if (!dex) return;
           
-          if (dex.data) {
-            dex.data.Items = dex.data.Items || {};
-            dex.data.Pokedex = dex.data.Pokedex || {};
+          dex.data = dex.data || {};
+          dex.data.Items = dex.data.Items || {};
+          dex.data.Pokedex = dex.data.Pokedex || {};
 
-            if (!dex.data.Items['raichunitex']) {
-              dex.data.Items['raichunitex'] = {
-                name: "Raichunite X",
-                spritenum: 575,
-                megaStone: "Raichu-Mega-X",
-                megaEvolves: "Raichu",
-                itemUser: ["Raichu"],
-                num: -1001,
-                gen: 9,
-                exists: true
-              };
-            }
+          // 1. Register Item
+          dex.data.Items['raichunitex'] = {
+            name: "Raichunite X",
+            spritenum: 575,
+            megaStone: "Raichu-Mega-X",
+            megaEvolves: "Raichu",
+            itemUser: ["Raichu"],
+            num: -1001,
+            gen: 9,
+            exists: true
+          };
 
-            if (!dex.data.Pokedex['raichumegax']) {
-              dex.data.Pokedex['raichumegax'] = {
-                num: 26,
-                name: "Raichu-Mega-X",
-                baseSpecies: "Raichu",
-                forme: "Mega-X",
-                types: ["Electric", "Fighting"],
-                baseStats: { hp: 60, atk: 120, def: 75, spa: 110, spd: 80, spe: 125 },
-                abilities: { 0: "Lightning Rod" },
-                heightm: 0.8,
-                weightkg: 30.0,
-                eggGroups: ["Field", "Fairy"],
-                requiredItem: "Raichunite X"
-              };
+          // 2. Register Form Species
+          dex.data.Pokedex['raichumegax'] = {
+            num: 26,
+            name: "Raichu-Mega-X",
+            baseSpecies: "Raichu",
+            forme: "Mega-X",
+            types: ["Electric", "Fighting"],
+            baseStats: { hp: 60, atk: 120, def: 75, spa: 110, spd: 80, spe: 125 },
+            abilities: { 0: "Lightning Rod" },
+            heightm: 0.8,
+            weightkg: 30.0,
+            eggGroups: ["Field", "Fairy"],
+            requiredItem: "Raichunite X"
+          };
+
+          // 3. Link form back to base species formes list
+          if (dex.species && typeof dex.species.get === 'function') {
+            var base = dex.species.get('raichu');
+            if (base && base.exists) {
+              base.otherFormes = base.otherFormes || [];
+              if (base.otherFormes.indexOf('Raichu-Mega-X') === -1) {
+                base.otherFormes.push('Raichu-Mega-X');
+              }
             }
+          }
+
+          // 4. Flush internal lookup caches if they exist
+          if (dex.items && dex.items.cache) {
+            dex.items.cache.delete('raichunitex');
+          }
+          if (dex.species && dex.species.cache) {
+            dex.species.cache.delete('raichumegax');
+            dex.species.cache.delete('raichu');
           }
         };
 
@@ -307,6 +319,41 @@ Timid Nature
                 }
               }
             });
+
+            // Re-apply custom dex to the active battle's local Dex instance
+            if (globalThis.battle.dex) {
+              const bDex = globalThis.battle.dex;
+              bDex.data.Items['raichunitex'] = {
+                name: "Raichunite X",
+                spritenum: 575,
+                megaStone: "Raichu-Mega-X",
+                megaEvolves: "Raichu",
+                itemUser: ["Raichu"],
+                num: -1001,
+                gen: 9,
+                exists: true
+              };
+              bDex.data.Pokedex['raichumegax'] = {
+                num: 26,
+                name: "Raichu-Mega-X",
+                baseSpecies: "Raichu",
+                forme: "Mega-X",
+                types: ["Electric", "Fighting"],
+                baseStats: { hp: 60, atk: 120, def: 75, spa: 110, spd: 80, spe: 125 },
+                abilities: { 0: "Lightning Rod" },
+                heightm: 0.8,
+                weightkg: 30.0,
+                eggGroups: ["Field", "Fairy"],
+                requiredItem: "Raichunite X"
+              };
+              var base = bDex.species.get('raichu');
+              if (base && base.exists) {
+                base.otherFormes = base.otherFormes || [];
+                if (base.otherFormes.indexOf('Raichu-Mega-X') === -1) {
+                  base.otherFormes.push('Raichu-Mega-X');
+                }
+              }
+            }
 
             globalThis.battle.start();
           } catch (err) {
@@ -521,7 +568,6 @@ Timid Nature
     } else {
       List<String> slotActions = [];
 
-      // Player Slot 1 Action
       if (_s1IsSwitch) {
         slotActions.add('switch $_s1SwitchChoice');
       } else {
@@ -530,7 +576,6 @@ Timid Nature
         slotActions.add(act);
       }
 
-      // Player Slot 2 Action
       final activeList = _currentRequest!['active'] as List<dynamic>? ?? [];
       if (activeList.length > 1) {
         if (_s2IsSwitch) {
