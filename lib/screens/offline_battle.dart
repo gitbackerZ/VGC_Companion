@@ -313,7 +313,25 @@ Timid Nature
           }
         };
 
-        globalThis.startVGCBattle = function(formatId, p1RawText, p2RawText) {
+        globalThis.parseTeam = function(teamData) {
+          if (!teamData) return [];
+          if (Array.isArray(teamData)) return teamData;
+
+          const dex = globalThis.getDexObject();
+          const TeamsObj = globalThis.Teams || (dex && dex.teams) || (globalThis.PokemonShowdown && globalThis.PokemonShowdown.Teams);
+
+          if (TeamsObj) {
+            if (typeof TeamsObj.import === 'function' && typeof teamData === 'string' && teamData.includes('\\n')) {
+              try { return TeamsObj.import(teamData); } catch (e) {}
+            }
+            if (typeof TeamsObj.unpack === 'function' && typeof teamData === 'string' && teamData.includes('|')) {
+              try { return TeamsObj.unpack(teamData); } catch (e) {}
+            }
+          }
+          return teamData;
+        };
+
+        globalThis.startVGCBattle = function(formatId, p1TeamData, p2TeamData) {
           globalThis.logBuffer = [];
           try {
             const dex = globalThis.getDexObject();
@@ -321,14 +339,8 @@ Timid Nature
               globalThis.ensureCustomDexEntries(dex);
             }
 
-            // Parse teams natively inside JS to preserve custom items/formats
-            const p1Team = (dex && dex.teams && typeof dex.teams.import === 'function') 
-              ? dex.teams.import(p1RawText) 
-              : p1RawText;
-              
-            const p2Team = (dex && dex.teams && typeof dex.teams.import === 'function') 
-              ? dex.teams.import(p2RawText) 
-              : p2RawText;
+            const p1Team = globalThis.parseTeam(p1TeamData);
+            const p2Team = globalThis.parseTeam(p2TeamData);
 
             const targetFormat = formatId || 'gen9doublescustomgame';
             const BattleConstructor = globalThis.getBattleConstructor();
@@ -527,11 +539,11 @@ Timid Nature
     });
     _announce('Starting Gen 9 Custom Double Battle.');
 
-    final p1Raw = jsonEncode(_p1TeamController.text.trim());
-    final p2Raw = jsonEncode(_p2TeamController.text.trim());
+    final p1Packed = jsonEncode(_formatTeamSheet(_p1TeamController.text));
+    final p2Packed = jsonEncode(_formatTeamSheet(_p2TeamController.text));
 
     final JsEvalResult result = _jsRuntime!.evaluate(
-      "globalThis.startVGCBattle('gen9doublescustomgame', $p1Raw, $p2Raw);"
+      "globalThis.startVGCBattle('gen9doublescustomgame', $p1Packed, $p2Packed);"
     );
 
     if (result.isError) {
