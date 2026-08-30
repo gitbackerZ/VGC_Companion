@@ -101,7 +101,6 @@ Timid Nature
     try {
       final runtime = getJavascriptRuntime();
 
-      // 1. Load raw asset contents
       final engineCode = await rootBundle.loadString('assets/engine.js');
 
       String dexJs = '';
@@ -118,7 +117,6 @@ Timid Nature
         debugPrint('learnsets.json asset load warning: $e');
       }
 
-      // 2. Setup environment polyfills & CommonJS wrappers
       const String polyfillsScript = '''
         globalThis.global = globalThis;
         globalThis.window = globalThis;
@@ -126,11 +124,30 @@ Timid Nature
         globalThis.root = globalThis;
         globalThis.navigator = { userAgent: 'Node.js' };
 
+        if (typeof globalThis.setImmediate === 'undefined') {
+          globalThis.setImmediate = function(fn) {
+            var args = Array.prototype.slice.call(arguments, 1);
+            return setTimeout(function() { fn.apply(null, args); }, 0);
+          };
+        }
+
+        if (typeof globalThis.clearImmediate === 'undefined') {
+          globalThis.clearImmediate = function(id) { clearTimeout(id); };
+        }
+
+        if (typeof globalThis.queueMicrotask === 'undefined') {
+          globalThis.queueMicrotask = function(cb) {
+            Promise.resolve().then(cb).catch(function(e) {
+              setTimeout(function() { throw e; }, 0);
+            });
+          };
+        }
+
         if (!globalThis.process) {
           globalThis.process = {
             env: { NODE_ENV: 'production' },
             argv: [],
-            nextTick: function(cb) { setTimeout(cb, 0); },
+            nextTick: function(cb) { globalThis.setImmediate(cb); },
             cwd: function() { return ''; }
           };
         }
@@ -177,7 +194,7 @@ Timid Nature
           os: { platform: function() { return 'browser'; }, homedir: function() { return ''; } },
           events: function EventEmitter() {},
           crypto: globalThis.crypto || {},
-          buffer: { Buffer: { isBuffer: function() { return false; } } }
+          buffer: { Buffer: { isBuffer: function() { return false; }, from: function() { return []; } } }
         };
 
         if (!globalThis.require) {
@@ -193,21 +210,18 @@ Timid Nature
 
       runtime.evaluate(polyfillsScript);
 
-      // 3. Evaluate engine.js
       final engineEval = runtime.evaluate(engineCode);
       if (engineEval.isError) {
-        throw Exception('engine.js JS Execution Error: ${engineEval.stringResult}');
+        throw Exception('engine.js execution error: ${engineEval.stringResult}');
       }
 
-      // 4. Evaluate dex.js
       if (dexJs.isNotEmpty) {
         final dexEval = runtime.evaluate(dexJs);
         if (dexEval.isError) {
-          debugPrint('dex.js runtime warning: ${dexEval.stringResult}');
+          debugPrint('dex.js execution warning: ${dexEval.stringResult}');
         }
       }
 
-      // 5. Hydrate Learnsets, resolve Battle constructor, and setup helper functions
       final String helperScript = '''
         if (typeof Dex !== "undefined") {
           Dex.data = Dex.data || {};
@@ -215,81 +229,51 @@ Timid Nature
         }
 
         (function resolveBattleConstructor() {
-          function isBattleCtor(fn) {
-            if (typeof fn !== 'function' || fn === Object || fn === Array) return false;
-            if (fn.name === 'Battle') return true;
-            var p = fn.prototype;
-            if (p) {
-              var methods = ['choose', 'setPlayer', 'makeRequest', 'start', 'commitDecisions', 'step', 'init'];
-              for (var i = 0; i < methods.length; i++) {
-                if (typeof p[methods[i]] === 'function') return true;
-              }
-            }
+          function isValidCtor(fn) {
+            if (typeof fn !== 'function') return false;
             try {
+              if (fn.prototype) {
+                var p = fn.prototype;
+                if (typeof p.choose === 'function' || typeof p.makeChoices === 'function' || typeof p.start === 'function' || typeof p.init === 'function') {
+                  return true;
+                }
+              }
               var str = fn.toString();
-              if (str.indexOf('formatid') !== -1 || str.indexOf('commitDecisions') !== -1 || (str.indexOf('p1') !== -1 && str.indexOf('p2') !== -1)) {
+              if (str.indexOf('formatid') !== -1 || str.indexOf('commitDecisions') !== -1 || str.indexOf('Side') !== -1) {
                 return true;
               }
             } catch (e) {}
             return false;
           }
 
-          // 1. Check direct global properties
-          if (isBattleCtor(globalThis.Battle)) return;
-          if (globalThis.Dex && isBattleCtor(globalThis.Dex.Battle)) {
-            globalThis.Battle = globalThis.Dex.Battle;
-            return;
-          }
-          if (globalThis.Sim && isBattleCtor(globalThis.Sim.Battle)) {
-            globalThis.Battle = globalThis.Sim.Battle;
-            return;
-          }
+          var candidates = [
+            globalThis.Battle,
+            globalThis.Dex ? globalThis.Dex.Battle : null,
+            globalThis.Sim ? globalThis.Sim.Battle : null,
+            globalThis.module ? globalThis.module.exports : null,
+            globalThis.module && globalThis.module.exports ? globalThis.module.exports.Battle : null,
+            globalThis.module && globalThis.module.exports ? globalThis.module.exports.Sim ? globalThis.module.exports.Sim.Battle : null : null,
+            globalThis.exports ? globalThis.exports.Battle : null
+          ];
 
-          // 2. Check module.exports (Direct function or Object container)
-          var modExp = globalThis.module ? globalThis.module.exports : null;
-          if (isBattleCtor(modExp)) {
-            globalThis.Battle = modExp;
-            return;
-          }
-          if (modExp && typeof modExp === 'object') {
-            if (isBattleCtor(modExp.Battle)) {
-              globalThis.Battle = modExp.Battle;
+          for (var i = 0; i < candidates.length; i++) {
+            if (isValidCtor(candidates[i])) {
+              globalThis.Battle = candidates[i];
               return;
-            }
-            if (modExp.Sim && isBattleCtor(modExp.Sim.Battle)) {
-              globalThis.Battle = modExp.Sim.Battle;
-              return;
-            }
-            if (modExp.Dex && isBattleCtor(modExp.Dex.Battle)) {
-              globalThis.Battle = modExp.Dex.Battle;
-              return;
-            }
-            if (modExp.default) {
-              if (isBattleCtor(modExp.default)) {
-                globalThis.Battle = modExp.default;
-                return;
-              }
-              if (isBattleCtor(modExp.default.Battle)) {
-                globalThis.Battle = modExp.default.Battle;
-                return;
-              }
             }
           }
 
-          // 3. Deep search global scope and module exports
-          var searchTargets = [modExp, globalThis.Dex, globalThis.Sim, globalThis.exports, globalThis];
+          var searchTargets = [globalThis.module ? globalThis.module.exports : null, globalThis.Dex, globalThis.Sim, globalThis];
           for (var t = 0; t < searchTargets.length; t++) {
             var target = searchTargets[t];
             if (!target || (typeof target !== 'object' && typeof target !== 'function')) continue;
-
             var keys = Object.getOwnPropertyNames(target);
             for (var k = 0; k < keys.length; k++) {
               var key = keys[k];
-              if (key === 'globalThis' || key === 'global' || key === 'window' || key === 'self' || key === 'root') continue;
+              if (key === 'globalThis' || key === 'global' || key === 'window' || key === 'self') continue;
               try {
-                var val = target[key];
-                if (isBattleCtor(val)) {
-                  globalThis.Battle = val;
+                if (isValidCtor(target[key])) {
+                  globalThis.Battle = target[key];
                   return;
                 }
               } catch (e) {}
@@ -312,7 +296,33 @@ Timid Nature
         globalThis.sendAction = function(action) {
           if (!globalThis.battle) return;
           try {
-            globalThis.battle.choose(action);
+            var b = globalThis.battle;
+            var side = null;
+            var cmd = action;
+
+            if (typeof action === 'string' && action.startsWith('>')) {
+              var spaceIdx = action.indexOf(' ');
+              if (spaceIdx !== -1) {
+                side = action.substring(1, spaceIdx);
+                cmd = action.substring(spaceIdx + 1);
+              }
+            }
+
+            if (typeof b.choose === 'function') {
+              if (side) {
+                b.choose(side, cmd);
+              } else {
+                b.choose(cmd);
+              }
+            } else if (typeof b.makeChoices === 'function') {
+              b.makeChoices(cmd);
+            } else if (typeof b.input === 'function') {
+              b.input(action);
+            } else if (typeof b.receive === 'function') {
+              b.receive(action);
+            } else {
+              throw new Error('No valid action handler (choose/makeChoices/input) found on battle instance.');
+            }
           } catch (err) {
             globalThis.logBuffer.push('|error| Action Exception: ' + (err.message || err));
           }
@@ -436,20 +446,7 @@ Timid Nature
 
             let BattleCtor = globalThis.Battle;
             if (typeof BattleCtor !== 'function') {
-              if (globalThis.module && typeof globalThis.module.exports === 'function') {
-                BattleCtor = globalThis.module.exports;
-              } else if (globalThis.module && globalThis.module.exports && typeof globalThis.module.exports.Battle === 'function') {
-                BattleCtor = globalThis.module.exports.Battle;
-              } else if (globalThis.Dex && typeof globalThis.Dex.Battle === 'function') {
-                BattleCtor = globalThis.Dex.Battle;
-              }
-            }
-
-            if (typeof BattleCtor !== 'function') {
-              const bType = typeof globalThis.Battle;
-              const modType = globalThis.module ? typeof globalThis.module.exports : 'none';
-              const keys = Object.getOwnPropertyNames(globalThis).join(', ');
-              throw new Error('Battle constructor invalid on globalThis (type: ' + bType + ', modExportType: ' + modType + '). Global Keys: [' + keys + ']');
+              throw new Error('Battle constructor resolution failed. Value is ' + (typeof BattleCtor));
             }
 
             globalThis.battle = new BattleCtor({
@@ -466,7 +463,11 @@ Timid Nature
               }
             });
 
-            globalThis.battle.start();
+            if (typeof globalThis.battle.start === 'function') {
+              globalThis.battle.start();
+            } else if (typeof globalThis.battle.init === 'function') {
+              globalThis.battle.init();
+            }
           } catch (err) {
             const errMsg = (err && err.message) ? err.message : String(err);
             globalThis.logBuffer.push('|error| Engine Crash: ' + errMsg);
