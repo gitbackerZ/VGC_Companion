@@ -26,23 +26,19 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   final TextEditingController _p1TeamController = TextEditingController();
   final TextEditingController _p2TeamController = TextEditingController();
 
-  // Team Preview State
   List<dynamic> _p1TeamList = [];
   List<dynamic> _p2TeamList = [];
   final List<int> _selectedPreviewSlots = [];
 
-  // Active State Tracker
   final Map<String, String> _activeHp = {};
   final Map<String, String> _activeNames = {};
 
-  // Slot 1 Action State
   bool _s1IsSwitch = false;
   int _s1MoveChoice = 1;
   int _s1Target = 1;
   int _s1SwitchChoice = 1;
   bool _s1Mega = false;
 
-  // Slot 2 Action State
   bool _s2IsSwitch = false;
   int _s2MoveChoice = 1;
   int _s2Target = 1;
@@ -105,7 +101,6 @@ Timid Nature
     try {
       final runtime = getJavascriptRuntime();
 
-      // Load files from assets
       final engineCode = await rootBundle.loadString('assets/engine.js');
 
       String dexJs = '';
@@ -122,12 +117,12 @@ Timid Nature
         debugPrint('learnsets.json asset load warning: $e');
       }
 
-      // Unified JS Context Script to guarantee shared context and exports
       final String combinedJsScript = '''
-        // 1. Environment Polyfills
+        // 1. Core Polyfills
         globalThis.global = globalThis;
         globalThis.window = globalThis;
         globalThis.self = globalThis;
+        globalThis.navigator = { userAgent: 'Node.js' };
 
         if (!globalThis.process) {
           globalThis.process = {
@@ -138,98 +133,114 @@ Timid Nature
           };
         }
 
-        globalThis.exports = {};
-        globalThis.module = { exports: globalThis.exports };
+        if (typeof globalThis.TextEncoder === 'undefined') {
+          globalThis.TextEncoder = function TextEncoder() {};
+          globalThis.TextEncoder.prototype.encode = function(s) {
+            var arr = new Uint8Array(s.length);
+            for (var i = 0; i < s.length; i++) arr[i] = s.charCodeAt(i);
+            return arr;
+          };
+        }
+
+        if (typeof globalThis.TextDecoder === 'undefined') {
+          globalThis.TextDecoder = function TextDecoder() {};
+          globalThis.TextDecoder.prototype.decode = function(arr) {
+            return String.fromCharCode.apply(null, arr);
+          };
+        }
+
+        // 2. Setup Dedicated Export Sandbox
+        var rootExports = {};
+        var rootModule = { exports: rootExports };
+        globalThis.exports = rootExports;
+        globalThis.module = rootModule;
 
         if (!globalThis.require) {
           globalThis.require = function(id) {
-            if (id === 'fs' || id === 'path' || id === 'crypto' || id === 'util') return {};
+            if (id === 'fs' || id === 'path' || id === 'crypto' || id === 'util' || id === 'os') return {};
             if (globalThis[id]) return globalThis[id];
             return globalThis.exports || {};
           };
         }
 
-        // 2. Load Core Engine Source
-        $engineCode
+        globalThis.logBuffer = [];
 
-        // 3. Load Dex Data
-        $dexJs
+        // 3. Evaluate Engine Code safely
+        try {
+          $engineCode
+        } catch (err) {
+          globalThis.logBuffer.push('|error| engine.js Execution Exception: ' + (err.stack || err.message || err));
+        }
 
-        // 4. Load Learnsets Data
+        // 4. Evaluate Dex & Learnsets
+        try {
+          $dexJs
+        } catch (err) {
+          globalThis.logBuffer.push('|error| dex.js Execution Exception: ' + (err.message || err));
+        }
+
         if (typeof Dex !== "undefined") {
           Dex.data = Dex.data || {};
           Dex.data.Learnsets = $learnsetsJson;
         }
 
-        // 5. Explicit Global Export Binding
-        (function() {
-          var mod = globalThis.module ? globalThis.module.exports : null;
-          var exp = globalThis.exports;
-
-          var sources = [mod, exp];
-          for (var i = 0; i < sources.length; i++) {
-            var src = sources[i];
-            if (!src) continue;
-            if (typeof src === 'function') {
-              globalThis.Battle = src;
-            } else if (typeof src === 'object') {
-              if (src.Battle) globalThis.Battle = src.Battle;
-              if (src.Sim && src.Sim.Battle) globalThis.Battle = src.Sim.Battle;
-              if (src.Sim) globalThis.Sim = src.Sim;
-              if (src.Dex) globalThis.Dex = src.Dex;
-              if (src.default) {
-                if (typeof src.default === 'function') globalThis.Battle = src.default;
-                if (src.default.Battle) globalThis.Battle = src.default.Battle;
-                if (src.default.Sim && src.default.Sim.Battle) globalThis.Battle = src.default.Sim.Battle;
-              }
-              for (var k in src) {
-                try { if (!globalThis[k]) globalThis[k] = src[k]; } catch(e) {}
-              }
+        // 5. Robust Battle Constructor Resolver
+        globalThis.isBattleCtor = function(fn) {
+          if (typeof fn !== 'function') return false;
+          if (fn.name === 'Battle') return true;
+          if (fn.prototype) {
+            var p = fn.prototype;
+            if (typeof p.choose === 'function' || typeof p.setPlayer === 'function' || typeof p.makeRequest === 'function' || typeof p.start === 'function' || typeof p.commitDecisions === 'function') {
+              return true;
             }
           }
-        })();
+          return false;
+        };
 
-        // 6. Runtime Helpers & Constructor Scanner
-        globalThis.logBuffer = [];
+        globalThis.getBattleConstructor = function() {
+          if (globalThis.isBattleCtor(globalThis.Battle)) return globalThis.Battle;
+          if (globalThis.Sim && globalThis.isBattleCtor(globalThis.Sim.Battle)) return globalThis.Sim.Battle;
+          if (globalThis.PokemonShowdown && globalThis.isBattleCtor(globalThis.PokemonShowdown.Battle)) return globalThis.PokemonShowdown.Battle;
+
+          var targets = [
+            rootModule.exports,
+            rootExports,
+            globalThis.module ? globalThis.module.exports : null,
+            globalThis.exports
+          ];
+
+          for (var i = 0; i < targets.length; i++) {
+            var t = targets[i];
+            if (!t) continue;
+            if (globalThis.isBattleCtor(t)) return t;
+            if (globalThis.isBattleCtor(t.Battle)) return t.Battle;
+            if (t.Sim && globalThis.isBattleCtor(t.Sim.Battle)) return t.Sim.Battle;
+            if (t.default) {
+              if (globalThis.isBattleCtor(t.default)) return t.default;
+              if (globalThis.isBattleCtor(t.default.Battle)) return t.default.Battle;
+              if (t.default.Sim && globalThis.isBattleCtor(t.default.Sim.Battle)) return t.default.Sim.Battle;
+            }
+          }
+
+          var keys = Object.getOwnPropertyNames(globalThis);
+          for (var j = 0; j < keys.length; j++) {
+            var k = keys[j];
+            if (k === 'globalThis' || k === 'global' || k === 'window' || k === 'self') continue;
+            try {
+              var item = globalThis[k];
+              if (globalThis.isBattleCtor(item)) return item;
+              if (item && globalThis.isBattleCtor(item.Battle)) return item.Battle;
+              if (item && item.Sim && globalThis.isBattleCtor(item.Sim.Battle)) return item.Sim.Battle;
+            } catch(e) {}
+          }
+
+          return null;
+        };
 
         globalThis.toID = function(text) {
           if (text && text.id) return text.id;
           if (typeof text !== 'string' && typeof text !== 'number') return '';
           return ('' + text).toLowerCase().replace(/[^a-z0-9]/g, '');
-        };
-
-        globalThis.getBattleConstructor = function() {
-          function isBattleCtor(fn) {
-            if (typeof fn !== 'function') return false;
-            if (fn.name === 'Battle') return true;
-            if (fn.prototype && (typeof fn.prototype.choose === 'function' || typeof fn.prototype.start === 'function' || typeof fn.prototype.setPlayer === 'function')) {
-              return true;
-            }
-            return false;
-          }
-
-          if (isBattleCtor(globalThis.Battle)) return globalThis.Battle;
-          if (globalThis.Sim && isBattleCtor(globalThis.Sim.Battle)) return globalThis.Sim.Battle;
-
-          if (globalThis.module && globalThis.module.exports) {
-            var mod = globalThis.module.exports;
-            if (isBattleCtor(mod)) return mod;
-            if (isBattleCtor(mod.Battle)) return mod.Battle;
-            if (mod.Sim && isBattleCtor(mod.Sim.Battle)) return mod.Sim.Battle;
-          }
-
-          var keys = Object.getOwnPropertyNames(globalThis);
-          for (var i = 0; i < keys.length; i++) {
-            var key = keys[i];
-            if (key === 'globalThis' || key === 'global' || key === 'window' || key === 'self') continue;
-            try {
-              var item = globalThis[key];
-              if (isBattleCtor(item)) return item;
-              if (item && isBattleCtor(item.Battle)) return item.Battle;
-            } catch(e) {}
-          }
-
-          return null;
         };
 
         globalThis.getLogs = function() {
@@ -251,9 +262,7 @@ Timid Nature
           if (!teamData) teamData = '';
           let rawTeam = [];
 
-          if (Array.isArray(teamData)) {
-            rawTeam = teamData;
-          }
+          if (Array.isArray(teamData)) rawTeam = teamData;
 
           if (rawTeam.length === 0 && typeof teamData === 'string') {
             const blocks = teamData.split(/\\n\\s*\\n/);
@@ -325,9 +334,7 @@ Timid Nature
             const specID = globalThis.toID(mon.species || mon.name || 'pikachu') || 'pikachu';
 
             let moveIDs = Array.isArray(mon.moves) ? mon.moves.map(globalThis.toID).filter(Boolean) : [];
-            if (moveIDs.length === 0) {
-              moveIDs = ['tackle', 'protect'];
-            }
+            if (moveIDs.length === 0) moveIDs = ['tackle', 'protect'];
 
             sanitized.push({
               name: mon.name || mon.species || 'Pikachu',
@@ -367,13 +374,13 @@ Timid Nature
             const p1Team = globalThis.parseTeam(p1TeamData);
             const p2Team = globalThis.parseTeam(p2TeamData);
 
-            const BattleConstructor = globalThis.getBattleConstructor();
-            if (!BattleConstructor) {
+            const BattleCtor = globalThis.getBattleConstructor();
+            if (!BattleCtor) {
               const globalsList = Object.getOwnPropertyNames(globalThis).join(', ');
               throw new Error('Battle constructor not found. Globals: [' + globalsList + ']');
             }
 
-            globalThis.battle = new BattleConstructor({
+            globalThis.battle = new BattleCtor({
               formatid: 'gen9customgame',
               gameType: 'doubles',
               p1: { name: 'Player 1', team: p1Team },
