@@ -101,6 +101,7 @@ Timid Nature
     try {
       final runtime = getJavascriptRuntime();
 
+      // 1. Load raw asset contents
       final engineCode = await rootBundle.loadString('assets/engine.js');
 
       String dexJs = '';
@@ -117,6 +118,7 @@ Timid Nature
         debugPrint('learnsets.json asset load warning: $e');
       }
 
+      // 2. Setup environment polyfills & CommonJS wrappers
       const String polyfillsScript = '''
         globalThis.global = globalThis;
         globalThis.window = globalThis;
@@ -168,9 +170,19 @@ Timid Nature
         globalThis.exports = exp;
         globalThis.module = { exports: exp };
 
+        var dummyModules = {
+          fs: { readFileSync: function() { return ''; }, existsSync: function() { return false; } },
+          path: { resolve: function() { return ''; }, join: function() { return ''; }, dirname: function() { return ''; } },
+          util: { inspect: function(o) { return String(o); }, inherits: function() {} },
+          os: { platform: function() { return 'browser'; }, homedir: function() { return ''; } },
+          events: function EventEmitter() {},
+          crypto: globalThis.crypto || {},
+          buffer: { Buffer: { isBuffer: function() { return false; } } }
+        };
+
         if (!globalThis.require) {
           globalThis.require = function(id) {
-            if (id === 'fs' || id === 'path' || id === 'crypto' || id === 'util' || id === 'os') return {};
+            if (dummyModules[id]) return dummyModules[id];
             if (globalThis[id]) return globalThis[id];
             return globalThis.module.exports || globalThis.exports || {};
           };
@@ -181,15 +193,21 @@ Timid Nature
 
       runtime.evaluate(polyfillsScript);
 
+      // 3. Evaluate engine.js and throw strictly if execution fails
       final engineEval = runtime.evaluate(engineCode);
       if (engineEval.isError) {
-        debugPrint('Engine JS Runtime Error: ${engineEval.stringResult}');
+        throw Exception('engine.js JS Execution Error: ${engineEval.stringResult}');
       }
 
+      // 4. Evaluate dex.js
       if (dexJs.isNotEmpty) {
-        runtime.evaluate(dexJs);
+        final dexEval = runtime.evaluate(dexJs);
+        if (dexEval.isError) {
+          debugPrint('dex.js runtime warning: ${dexEval.stringResult}');
+        }
       }
 
+      // 5. Hydrate Learnsets, resolve Battle constructor, and setup helper functions
       final String helperScript = '''
         if (typeof Dex !== "undefined") {
           Dex.data = Dex.data || {};
@@ -197,34 +215,57 @@ Timid Nature
         }
 
         (function resolveBattleConstructor() {
-          function inspect(obj) {
-            if (!obj) return null;
-            if (typeof obj === 'function') {
-              if (obj.name === 'Battle') return obj;
-              if (obj.prototype && (obj.prototype.choose || obj.prototype.setPlayer || obj.prototype.makeRequest || obj.prototype.start)) {
-                return obj;
-              }
+          function isBattleClass(fn) {
+            if (typeof fn !== 'function') return false;
+            if (fn.name === 'Battle') return true;
+            var p = fn.prototype;
+            if (p && (p.choose || p.setPlayer || p.makeRequest || p.start || p.commitDecisions || p.step)) {
+              return true;
             }
-            if (typeof obj === 'object') {
-              if (obj.Battle) return inspect(obj.Battle);
-              if (obj.Sim && obj.Sim.Battle) return inspect(obj.Sim.Battle);
-              if (obj.default) return inspect(obj.default);
+            return false;
+          }
+
+          function search(obj, depth, visited) {
+            if (!obj || depth > 3) return null;
+            if (visited.indexOf(obj) !== -1) return null;
+            visited.push(obj);
+
+            if (isBattleClass(obj)) return obj;
+
+            if (typeof obj === 'object' || typeof obj === 'function') {
+              if (isBattleClass(obj.Battle)) return obj.Battle;
+              if (obj.Sim && isBattleClass(obj.Sim.Battle)) return obj.Sim.Battle;
+              if (isBattleClass(obj.default)) return obj.default;
+
+              try {
+                var keys = Object.keys(obj);
+                for (var i = 0; i < keys.length; i++) {
+                  var k = keys[i];
+                  if (k === 'globalThis' || k === 'global' || k === 'window' || k === 'self' || k === 'Dex') continue;
+                  var val = obj[k];
+                  var found = search(val, depth + 1, visited);
+                  if (found) return found;
+                }
+              } catch (e) {}
             }
             return null;
           }
 
+          var visited = [];
           var targets = [
             globalThis.Battle,
+            globalThis.module ? globalThis.module.exports : null,
+            globalThis.exports,
             globalThis.Sim,
             globalThis.PokemonShowdown,
-            globalThis.module ? globalThis.module.exports : null,
-            globalThis.exports
+            globalThis.Dex,
+            globalThis
           ];
 
           for (var i = 0; i < targets.length; i++) {
-            var found = inspect(targets[i]);
-            if (found) {
-              globalThis.Battle = found;
+            var res = search(targets[i], 0, visited);
+            if (res) {
+              globalThis.Battle = res;
               return;
             }
           }
