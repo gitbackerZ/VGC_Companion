@@ -105,41 +105,52 @@ Timid Nature
     try {
       final runtime = getJavascriptRuntime();
 
-      // Proxy polyfill to capture exports globally and prevent overwrites by dex.js
+      // 1. Full Node & CommonJS Environment Polyfill
       const String envPolyfill = '''
         var global = globalThis;
         var window = globalThis;
-        var exports = globalThis;
-        
-        var _moduleExports = globalThis;
-        var module = {
-          get exports() {
-            return _moduleExports;
-          },
-          set exports(val) {
-            _moduleExports = val;
-            if (val && (typeof val === 'object' || typeof val === 'function')) {
-              Object.assign(globalThis, val);
-            }
-          }
-        };
+
+        if (!globalThis.process) {
+          globalThis.process = {
+            env: {},
+            argv: [],
+            nextTick: function(cb) { setTimeout(cb, 0); },
+            cwd: function() { return ''; }
+          };
+        }
+
+        globalThis.exports = globalThis.exports || {};
+        globalThis.module = globalThis.module || { exports: globalThis.exports };
+
+        if (!globalThis.require) {
+          globalThis.require = function(id) {
+            if (id === 'fs' || id === 'path' || id === 'crypto') return {};
+            if (globalThis[id]) return globalThis[id];
+            return globalThis.exports || {};
+          };
+        }
       ''';
       runtime.evaluate(envPolyfill);
 
-      // 1. Load Core Engine
+      // 2. Load Core Engine
       final engineCode = await rootBundle.loadString('assets/engine.js');
       final engineResult = runtime.evaluate(engineCode);
       if (engineResult.isError) {
         throw Exception('Engine JS Evaluation Failed: ${engineResult.stringResult}');
       }
 
-      // Explicitly lock Battle constructor to global scope right after loading engine.js
+      // Capture exports immediately after engine execution
       runtime.evaluate('''
         if (typeof Battle !== 'undefined') globalThis.Battle = Battle;
         if (typeof Sim !== 'undefined' && Sim.Battle) globalThis.Battle = Sim.Battle;
+        if (module && module.exports) {
+          if (typeof module.exports === 'function') globalThis.Battle = module.exports;
+          if (module.exports.Battle) globalThis.Battle = module.exports.Battle;
+          if (module.exports.Sim && module.exports.Sim.Battle) globalThis.Battle = module.exports.Sim.Battle;
+        }
       ''');
 
-      // 2. Load Dex Data
+      // 3. Load Dex Data
       try {
         final dexJs = await rootBundle.loadString('assets/js/dex.js');
         runtime.evaluate(dexJs);
@@ -147,7 +158,7 @@ Timid Nature
         debugPrint('dex.js asset load warning: $e');
       }
 
-      // 3. Load Learnsets
+      // 4. Load Learnsets
       try {
         final learnsetsJson = await rootBundle.loadString('assets/js/learnsets.json');
         runtime.evaluate('if (typeof Dex !== "undefined") { Dex.data = Dex.data || {}; Dex.data.Learnsets = $learnsetsJson; }');
@@ -155,7 +166,7 @@ Timid Nature
         debugPrint('learnsets.json asset load warning: $e');
       }
 
-      // 4. Inject Runtime Methods & Fallbacks
+      // 5. Inject Runtime Helpers & Scanner
       const String jsPatchCode = '''
         globalThis.logBuffer = [];
 
@@ -166,10 +177,29 @@ Timid Nature
         };
 
         globalThis.getBattleConstructor = function() {
-          if (globalThis.Battle) return globalThis.Battle;
-          if (globalThis.Sim && globalThis.Sim.Battle) return globalThis.Sim.Battle;
-          if (globalThis.Dex && globalThis.Dex.Battle) return globalThis.Dex.Battle;
-          if (globalThis.PokemonShowdown && globalThis.PokemonShowdown.Battle) return globalThis.PokemonShowdown.Battle;
+          if (typeof globalThis.Battle === 'function') return globalThis.Battle;
+          if (globalThis.Sim && typeof globalThis.Sim.Battle === 'function') return globalThis.Sim.Battle;
+          if (globalThis.Dex && typeof globalThis.Dex.Battle === 'function') return globalThis.Dex.Battle;
+          if (globalThis.PokemonShowdown && typeof globalThis.PokemonShowdown.Battle === 'function') return globalThis.PokemonShowdown.Battle;
+
+          if (typeof module !== 'undefined' && module.exports) {
+            if (typeof module.exports.Battle === 'function') return module.exports.Battle;
+            if (module.exports.Sim && typeof module.exports.Sim.Battle === 'function') return module.exports.Sim.Battle;
+            if (typeof module.exports === 'function') return module.exports;
+          }
+
+          if (typeof exports !== 'undefined') {
+            if (typeof exports.Battle === 'function') return exports.Battle;
+            if (exports.Sim && typeof exports.Sim.Battle === 'function') return exports.Sim.Battle;
+          }
+
+          for (var key in globalThis) {
+            try {
+              var obj = globalThis[key];
+              if (obj && typeof obj.Battle === 'function') return obj.Battle;
+            } catch(e) {}
+          }
+
           return null;
         };
 
@@ -284,7 +314,6 @@ Timid Nature
             });
           }
 
-          // Ensure minimum 2 Pokémon to satisfy Doubles lead slots
           while (sanitized.length < 2) {
             sanitized.push({
               name: 'Pikachu ' + (sanitized.length + 1),
@@ -311,7 +340,8 @@ Timid Nature
 
             const BattleConstructor = globalThis.getBattleConstructor();
             if (!BattleConstructor) {
-              throw new Error('Battle constructor not found on global scope.');
+              const availableKeys = Object.keys(globalThis).filter(k => k !== 'logBuffer').join(', ');
+              throw new Error('Battle constructor not found on global scope. Globals: [' + availableKeys + ']');
             }
 
             globalThis.battle = new BattleConstructor({
