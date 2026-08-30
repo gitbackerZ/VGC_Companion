@@ -118,7 +118,7 @@ Timid Nature
       }
 
       final String combinedJsScript = '''
-        // 1. Comprehensive Host & Runtime Polyfills
+        // 1. Setup Host & Environment Polyfills directly on globalThis
         globalThis.global = globalThis;
         globalThis.window = globalThis;
         globalThis.self = globalThis;
@@ -164,7 +164,7 @@ Timid Nature
           };
         }
 
-        // 2. Intercept module.exports re-assignments
+        // 2. Intercept CommonJS / UMD export assignments directly on root
         var internalExports = {};
         globalThis.exports = internalExports;
 
@@ -208,14 +208,12 @@ Timid Nature
 
         globalThis.logBuffer = [];
 
-        // 3. Evaluate Engine inside a bound scope context
-        (function(exports, module, global, window, self) {
-          try {
-            $engineCode
-          } catch (err) {
-            globalThis.logBuffer.push('|error| engine.js Execution Exception: ' + (err.stack || err.message || err));
-          }
-        }).call(globalThis, globalThis.exports, globalThis.module, globalThis, globalThis, globalThis);
+        // 3. Evaluate Engine directly at top-level scope (No IIFE wrapper)
+        try {
+          $engineCode
+        } catch (err) {
+          globalThis.logBuffer.push('|error| engine.js Execution Exception: ' + (err.stack || err.message || err));
+        }
 
         // 4. Evaluate Dex & Learnsets
         try {
@@ -231,12 +229,14 @@ Timid Nature
 
         // 5. Deep Constructor Resolution Algorithm
         globalThis.isBattleCtor = function(fn) {
-          if (typeof fn !== 'function') return false;
-          if (fn.name === 'Battle') return true;
-          if (fn.prototype) {
-            var p = fn.prototype;
-            if (typeof p.choose === 'function' || typeof p.setPlayer === 'function' || typeof p.makeRequest === 'function' || typeof p.start === 'function' || typeof p.commitDecisions === 'function') {
-              return true;
+          if (!fn || (typeof fn !== 'function' && typeof fn !== 'object')) return false;
+          if (typeof fn === 'function') {
+            if (fn.name === 'Battle') return true;
+            if (fn.prototype) {
+              var p = fn.prototype;
+              if (typeof p.choose === 'function' || typeof p.setPlayer === 'function' || typeof p.makeRequest === 'function' || typeof p.start === 'function' || typeof p.commitDecisions === 'function') {
+                return true;
+              }
             }
           }
           return false;
