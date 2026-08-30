@@ -199,7 +199,36 @@ Timid Nature
         throw Exception('engine.js JS Execution Error: ${engineEval.stringResult}');
       }
 
-      // 4. Evaluate dex.js
+      // 4. Force bind module.exports / exports to globalThis
+      const String bindExportsScript = '''
+        (function bindEngineExports() {
+          var mod = globalThis.module ? globalThis.module.exports : null;
+          var exp = globalThis.exports;
+
+          if (mod) {
+            if (typeof mod === 'function') globalThis.Battle = mod;
+            if (mod.Battle) globalThis.Battle = mod.Battle;
+            if (mod.Sim && mod.Sim.Battle) globalThis.Battle = mod.Sim.Battle;
+            if (mod.default) {
+              if (typeof mod.default === 'function') globalThis.Battle = mod.default;
+              if (mod.default.Battle) globalThis.Battle = mod.default.Battle;
+            }
+          }
+
+          if (!globalThis.Battle && exp) {
+            if (typeof exp === 'function') globalThis.Battle = exp;
+            if (exp.Battle) globalThis.Battle = exp.Battle;
+            if (exp.Sim && exp.Sim.Battle) globalThis.Battle = exp.Sim.Battle;
+          }
+
+          if (!globalThis.Battle && typeof globalThis.Sim !== 'undefined') {
+            if (globalThis.Sim.Battle) globalThis.Battle = globalThis.Sim.Battle;
+          }
+        })();
+      ''';
+      runtime.evaluate(bindExportsScript);
+
+      // 5. Evaluate dex.js
       if (dexJs.isNotEmpty) {
         final dexEval = runtime.evaluate(dexJs);
         if (dexEval.isError) {
@@ -207,68 +236,39 @@ Timid Nature
         }
       }
 
-      // 5. Hydrate Learnsets, resolve Battle constructor, and setup helper functions
+      // 6. Hydrate Learnsets, resolve fallback Battle constructor, and setup helper functions
       final String helperScript = '''
         if (typeof Dex !== "undefined") {
           Dex.data = Dex.data || {};
           Dex.data.Learnsets = $learnsetsJson;
         }
 
-        (function resolveBattleConstructor() {
-          function isBattleClass(fn) {
+        (function resolveBattleFallback() {
+          if (globalThis.Battle) return;
+
+          function isLikelyBattle(fn) {
             if (typeof fn !== 'function') return false;
             if (fn.name === 'Battle') return true;
             var p = fn.prototype;
-            if (p && (p.choose || p.setPlayer || p.makeRequest || p.start || p.commitDecisions || p.step)) {
+            if (p && (p.choose || p.setPlayer || p.makeRequest || p.start || p.commitDecisions || p.step || p.getUndoLog)) {
               return true;
             }
             return false;
           }
 
-          function search(obj, depth, visited) {
-            if (!obj || depth > 3) return null;
-            if (visited.indexOf(obj) !== -1) return null;
-            visited.push(obj);
-
-            if (isBattleClass(obj)) return obj;
-
-            if (typeof obj === 'object' || typeof obj === 'function') {
-              if (isBattleClass(obj.Battle)) return obj.Battle;
-              if (obj.Sim && isBattleClass(obj.Sim.Battle)) return obj.Sim.Battle;
-              if (isBattleClass(obj.default)) return obj.default;
-
-              try {
-                var keys = Object.keys(obj);
-                for (var i = 0; i < keys.length; i++) {
-                  var k = keys[i];
-                  if (k === 'globalThis' || k === 'global' || k === 'window' || k === 'self' || k === 'Dex') continue;
-                  var val = obj[k];
-                  var found = search(val, depth + 1, visited);
-                  if (found) return found;
-                }
-              } catch (e) {}
+          function scanObj(obj) {
+            if (!obj || typeof obj !== 'object') return null;
+            var keys = Object.keys(obj);
+            for (var i = 0; i < keys.length; i++) {
+              var val = obj[keys[i]];
+              if (isLikelyBattle(val)) return val;
             }
             return null;
           }
 
-          var visited = [];
-          var targets = [
-            globalThis.Battle,
-            globalThis.module ? globalThis.module.exports : null,
-            globalThis.exports,
-            globalThis.Sim,
-            globalThis.PokemonShowdown,
-            globalThis.Dex,
-            globalThis
-          ];
-
-          for (var i = 0; i < targets.length; i++) {
-            var res = search(targets[i], 0, visited);
-            if (res) {
-              globalThis.Battle = res;
-              return;
-            }
-          }
+          globalThis.Battle = scanObj(globalThis.module ? globalThis.module.exports : null) ||
+                              scanObj(globalThis.exports) ||
+                              scanObj(globalThis);
         })();
 
         globalThis.toID = function(text) {
@@ -411,7 +411,8 @@ Timid Nature
             const BattleCtor = globalThis.Battle;
             if (!BattleCtor) {
               const keys = Object.getOwnPropertyNames(globalThis).join(', ');
-              throw new Error('Battle constructor not found on globalThis. Keys: [' + keys + ']');
+              const modKeys = globalThis.module && globalThis.module.exports ? Object.keys(globalThis.module.exports).join(', ') : 'none';
+              throw new Error('Battle constructor not found on globalThis. Module Exports: [' + modKeys + ']. Global Keys: [' + keys + ']');
             }
 
             globalThis.battle = new BattleCtor({
