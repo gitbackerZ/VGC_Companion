@@ -214,16 +214,25 @@ Timid Nature
         throw Exception('engine.js execution error: ${engineEval.stringResult}');
       }
 
-      // --- DIAGNOSTIC PROBE: push results into on-screen terminal log ---
-      // Split into small single-key evals so each line is short and readable
-      // on a phone screen. No desktop debug console required.
+      if (dexJs.isNotEmpty) {
+        final dexEval = runtime.evaluate(dexJs);
+        if (dexEval.isError) {
+          setState(() {
+            _rawLogs.add('|probe| dex.js execution error: ${dexEval.stringResult}');
+          });
+        }
+      }
+
+      // --- DIAGNOSTIC PROBE: run AFTER dex.js loads, since that's what ---
+      // --- actually defines Dex / getSpeciesList / etc per the earlier ---
+      // --- crash log. Each check is its own short line for phone screens. ---
       void probeLine(String label, String jsExpression) {
         final res = runtime.evaluate(
           "(function(){ try { return JSON.stringify($jsExpression); } catch(e) { return 'ERR:' + (e.message || e); } })();"
         );
         final value = res.isError ? 'EVAL_ERROR: ${res.stringResult}' : res.stringResult;
         setState(() {
-          _rawLogs.add('|probe| $label: $value');
+          _rawLogs.add('|probe2| $label: $value');
         });
       }
 
@@ -240,11 +249,15 @@ Timid Nature
         "(globalThis.module && globalThis.module.exports) ? Object.keys(globalThis.module.exports) : []",
       );
       probeLine('exportsKeys', "globalThis.exports ? Object.keys(globalThis.exports) : []");
+      probeLine(
+        'dexBattleType',
+        "(typeof Dex !== 'undefined' && Dex && Dex.Battle) ? typeof Dex.Battle : 'no-dex-battle'",
+      );
+      probeLine(
+        'globalKeysWithBattleWord',
+        "Object.keys(globalThis).filter(function(k){ return /battle/i.test(k); })",
+      );
       // --- END DIAGNOSTIC PROBE ---
-
-      if (dexJs.isNotEmpty) {
-        runtime.evaluate(dexJs);
-      }
 
       final String helperScript = '''
         if (typeof Dex !== "undefined") {
