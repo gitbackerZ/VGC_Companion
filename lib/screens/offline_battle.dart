@@ -105,11 +105,29 @@ Timid Nature
     try {
       final runtime = getJavascriptRuntime();
 
-      // 1. Full Node & Browser Environment Polyfill
-      const String envPolyfill = '''
-        var global = globalThis;
-        var window = globalThis;
-        var self = globalThis;
+      // Load files from assets
+      final engineCode = await rootBundle.loadString('assets/engine.js');
+
+      String dexJs = '';
+      try {
+        dexJs = await rootBundle.loadString('assets/js/dex.js');
+      } catch (e) {
+        debugPrint('dex.js asset load warning: $e');
+      }
+
+      String learnsetsJson = '{}';
+      try {
+        learnsetsJson = await rootBundle.loadString('assets/js/learnsets.json');
+      } catch (e) {
+        debugPrint('learnsets.json asset load warning: $e');
+      }
+
+      // Unified JS Context Script to guarantee shared context and exports
+      final String combinedJsScript = '''
+        // 1. Environment Polyfills
+        globalThis.global = globalThis;
+        globalThis.window = globalThis;
+        globalThis.self = globalThis;
 
         if (!globalThis.process) {
           globalThis.process = {
@@ -130,18 +148,20 @@ Timid Nature
             return globalThis.exports || {};
           };
         }
-      ''';
-      runtime.evaluate(envPolyfill);
 
-      // 2. Load Core Engine
-      final engineCode = await rootBundle.loadString('assets/engine.js');
-      final engineResult = runtime.evaluate(engineCode);
-      if (engineResult.isError) {
-        throw Exception('Engine JS Evaluation Failed: ${engineResult.stringResult}');
-      }
+        // 2. Load Core Engine Source
+        $engineCode
 
-      // 3. Auto-Sync Engine Exports to globalThis Scope
-      runtime.evaluate('''
+        // 3. Load Dex Data
+        $dexJs
+
+        // 4. Load Learnsets Data
+        if (typeof Dex !== "undefined") {
+          Dex.data = Dex.data || {};
+          Dex.data.Learnsets = $learnsetsJson;
+        }
+
+        // 5. Explicit Global Export Binding
         (function() {
           var mod = globalThis.module ? globalThis.module.exports : null;
           var exp = globalThis.exports;
@@ -168,26 +188,8 @@ Timid Nature
             }
           }
         })();
-      ''');
 
-      // 4. Load Dex Data
-      try {
-        final dexJs = await rootBundle.loadString('assets/js/dex.js');
-        runtime.evaluate(dexJs);
-      } catch (e) {
-        debugPrint('dex.js asset load warning: $e');
-      }
-
-      // 5. Load Learnsets
-      try {
-        final learnsetsJson = await rootBundle.loadString('assets/js/learnsets.json');
-        runtime.evaluate('if (typeof Dex !== "undefined") { Dex.data = Dex.data || {}; Dex.data.Learnsets = $learnsetsJson; }');
-      } catch (e) {
-        debugPrint('learnsets.json asset load warning: $e');
-      }
-
-      // 6. Deep Prototype & Global Property Inspector Patch
-      const String jsPatchCode = '''
+        // 6. Runtime Helpers & Constructor Scanner
         globalThis.logBuffer = [];
 
         globalThis.toID = function(text) {
@@ -206,29 +208,14 @@ Timid Nature
             return false;
           }
 
-          function inspect(obj, depth) {
-            if (!obj || depth > 3) return null;
-            if (isBattleCtor(obj)) return obj;
-            if (isBattleCtor(obj.Battle)) return obj.Battle;
-            if (obj.Sim && isBattleCtor(obj.Sim.Battle)) return obj.Sim.Battle;
-            if (obj.default) {
-              var res = inspect(obj.default, depth + 1);
-              if (res) return res;
-            }
-            return null;
-          }
-
           if (isBattleCtor(globalThis.Battle)) return globalThis.Battle;
           if (globalThis.Sim && isBattleCtor(globalThis.Sim.Battle)) return globalThis.Sim.Battle;
 
-          var found = null;
           if (globalThis.module && globalThis.module.exports) {
-            found = inspect(globalThis.module.exports, 0);
-            if (found) return found;
-          }
-          if (globalThis.exports) {
-            found = inspect(globalThis.exports, 0);
-            if (found) return found;
+            var mod = globalThis.module.exports;
+            if (isBattleCtor(mod)) return mod;
+            if (isBattleCtor(mod.Battle)) return mod.Battle;
+            if (mod.Sim && isBattleCtor(mod.Sim.Battle)) return mod.Sim.Battle;
           }
 
           var keys = Object.getOwnPropertyNames(globalThis);
@@ -236,8 +223,9 @@ Timid Nature
             var key = keys[i];
             if (key === 'globalThis' || key === 'global' || key === 'window' || key === 'self') continue;
             try {
-              found = inspect(globalThis[key], 1);
-              if (found) return found;
+              var item = globalThis[key];
+              if (isBattleCtor(item)) return item;
+              if (item && isBattleCtor(item.Battle)) return item.Battle;
             } catch(e) {}
           }
 
@@ -381,8 +369,8 @@ Timid Nature
 
             const BattleConstructor = globalThis.getBattleConstructor();
             if (!BattleConstructor) {
-              const allGlobals = Object.getOwnPropertyNames(globalThis).slice(0, 30).join(', ');
-              throw new Error('Battle constructor not found. Globals: [' + allGlobals + ']');
+              const globalsList = Object.getOwnPropertyNames(globalThis).join(', ');
+              throw new Error('Battle constructor not found. Globals: [' + globalsList + ']');
             }
 
             globalThis.battle = new BattleConstructor({
@@ -407,9 +395,9 @@ Timid Nature
         };
       ''';
 
-      final patchResult = runtime.evaluate(jsPatchCode);
-      if (patchResult.isError) {
-        throw Exception('JS Patch Injection Failed: ${patchResult.stringResult}');
+      final initResult = runtime.evaluate(combinedJsScript);
+      if (initResult.isError) {
+        throw Exception('Engine JS Evaluation Failed: ${initResult.stringResult}');
       }
 
       setState(() {
