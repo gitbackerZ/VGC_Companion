@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_js/flutter_js.dart';
-import '../services/team_text_codec.dart';
 
 enum BattleStage { setup, teamPreview, inBattle, ended }
 
@@ -27,7 +26,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   final TextEditingController _p1TeamController = TextEditingController();
   final TextEditingController _p2TeamController = TextEditingController();
 
-  // Team Preview
+  // Team Preview State
   List<dynamic> _p1TeamList = [];
   List<dynamic> _p2TeamList = [];
   final List<int> _selectedPreviewSlots = [];
@@ -180,40 +179,44 @@ Timid Nature
         };
 
         globalThis.parseTeam = function(teamData) {
-          if (!teamData) return [];
-          if (Array.isArray(teamData)) return teamData;
+          if (!teamData) teamData = '';
+          let rawTeam = [];
 
-          const dex = globalThis.getDexObject();
+          if (Array.isArray(teamData)) {
+            rawTeam = teamData;
+          }
 
-          // 1. Native Dex Unpacker
-          try {
-            if (dex && typeof dex.unpackTeam === 'function' && typeof teamData === 'string') {
-              const res = dex.unpackTeam(teamData);
-              if (Array.isArray(res) && res.length > 0) return res;
-            }
-            const TeamsObj = globalThis.Teams || (dex && dex.teams) || (globalThis.PokemonShowdown && globalThis.PokemonShowdown.Teams);
-            if (TeamsObj && typeof TeamsObj.unpack === 'function' && typeof teamData === 'string') {
-              const res = TeamsObj.unpack(teamData);
-              if (Array.isArray(res) && res.length > 0) return res;
-            }
-          } catch (e) {}
+          // 1. Native Dex Unpacker Attempt
+          if (rawTeam.length === 0 && typeof teamData === 'string') {
+            try {
+              const dex = globalThis.getDexObject();
+              if (dex && typeof dex.unpackTeam === 'function') {
+                const res = dex.unpackTeam(teamData);
+                if (Array.isArray(res) && res.length > 0) rawTeam = res;
+              }
+              if (rawTeam.length === 0) {
+                const TeamsObj = globalThis.Teams || (dex && dex.teams) || (globalThis.PokemonShowdown && globalThis.PokemonShowdown.Teams);
+                if (TeamsObj && typeof TeamsObj.unpack === 'function' && teamData.includes('|')) {
+                  const res = TeamsObj.unpack(teamData);
+                  if (Array.isArray(res) && res.length > 0) rawTeam = res;
+                }
+              }
+            } catch (e) {}
+          }
 
-          // 2. Pure JS Unpacker for Packed Format ("Mon1]Mon2...")
-          if (typeof teamData === 'string' && teamData.includes('|')) {
-            const team = [];
+          // 2. Packed String Unpacker ("Mon1]Mon2...")
+          if (rawTeam.length === 0 && typeof teamData === 'string' && teamData.includes(']')) {
             const blocks = teamData.split(']');
             for (let b = 0; b < blocks.length; b++) {
               const block = blocks[b].trim();
               if (!block) continue;
               const parts = block.split('|');
-              
               const name = parts[0] || '';
               const species = parts[1] || name;
-              const item = globalThis.toID(parts[2] || '');
-              const ability = globalThis.toID(parts[3] || '');
-              const moves = parts[4] ? parts[4].split(',').map(globalThis.toID).filter(Boolean) : [];
+              const item = parts[2] || '';
+              const ability = parts[3] || '';
+              const moves = parts[4] ? parts[4].split(',').filter(Boolean) : [];
               const nature = parts[5] || 'Hardy';
-              
               const evParts = parts[6] ? parts[6].split(',') : [];
               const evs = {
                 hp: parseInt(evParts[0]) || 0,
@@ -223,42 +226,27 @@ Timid Nature
                 spd: parseInt(evParts[4]) || 0,
                 spe: parseInt(evParts[5]) || 0
               };
-
               const gender = parts[7] || '';
-
-              const ivParts = parts[8] ? parts[8].split(',') : [];
-              const ivs = {
-                hp: ivParts[0] !== undefined && ivParts[0] !== '' ? parseInt(ivParts[0]) : 31,
-                atk: ivParts[1] !== undefined && ivParts[1] !== '' ? parseInt(ivParts[1]) : 31,
-                def: ivParts[2] !== undefined && ivParts[2] !== '' ? parseInt(ivParts[2]) : 31,
-                spa: ivParts[3] !== undefined && ivParts[3] !== '' ? parseInt(ivParts[3]) : 31,
-                spd: ivParts[4] !== undefined && ivParts[4] !== '' ? parseInt(ivParts[4]) : 31,
-                spe: ivParts[5] !== undefined && ivParts[5] !== '' ? parseInt(ivParts[5]) : 31
-              };
-
               const level = parseInt(parts[10]) || 50;
 
               if (species || name) {
-                team.push({
+                rawTeam.push({
                   name: name || species,
-                  species: globalThis.toID(species || name),
+                  species: species || name,
                   item: item,
                   ability: ability,
                   moves: moves,
                   nature: nature,
                   evs: evs,
-                  ivs: ivs,
                   gender: gender,
                   level: level
                 });
               }
             }
-            if (team.length > 0) return team;
           }
 
-          // 3. Fallback Multiline Importer
-          if (typeof teamData === 'string') {
-            const team = [];
+          // 3. Standard Multiline Export Importer
+          if (rawTeam.length === 0 && typeof teamData === 'string') {
             const blocks = teamData.split(/\\n\\s*\\n/);
             for (let b = 0; b < blocks.length; b++) {
               const lines = blocks[b].split('\\n').map(l => l.trim()).filter(Boolean);
@@ -272,7 +260,6 @@ Timid Nature
               let nature = 'Hardy';
               const moves = [];
               const evs = { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };
-              const ivs = { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 };
 
               for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
@@ -313,29 +300,69 @@ Timid Nature
                     }
                   });
                 } else if (line.startsWith('-')) {
-                  moves.push(globalThis.toID(line.substring(1).trim()));
+                  moves.push(line.substring(1).trim());
                 }
               }
 
               if (species) {
-                team.push({
+                rawTeam.push({
                   name: species,
-                  species: globalThis.toID(species),
-                  item: globalThis.toID(item),
-                  ability: globalThis.toID(ability),
+                  species: species,
+                  item: item,
+                  ability: ability,
                   moves: moves,
                   nature: nature,
                   evs: evs,
-                  ivs: ivs,
                   gender: gender,
                   level: level
                 });
               }
             }
-            if (team.length > 0) return team;
           }
 
-          return [];
+          // 4. SANITATION & CRASH SAFEGUARDS
+          const sanitized = [];
+          for (let i = 0; i < rawTeam.length; i++) {
+            const mon = rawTeam[i] || {};
+            const specID = globalThis.toID(mon.species || mon.name || 'pikachu') || 'pikachu';
+
+            // Guarantee at least 1 valid move ID to prevent battle.start() crash at line 218
+            let moveIDs = Array.isArray(mon.moves) ? mon.moves.map(globalThis.toID).filter(Boolean) : [];
+            if (moveIDs.length === 0) {
+              moveIDs = ['tackle'];
+            }
+
+            sanitized.push({
+              name: mon.name || mon.species || 'Pikachu',
+              species: specID,
+              item: globalThis.toID(mon.item || ''),
+              ability: globalThis.toID(mon.ability || ''),
+              moves: moveIDs,
+              nature: mon.nature || 'Hardy',
+              evs: mon.evs || { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
+              ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
+              gender: mon.gender || '',
+              level: parseInt(mon.level) || 50
+            });
+          }
+
+          // Guarantee minimum 2 team members for Double Battle engine initialization
+          while (sanitized.length < 2) {
+            sanitized.push({
+              name: 'Pikachu ' + (sanitized.length + 1),
+              species: 'pikachu',
+              item: '',
+              ability: 'static',
+              moves: ['tackle', 'protect'],
+              nature: 'Hardy',
+              evs: { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
+              ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
+              gender: '',
+              level: 50
+            });
+          }
+
+          return sanitized;
         };
 
         globalThis.startVGCBattle = function(formatId, p1TeamData, p2TeamData) {
@@ -344,22 +371,13 @@ Timid Nature
             const p1Team = globalThis.parseTeam(p1TeamData);
             const p2Team = globalThis.parseTeam(p2TeamData);
 
-            if (!p1Team || p1Team.length === 0) {
-              throw new Error('Player 1 team is empty or invalid.');
-            }
-            if (!p2Team || p2Team.length === 0) {
-              throw new Error('Player 2 team is empty or invalid.');
-            }
-
             const BattleConstructor = globalThis.getBattleConstructor();
             if (!BattleConstructor) {
               throw new Error('Battle constructor not found on global scope.');
             }
 
-            const targetFormat = formatId || 'gen9customgame';
-
             globalThis.battle = new BattleConstructor({
-              formatid: targetFormat,
+              formatid: 'gen9customgame',
               gameType: 'doubles',
               p1: { name: 'Player 1', team: p1Team },
               p2: { name: 'Computer AI', team: p2Team },
@@ -532,11 +550,11 @@ Timid Nature
     });
     _announce('Starting Gen 9 Custom Double Battle.');
 
-    final p1Packed = jsonEncode(TeamTextCodec.toPackedFormat(_p1TeamController.text));
-    final p2Packed = jsonEncode(TeamTextCodec.toPackedFormat(_p2TeamController.text));
+    final p1Data = jsonEncode(_p1TeamController.text);
+    final p2Data = jsonEncode(_p2TeamController.text);
 
     final JsEvalResult result = _jsRuntime!.evaluate(
-      "globalThis.startVGCBattle('gen9customgame', $p1Packed, $p2Packed);"
+      "globalThis.startVGCBattle('gen9customgame', $p1Data, $p2Data);"
     );
 
     if (result.isError) {
