@@ -105,21 +105,41 @@ Timid Nature
     try {
       final runtime = getJavascriptRuntime();
 
+      // Proxy polyfill to capture exports globally and prevent overwrites by dex.js
       const String envPolyfill = '''
         var global = globalThis;
         var window = globalThis;
         var exports = globalThis;
-        var module = { exports: globalThis };
-        var process = { env: { NODE_ENV: 'production' }, argv: [], cwd: function() { return '/'; } };
+        
+        var _moduleExports = globalThis;
+        var module = {
+          get exports() {
+            return _moduleExports;
+          },
+          set exports(val) {
+            _moduleExports = val;
+            if (val && (typeof val === 'object' || typeof val === 'function')) {
+              Object.assign(globalThis, val);
+            }
+          }
+        };
       ''';
       runtime.evaluate(envPolyfill);
 
+      // 1. Load Core Engine
       final engineCode = await rootBundle.loadString('assets/engine.js');
       final engineResult = runtime.evaluate(engineCode);
       if (engineResult.isError) {
         throw Exception('Engine JS Evaluation Failed: ${engineResult.stringResult}');
       }
 
+      // Explicitly lock Battle constructor to global scope right after loading engine.js
+      runtime.evaluate('''
+        if (typeof Battle !== 'undefined') globalThis.Battle = Battle;
+        if (typeof Sim !== 'undefined' && Sim.Battle) globalThis.Battle = Sim.Battle;
+      ''');
+
+      // 2. Load Dex Data
       try {
         final dexJs = await rootBundle.loadString('assets/js/dex.js');
         runtime.evaluate(dexJs);
@@ -127,6 +147,7 @@ Timid Nature
         debugPrint('dex.js asset load warning: $e');
       }
 
+      // 3. Load Learnsets
       try {
         final learnsetsJson = await rootBundle.loadString('assets/js/learnsets.json');
         runtime.evaluate('if (typeof Dex !== "undefined") { Dex.data = Dex.data || {}; Dex.data.Learnsets = $learnsetsJson; }');
@@ -134,6 +155,7 @@ Timid Nature
         debugPrint('learnsets.json asset load warning: $e');
       }
 
+      // 4. Inject Runtime Methods & Fallbacks
       const String jsPatchCode = '''
         globalThis.logBuffer = [];
 
@@ -147,19 +169,7 @@ Timid Nature
           if (globalThis.Battle) return globalThis.Battle;
           if (globalThis.Sim && globalThis.Sim.Battle) return globalThis.Sim.Battle;
           if (globalThis.Dex && globalThis.Dex.Battle) return globalThis.Dex.Battle;
-          if (typeof module !== 'undefined' && module.exports) {
-            if (module.exports.Battle) return module.exports.Battle;
-            if (module.exports.Sim && module.exports.Sim.Battle) return module.exports.Sim.Battle;
-          }
-          if (typeof exports !== 'undefined' && exports.Battle) return exports.Battle;
-          return null;
-        };
-
-        globalThis.getDexObject = function() {
-          if (globalThis.Dex) return globalThis.Dex;
-          if (globalThis.Sim && globalThis.Sim.Dex) return globalThis.Sim.Dex;
-          if (typeof module !== 'undefined' && module.exports && module.exports.Dex) return module.exports.Dex;
-          if (globalThis.PokemonShowdown && globalThis.PokemonShowdown.Dex) return globalThis.PokemonShowdown.Dex;
+          if (globalThis.PokemonShowdown && globalThis.PokemonShowdown.Battle) return globalThis.PokemonShowdown.Battle;
           return null;
         };
 
@@ -274,7 +284,7 @@ Timid Nature
             });
           }
 
-          // Ensure minimum 2 mons for double battle format
+          // Ensure minimum 2 Pokémon to satisfy Doubles lead slots
           while (sanitized.length < 2) {
             sanitized.push({
               name: 'Pikachu ' + (sanitized.length + 1),
