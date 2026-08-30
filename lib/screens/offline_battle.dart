@@ -105,7 +105,7 @@ Timid Nature
     try {
       final runtime = getJavascriptRuntime();
 
-      // 1. Full Node & CommonJS Environment Polyfill with Linked Exports
+      // 1. Full Node & Browser Environment Polyfill
       const String envPolyfill = '''
         var global = globalThis;
         var window = globalThis;
@@ -120,8 +120,8 @@ Timid Nature
           };
         }
 
-        globalThis.module = globalThis.module || { exports: {} };
-        globalThis.exports = globalThis.module.exports;
+        globalThis.exports = {};
+        globalThis.module = { exports: globalThis.exports };
 
         if (!globalThis.require) {
           globalThis.require = function(id) {
@@ -145,9 +145,11 @@ Timid Nature
         (function() {
           var mod = globalThis.module ? globalThis.module.exports : null;
           var exp = globalThis.exports;
-          var src = mod || exp;
 
-          if (src) {
+          var sources = [mod, exp];
+          for (var i = 0; i < sources.length; i++) {
+            var src = sources[i];
+            if (!src) continue;
             if (typeof src === 'function') {
               globalThis.Battle = src;
             } else if (typeof src === 'object') {
@@ -161,9 +163,7 @@ Timid Nature
                 if (src.default.Sim && src.default.Sim.Battle) globalThis.Battle = src.default.Sim.Battle;
               }
               for (var k in src) {
-                if (!globalThis[k]) {
-                  try { globalThis[k] = src[k]; } catch(e) {}
-                }
+                try { if (!globalThis[k]) globalThis[k] = src[k]; } catch(e) {}
               }
             }
           }
@@ -186,7 +186,7 @@ Timid Nature
         debugPrint('learnsets.json asset load warning: $e');
       }
 
-      // 6. Inject Runtime Helpers & Deep Constructor Scanner
+      // 6. Deep Prototype & Global Property Inspector Patch
       const String jsPatchCode = '''
         globalThis.logBuffer = [];
 
@@ -197,11 +197,20 @@ Timid Nature
         };
 
         globalThis.getBattleConstructor = function() {
+          function isBattleCtor(fn) {
+            if (typeof fn !== 'function') return false;
+            if (fn.name === 'Battle') return true;
+            if (fn.prototype && (typeof fn.prototype.choose === 'function' || typeof fn.prototype.start === 'function' || typeof fn.prototype.setPlayer === 'function')) {
+              return true;
+            }
+            return false;
+          }
+
           function inspect(obj, depth) {
             if (!obj || depth > 3) return null;
-            if (typeof obj === 'function' && (obj.name === 'Battle' || (obj.prototype && obj.prototype.choose))) return obj;
-            if (typeof obj.Battle === 'function') return obj.Battle;
-            if (obj.Sim && typeof obj.Sim.Battle === 'function') return obj.Sim.Battle;
+            if (isBattleCtor(obj)) return obj;
+            if (isBattleCtor(obj.Battle)) return obj.Battle;
+            if (obj.Sim && isBattleCtor(obj.Sim.Battle)) return obj.Sim.Battle;
             if (obj.default) {
               var res = inspect(obj.default, depth + 1);
               if (res) return res;
@@ -209,29 +218,26 @@ Timid Nature
             return null;
           }
 
-          if (typeof globalThis.Battle === 'function') return globalThis.Battle;
-          if (globalThis.Sim && typeof globalThis.Sim.Battle === 'function') return globalThis.Sim.Battle;
+          if (isBattleCtor(globalThis.Battle)) return globalThis.Battle;
+          if (globalThis.Sim && isBattleCtor(globalThis.Sim.Battle)) return globalThis.Sim.Battle;
 
           var found = null;
-          if (typeof module !== 'undefined' && module.exports) {
-            found = inspect(module.exports, 0);
+          if (globalThis.module && globalThis.module.exports) {
+            found = inspect(globalThis.module.exports, 0);
             if (found) return found;
           }
-          if (typeof exports !== 'undefined') {
-            found = inspect(exports, 0);
-            if (found) return found;
-          }
-          if (globalThis.Dex) {
-            found = inspect(globalThis.Dex, 0);
+          if (globalThis.exports) {
+            found = inspect(globalThis.exports, 0);
             if (found) return found;
           }
 
-          for (var key in globalThis) {
+          var keys = Object.getOwnPropertyNames(globalThis);
+          for (var i = 0; i < keys.length; i++) {
+            var key = keys[i];
+            if (key === 'globalThis' || key === 'global' || key === 'window' || key === 'self') continue;
             try {
-              if (key !== 'globalThis' && key !== 'global' && key !== 'window' && key !== 'self') {
-                found = inspect(globalThis[key], 1);
-                if (found) return found;
-              }
+              found = inspect(globalThis[key], 1);
+              if (found) return found;
             } catch(e) {}
           }
 
@@ -375,9 +381,8 @@ Timid Nature
 
             const BattleConstructor = globalThis.getBattleConstructor();
             if (!BattleConstructor) {
-              const modKeys = (typeof module !== 'undefined' && module.exports) ? Object.keys(module.exports).join(', ') : 'none';
-              const expKeys = (typeof exports !== 'undefined') ? Object.keys(exports).join(', ') : 'none';
-              throw new Error('Battle constructor not found. module.exports keys: [' + modKeys + '], exports keys: [' + expKeys + ']');
+              const allGlobals = Object.getOwnPropertyNames(globalThis).slice(0, 30).join(', ');
+              throw new Error('Battle constructor not found. Globals: [' + allGlobals + ']');
             }
 
             globalThis.battle = new BattleConstructor({
