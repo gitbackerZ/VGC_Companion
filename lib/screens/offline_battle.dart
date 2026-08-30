@@ -214,6 +214,38 @@ Timid Nature
         throw Exception('engine.js execution error: ${engineEval.stringResult}');
       }
 
+      // --- DIAGNOSTIC PROBE: inspect what engine.js actually exposes ---
+      final probe = runtime.evaluate('''
+        JSON.stringify({
+          moduleExportsKeys: (globalThis.module && globalThis.module.exports)
+            ? Object.keys(globalThis.module.exports)
+            : [],
+          exportsKeys: globalThis.exports ? Object.keys(globalThis.exports) : [],
+          dexKeys: (typeof Dex !== 'undefined' && Dex) ? Object.keys(Dex) : [],
+          dexPrototypeKeys: (typeof Dex !== 'undefined' && Dex && Dex.constructor && Dex.constructor.prototype)
+            ? Object.getOwnPropertyNames(Dex.constructor.prototype)
+            : [],
+          hasSimGlobal: typeof Sim,
+          hasBattleGlobal: typeof Battle,
+          hasPokemonShowdownGlobal: typeof PokemonShowdown,
+          globalKeysSample: Object.keys(globalThis).filter(function(k) {
+            return !['sendMessage','console','setTimeout','xhrRequests','idRequest',
+              'XMLHttpRequestExtension_send_native','XMLHttpRequest','fetch','exp',
+              'dummyModules','global','window','self','root','navigator','setImmediate',
+              'clearImmediate','queueMicrotask','process','performance','crypto',
+              'TextEncoder','TextDecoder','require','logBuffer'].includes(k)
+              && k.indexOf('FLUTTER_NATIVEJS') !== 0
+              && k.indexOf('__NATIVE_FLUTTER_JS__') !== 0;
+          })
+        });
+      ''');
+      if (probe.isError) {
+        debugPrint('ENGINE PROBE ERROR: ${probe.stringResult}');
+      } else {
+        debugPrint('ENGINE PROBE: ${probe.stringResult}');
+      }
+      // --- END DIAGNOSTIC PROBE ---
+
       if (dexJs.isNotEmpty) {
         runtime.evaluate(dexJs);
       }
