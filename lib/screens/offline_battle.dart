@@ -293,8 +293,8 @@ Timid Nature
           return logs;
         };
 
-        globalThis.checkAndPushRequests = function() {
-          if (!globalThis.battle) return;
+        globalThis.getDirectRequest = function() {
+          if (!globalThis.battle) return "";
           try {
             var b = globalThis.battle;
             var req = null;
@@ -307,12 +307,19 @@ Timid Nature
                 req = b.p1.currentRequest;
               }
             }
-            if (!req && typeof b.getRequests === 'function') {
-              var reqs = b.getRequests();
-              if (reqs && reqs[0]) req = reqs[0];
-            }
-            if (req) {
-              globalThis.logBuffer.push('|request|' + JSON.stringify(req));
+            if (!req) return "";
+            return (typeof req === 'string') ? req : JSON.stringify(req);
+          } catch (e) {
+            return "";
+          }
+        };
+
+        globalThis.checkAndPushRequests = function() {
+          if (!globalThis.battle) return;
+          try {
+            var reqStr = globalThis.getDirectRequest();
+            if (reqStr && reqStr.length > 0) {
+              globalThis.logBuffer.push('|request|' + reqStr);
             }
           } catch (e) {
             globalThis.logBuffer.push('|error| Request Extraction Exception: ' + (e.message || e));
@@ -436,9 +443,9 @@ Timid Nature
 
             sanitized.push({
               name: mon.name || mon.species || 'Pikachu',
-              species: specID,
-              item: globalThis.toID(mon.item || ''),
-              ability: globalThis.toID(mon.ability || ''),
+              species: mon.species || 'Pikachu',
+              item: mon.item || '',
+              ability: mon.ability || 'Static',
               moves: moveIDs,
               nature: mon.nature || 'Hardy',
               evs: mon.evs || { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
@@ -451,9 +458,9 @@ Timid Nature
           while (sanitized.length < 2) {
             sanitized.push({
               name: 'Pikachu ' + (sanitized.length + 1),
-              species: 'pikachu',
+              species: 'Pikachu',
               item: '',
-              ability: 'static',
+              ability: 'Static',
               moves: ['tackle', 'protect'],
               nature: 'Hardy',
               evs: { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
@@ -477,11 +484,9 @@ Timid Nature
               throw new Error('Battle constructor resolution failed.');
             }
 
-            globalThis.battle = new BattleCtor({
+            var battleInstance = new BattleCtor({
               formatid: 'gen9customgame',
               gameType: 'doubles',
-              p1: { name: 'Player 1', team: p1Team },
-              p2: { name: 'Computer AI', team: p2Team },
               send: function(type, data) {
                 if (Array.isArray(data)) {
                   globalThis.logBuffer.push(data.join('\\n'));
@@ -491,10 +496,20 @@ Timid Nature
               }
             });
 
-            if (typeof globalThis.battle.start === 'function') {
-              globalThis.battle.start();
-            } else if (typeof globalThis.battle.init === 'function') {
-              globalThis.battle.init();
+            globalThis.battle = battleInstance;
+
+            if (typeof battleInstance.setPlayer === 'function') {
+              battleInstance.setPlayer('p1', { name: 'Player 1', team: p1Team });
+              battleInstance.setPlayer('p2', { name: 'Computer AI', team: p2Team });
+            } else if (typeof battleInstance.join === 'function') {
+              battleInstance.join('p1', 'Player 1', 1, p1Team);
+              battleInstance.join('p2', 'Computer AI', 1, p2Team);
+            }
+
+            if (typeof battleInstance.start === 'function') {
+              battleInstance.start();
+            } else if (typeof battleInstance.init === 'function') {
+              battleInstance.init();
             }
 
             globalThis.checkAndPushRequests();
@@ -617,9 +632,14 @@ Timid Nature
   void _parseRequest(String jsonString) {
     if (jsonString.isEmpty) return;
     try {
-      final data = jsonDecode(jsonString);
+      dynamic data = jsonDecode(jsonString);
+      if (data is String) {
+        data = jsonDecode(data);
+      }
+      if (data is! Map<String, dynamic>) return;
+
       setState(() {
-        _currentRequest = data;
+        _currentRequest = Map<String, dynamic>.from(data);
 
         if (data.containsKey('teamPreview') && data['teamPreview'] == true) {
           _stage = BattleStage.teamPreview;
@@ -667,8 +687,14 @@ Timid Nature
         _statusMessage = 'JS Evaluation Error: ${result.stringResult}';
       });
       _announce('Failed to start battle.');
-    } else {
-      _fetchLogs();
+      return;
+    }
+
+    _fetchLogs();
+
+    final directReqRes = _jsRuntime!.evaluate("globalThis.getDirectRequest();");
+    if (!directReqRes.isError && directReqRes.stringResult.isNotEmpty) {
+      _parseRequest(directReqRes.stringResult);
     }
   }
 
