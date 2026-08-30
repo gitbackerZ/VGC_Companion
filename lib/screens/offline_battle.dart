@@ -60,7 +60,7 @@ Timid Nature
 - Energy Ball
 - Tailwind
 - Beat Up
-- Worry Seed
+- Protect
 
 Urshifu-Rapid-Strike @ Choice Scarf
 Ability: Unseen Fist
@@ -174,7 +174,7 @@ Timid Nature
           try {
             globalThis.battle.choose(action);
           } catch (err) {
-            globalThis.logBuffer.push('|error| Action Exception: ' + (err.stack || err.message));
+            globalThis.logBuffer.push('|error| Action Exception: ' + (err.message || err));
           }
         };
 
@@ -186,66 +186,6 @@ Timid Nature
             rawTeam = teamData;
           }
 
-          // 1. Native Dex Unpacker Attempt
-          if (rawTeam.length === 0 && typeof teamData === 'string') {
-            try {
-              const dex = globalThis.getDexObject();
-              if (dex && typeof dex.unpackTeam === 'function') {
-                const res = dex.unpackTeam(teamData);
-                if (Array.isArray(res) && res.length > 0) rawTeam = res;
-              }
-              if (rawTeam.length === 0) {
-                const TeamsObj = globalThis.Teams || (dex && dex.teams) || (globalThis.PokemonShowdown && globalThis.PokemonShowdown.Teams);
-                if (TeamsObj && typeof TeamsObj.unpack === 'function' && teamData.includes('|')) {
-                  const res = TeamsObj.unpack(teamData);
-                  if (Array.isArray(res) && res.length > 0) rawTeam = res;
-                }
-              }
-            } catch (e) {}
-          }
-
-          // 2. Packed String Unpacker ("Mon1]Mon2...")
-          if (rawTeam.length === 0 && typeof teamData === 'string' && teamData.includes(']')) {
-            const blocks = teamData.split(']');
-            for (let b = 0; b < blocks.length; b++) {
-              const block = blocks[b].trim();
-              if (!block) continue;
-              const parts = block.split('|');
-              const name = parts[0] || '';
-              const species = parts[1] || name;
-              const item = parts[2] || '';
-              const ability = parts[3] || '';
-              const moves = parts[4] ? parts[4].split(',').filter(Boolean) : [];
-              const nature = parts[5] || 'Hardy';
-              const evParts = parts[6] ? parts[6].split(',') : [];
-              const evs = {
-                hp: parseInt(evParts[0]) || 0,
-                atk: parseInt(evParts[1]) || 0,
-                def: parseInt(evParts[2]) || 0,
-                spa: parseInt(evParts[3]) || 0,
-                spd: parseInt(evParts[4]) || 0,
-                spe: parseInt(evParts[5]) || 0
-              };
-              const gender = parts[7] || '';
-              const level = parseInt(parts[10]) || 50;
-
-              if (species || name) {
-                rawTeam.push({
-                  name: name || species,
-                  species: species || name,
-                  item: item,
-                  ability: ability,
-                  moves: moves,
-                  nature: nature,
-                  evs: evs,
-                  gender: gender,
-                  level: level
-                });
-              }
-            }
-          }
-
-          // 3. Standard Multiline Export Importer
           if (rawTeam.length === 0 && typeof teamData === 'string') {
             const blocks = teamData.split(/\\n\\s*\\n/);
             for (let b = 0; b < blocks.length; b++) {
@@ -270,17 +210,7 @@ Timid Nature
                     header = parts[0].trim();
                     item = parts[1].trim();
                   }
-                  const gMatch = header.match(/\\s*\\(([MF])\\)\$/i);
-                  if (gMatch) {
-                    gender = gMatch[1].toUpperCase();
-                    header = header.substring(0, gMatch.index).trim();
-                  }
-                  const sMatch = header.match(/^(.*?)\\s*\\(([^)]+)\\)\$/);
-                  if (sMatch) {
-                    species = sMatch[2].trim();
-                  } else {
-                    species = header.trim();
-                  }
+                  species = header.trim();
                 } else if (line.startsWith('Ability:')) {
                   ability = line.replace('Ability:', '').trim();
                 } else if (line.startsWith('Level:')) {
@@ -320,16 +250,14 @@ Timid Nature
             }
           }
 
-          // 4. SANITATION & CRASH SAFEGUARDS
           const sanitized = [];
           for (let i = 0; i < rawTeam.length; i++) {
             const mon = rawTeam[i] || {};
             const specID = globalThis.toID(mon.species || mon.name || 'pikachu') || 'pikachu';
 
-            // Guarantee at least 1 valid move ID to prevent battle.start() crash at line 218
             let moveIDs = Array.isArray(mon.moves) ? mon.moves.map(globalThis.toID).filter(Boolean) : [];
             if (moveIDs.length === 0) {
-              moveIDs = ['tackle'];
+              moveIDs = ['tackle', 'protect'];
             }
 
             sanitized.push({
@@ -346,7 +274,7 @@ Timid Nature
             });
           }
 
-          // Guarantee minimum 2 team members for Double Battle engine initialization
+          // Ensure minimum 2 mons for double battle format
           while (sanitized.length < 2) {
             sanitized.push({
               name: 'Pikachu ' + (sanitized.length + 1),
@@ -392,7 +320,8 @@ Timid Nature
 
             globalThis.battle.start();
           } catch (err) {
-            globalThis.logBuffer.push('|error| Engine Crash: ' + (err.stack || err.message));
+            const errMsg = (err && err.message) ? err.message : String(err);
+            globalThis.logBuffer.push('|error| Engine Crash: ' + errMsg);
           }
         };
       ''';
@@ -430,10 +359,7 @@ Timid Nature
     if (_jsRuntime == null) return;
     try {
       final JsEvalResult result = _jsRuntime!.evaluate("globalThis.getLogs();");
-      if (result.isError) {
-        debugPrint("JS Error: ${result.stringResult}");
-        return;
-      }
+      if (result.isError) return;
       final String rawJson = result.stringResult;
       final List<dynamic> parsed = jsonDecode(rawJson);
       if (parsed.isNotEmpty) {
@@ -618,7 +544,7 @@ Timid Nature
     _jsRuntime!.evaluate("globalThis.sendAction('$p1Action');");
     _jsRuntime!.evaluate("globalThis.sendAction('>p2 default');");
 
-    _announce('Player actions submitted. Computer opponent executing turn.');
+    _announce('Player actions submitted.');
     setState(() => _currentRequest = null);
   }
 
@@ -704,14 +630,12 @@ Timid Nature
         const SizedBox(height: 4),
         Semantics(
           label: 'Player 1 Human Team Input Text Area',
-          hint: 'Paste standard Pokémon Showdown export or packed team text for your team',
           child: TextField(
             controller: _p1TeamController,
             maxLines: 5,
             style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
             decoration: const InputDecoration(
               labelText: 'Player 1 Team Sheet',
-              hintText: 'Paste standard Showdown team sheet here...',
               border: OutlineInputBorder(),
             ),
           ),
@@ -721,14 +645,12 @@ Timid Nature
         const SizedBox(height: 4),
         Semantics(
           label: 'Player 2 Computer AI Team Input Text Area',
-          hint: 'Paste standard Pokémon Showdown export or packed team text for the computer opponent',
           child: TextField(
             controller: _p2TeamController,
             maxLines: 5,
             style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
             decoration: const InputDecoration(
               labelText: 'Computer Team Sheet',
-              hintText: 'Paste standard Showdown team sheet here...',
               border: OutlineInputBorder(),
             ),
           ),
@@ -737,7 +659,6 @@ Timid Nature
         Semantics(
           button: true,
           label: 'Start Player versus Computer Battle',
-          hint: 'Begins team preview for player vs computer battle',
           child: SizedBox(
             width: double.infinity,
             height: 48,
@@ -778,7 +699,6 @@ Timid Nature
             return Semantics(
               button: true,
               label: '$monName. Status: $posText.',
-              hint: 'Double tap to toggle selection for line-up.',
               child: InkWell(
                 onTap: () {
                   setState(() {
@@ -812,8 +732,6 @@ Timid Nature
         Semantics(
           button: true,
           enabled: _selectedPreviewSlots.length >= 2,
-          label: 'Confirm Lineup Selection',
-          hint: 'Submits selected Pokémon and starts battle turn 1',
           child: SizedBox(
             width: double.infinity,
             height: 44,
@@ -851,7 +769,6 @@ Timid Nature
           ),
         ),
         const SizedBox(height: 8),
-
         if (_stage == BattleStage.inBattle && _currentRequest != null) ...[
           Card(
             margin: EdgeInsets.zero,
@@ -909,7 +826,6 @@ Timid Nature
                   Semantics(
                     button: true,
                     label: 'Submit Player Actions to Engine',
-                    hint: 'Locks in player actions and triggers opponent turn selection',
                     child: SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
@@ -955,7 +871,6 @@ Timid Nature
             if (!isForceSwitch && switches.isNotEmpty)
               Semantics(
                 button: true,
-                label: isSwitch ? 'Switch to Move selection' : 'Switch to Pokémon replacement',
                 child: TextButton(
                   onPressed: () => onToggleSwitch(!isSwitch),
                   child: Text(isSwitch ? 'Use Move' : 'Switch Out', style: const TextStyle(fontSize: 11)),
@@ -964,68 +879,55 @@ Timid Nature
           ],
         ),
         if (isSwitch || isForceSwitch) ...[
-          Semantics(
-            label: '$slotTitle Switch Pokémon Selection Dropdown',
-            child: DropdownButton<int>(
-              isExpanded: true,
-              value: switches.isEmpty ? 1 : (selectedSwitch > switches.length ? switches.first['slot'] as int : selectedSwitch),
-              items: switches.map((s) {
-                return DropdownMenuItem<int>(
-                  value: s['slot'] as int,
-                  child: Text('Switch to: ${s['name']} (${s['condition']})', style: const TextStyle(fontSize: 11)),
-                );
-              }).toList(),
-              onChanged: onSwitchChanged,
-            ),
+          DropdownButton<int>(
+            isExpanded: true,
+            value: switches.isEmpty ? 1 : (selectedSwitch > switches.length ? switches.first['slot'] as int : selectedSwitch),
+            items: switches.map((s) {
+              return DropdownMenuItem<int>(
+                value: s['slot'] as int,
+                child: Text('Switch to: ${s['name']} (${s['condition']})', style: const TextStyle(fontSize: 11)),
+              );
+            }).toList(),
+            onChanged: onSwitchChanged,
           ),
         ] else ...[
           Row(
             children: [
               Expanded(
-                child: Semantics(
-                  label: '$slotTitle Move Selection Dropdown',
-                  child: DropdownButton<int>(
-                    isExpanded: true,
-                    value: moves.isEmpty ? 1 : (selectedMove > moves.length ? 1 : selectedMove),
-                    items: List.generate(moves.length, (idx) {
-                      final m = moves[idx];
-                      return DropdownMenuItem<int>(
-                        value: idx + 1,
-                        child: Text(m['move'], style: const TextStyle(fontSize: 11)),
-                      );
-                    }),
-                    onChanged: onMoveChanged,
-                  ),
+                child: DropdownButton<int>(
+                  isExpanded: true,
+                  value: moves.isEmpty ? 1 : (selectedMove > moves.length ? 1 : selectedMove),
+                  items: List.generate(moves.length, (idx) {
+                    final m = moves[idx];
+                    return DropdownMenuItem<int>(
+                      value: idx + 1,
+                      child: Text(m['move'], style: const TextStyle(fontSize: 11)),
+                    );
+                  }),
+                  onChanged: onMoveChanged,
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: Semantics(
-                  label: '$slotTitle Opponent Target Selection Dropdown',
-                  child: DropdownButton<int>(
-                    isExpanded: true,
-                    value: selectedTarget,
-                    items: const [
-                      DropdownMenuItem(value: 1, child: Text('Target: Computer 1 (p2a)', style: TextStyle(fontSize: 10))),
-                      DropdownMenuItem(value: 2, child: Text('Target: Computer 2 (p2b)', style: TextStyle(fontSize: 10))),
-                      DropdownMenuItem(value: -2, child: Text('Target: Ally Slot 2', style: TextStyle(fontSize: 10))),
-                    ],
-                    onChanged: onTargetChanged,
-                  ),
+                child: DropdownButton<int>(
+                  isExpanded: true,
+                  value: selectedTarget,
+                  items: const [
+                    DropdownMenuItem(value: 1, child: Text('Target: Computer 1 (p2a)', style: TextStyle(fontSize: 10))),
+                    DropdownMenuItem(value: 2, child: Text('Target: Computer 2 (p2b)', style: TextStyle(fontSize: 10))),
+                    DropdownMenuItem(value: -2, child: Text('Target: Ally Slot 2', style: TextStyle(fontSize: 10))),
+                  ],
+                  onChanged: onTargetChanged,
                 ),
               ),
             ],
           ),
           if (canMega)
-            Semantics(
-              label: 'Mega Evolution Toggle Checkbox',
-              value: isMega ? 'Mega Evolution Enabled' : 'Mega Evolution Disabled',
-              child: Row(
-                children: [
-                  Checkbox(value: isMega, onChanged: (v) => onMegaToggled(v ?? false)),
-                  const Text('Mega Evolve', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.purpleAccent)),
-                ],
-              ),
+            Row(
+              children: [
+                Checkbox(value: isMega, onChanged: (v) => onMegaToggled(v ?? false)),
+                const Text('Mega Evolve', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.purpleAccent)),
+              ],
             ),
         ],
       ],
@@ -1042,20 +944,16 @@ Timid Nature
               final name = _activeNames[slot] ?? 'Empty';
               final hp = _activeHp[slot] ?? '100/100';
               return Expanded(
-                child: Semantics(
-                  container: true,
-                  label: '$title slot $slot: $name, Health $hp',
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 2),
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(color: Colors.grey[850], borderRadius: BorderRadius.circular(4)),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(name, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                        Text('HP: $hp', style: const TextStyle(fontSize: 9, fontFamily: 'monospace')),
-                      ],
-                    ),
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(color: Colors.grey[850], borderRadius: BorderRadius.circular(4)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(name, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                      Text('HP: $hp', style: const TextStyle(fontSize: 9, fontFamily: 'monospace')),
+                    ],
                   ),
                 ),
               );
@@ -1067,20 +965,17 @@ Timid Nature
   }
 
   Widget _buildLiveTerminal() {
-    return Semantics(
-      label: 'Live Battle Protocol Terminal Logs',
-      child: Container(
-        height: 100,
-        width: double.infinity,
-        margin: const EdgeInsets.all(8),
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(6)),
-        child: ListView.builder(
-          itemCount: _rawLogs.length,
-          itemBuilder: (context, index) {
-            return Text(_rawLogs[index], style: const TextStyle(color: Colors.greenAccent, fontFamily: 'monospace', fontSize: 10));
-          },
-        ),
+    return Container(
+      height: 100,
+      width: double.infinity,
+      margin: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(6)),
+      child: ListView.builder(
+        itemCount: _rawLogs.length,
+        itemBuilder: (context, index) {
+          return Text(_rawLogs[index], style: const TextStyle(color: Colors.greenAccent, fontFamily: 'monospace', fontSize: 10));
+        },
       ),
     );
   }
