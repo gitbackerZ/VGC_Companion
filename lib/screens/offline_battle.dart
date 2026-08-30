@@ -118,7 +118,7 @@ Timid Nature
       }
 
       final String combinedJsScript = '''
-        // 1. Core Polyfills
+        // 1. Comprehensive Host & Runtime Polyfills
         globalThis.global = globalThis;
         globalThis.window = globalThis;
         globalThis.self = globalThis;
@@ -130,6 +130,21 @@ Timid Nature
             argv: [],
             nextTick: function(cb) { setTimeout(cb, 0); },
             cwd: function() { return ''; }
+          };
+        }
+
+        if (!globalThis.performance) {
+          globalThis.performance = { now: function() { return Date.now(); } };
+        }
+
+        if (!globalThis.crypto) {
+          globalThis.crypto = {
+            getRandomValues: function(buffer) {
+              for (var i = 0; i < buffer.length; i++) {
+                buffer[i] = Math.floor(Math.random() * 256);
+              }
+              return buffer;
+            }
           };
         }
 
@@ -149,28 +164,58 @@ Timid Nature
           };
         }
 
-        // 2. Setup Dedicated Export Sandbox
-        var rootExports = {};
-        var rootModule = { exports: rootExports };
-        globalThis.exports = rootExports;
-        globalThis.module = rootModule;
+        // 2. Intercept module.exports re-assignments
+        var internalExports = {};
+        globalThis.exports = internalExports;
+
+        var internalModule = {
+          _exports: internalExports
+        };
+
+        Object.defineProperty(internalModule, 'exports', {
+          get: function() {
+            return this._exports;
+          },
+          set: function(val) {
+            this._exports = val;
+            if (val) {
+              if (typeof val === 'function') {
+                globalThis.Battle = val;
+              } else if (typeof val === 'object') {
+                if (val.Battle) globalThis.Battle = val.Battle;
+                if (val.Sim && val.Sim.Battle) globalThis.Battle = val.Sim.Battle;
+                if (val.Sim) globalThis.Sim = val.Sim;
+                if (val.Dex) globalThis.Dex = val.Dex;
+                for (var k in val) {
+                  try { if (!globalThis[k]) globalThis[k] = val[k]; } catch(e) {}
+                }
+              }
+            }
+          },
+          configurable: true,
+          enumerable: true
+        });
+
+        globalThis.module = internalModule;
 
         if (!globalThis.require) {
           globalThis.require = function(id) {
             if (id === 'fs' || id === 'path' || id === 'crypto' || id === 'util' || id === 'os') return {};
             if (globalThis[id]) return globalThis[id];
-            return globalThis.exports || {};
+            return globalThis.module.exports || globalThis.exports || {};
           };
         }
 
         globalThis.logBuffer = [];
 
-        // 3. Evaluate Engine Code safely
-        try {
-          $engineCode
-        } catch (err) {
-          globalThis.logBuffer.push('|error| engine.js Execution Exception: ' + (err.stack || err.message || err));
-        }
+        // 3. Evaluate Engine inside a bound scope context
+        (function(exports, module, global, window, self) {
+          try {
+            $engineCode
+          } catch (err) {
+            globalThis.logBuffer.push('|error| engine.js Execution Exception: ' + (err.stack || err.message || err));
+          }
+        }).call(globalThis, globalThis.exports, globalThis.module, globalThis, globalThis, globalThis);
 
         // 4. Evaluate Dex & Learnsets
         try {
@@ -184,7 +229,7 @@ Timid Nature
           Dex.data.Learnsets = $learnsetsJson;
         }
 
-        // 5. Robust Battle Constructor Resolver
+        // 5. Deep Constructor Resolution Algorithm
         globalThis.isBattleCtor = function(fn) {
           if (typeof fn !== 'function') return false;
           if (fn.name === 'Battle') return true;
@@ -202,12 +247,8 @@ Timid Nature
           if (globalThis.Sim && globalThis.isBattleCtor(globalThis.Sim.Battle)) return globalThis.Sim.Battle;
           if (globalThis.PokemonShowdown && globalThis.isBattleCtor(globalThis.PokemonShowdown.Battle)) return globalThis.PokemonShowdown.Battle;
 
-          var targets = [
-            rootModule.exports,
-            rootExports,
-            globalThis.module ? globalThis.module.exports : null,
-            globalThis.exports
-          ];
+          var modExp = globalThis.module ? globalThis.module.exports : null;
+          var targets = [modExp, globalThis.exports];
 
           for (var i = 0; i < targets.length; i++) {
             var t = targets[i];
