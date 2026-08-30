@@ -193,7 +193,7 @@ Timid Nature
 
       runtime.evaluate(polyfillsScript);
 
-      // 3. Evaluate engine.js and throw strictly if execution fails
+      // 3. Evaluate engine.js
       final engineEval = runtime.evaluate(engineCode);
       if (engineEval.isError) {
         throw Exception('engine.js JS Execution Error: ${engineEval.stringResult}');
@@ -207,7 +207,7 @@ Timid Nature
         }
       }
 
-      // 5. Hydrate Learnsets, resolve Battle constructor safely, and setup helper functions
+      // 5. Hydrate Learnsets, resolve Battle constructor, and setup helper functions
       final String helperScript = '''
         if (typeof Dex !== "undefined") {
           Dex.data = Dex.data || {};
@@ -215,64 +215,84 @@ Timid Nature
         }
 
         (function resolveBattleConstructor() {
-          if (typeof globalThis.Battle === 'function' && globalThis.Battle !== Object) {
-            return;
-          }
-
           function isBattleCtor(fn) {
-            if (typeof fn !== 'function') return false;
+            if (typeof fn !== 'function' || fn === Object || fn === Array) return false;
             if (fn.name === 'Battle') return true;
             var p = fn.prototype;
-            if (!p) return false;
-            var methods = ['choose', 'setPlayer', 'makeRequest', 'start', 'commitDecisions', 'step', 'getUndoLog', 'init', 'parseChoice'];
-            for (var i = 0; i < methods.length; i++) {
-              if (typeof p[methods[i]] === 'function') return true;
+            if (p) {
+              var methods = ['choose', 'setPlayer', 'makeRequest', 'start', 'commitDecisions', 'step', 'init'];
+              for (var i = 0; i < methods.length; i++) {
+                if (typeof p[methods[i]] === 'function') return true;
+              }
             }
+            try {
+              var str = fn.toString();
+              if (str.indexOf('formatid') !== -1 || str.indexOf('commitDecisions') !== -1 || (str.indexOf('p1') !== -1 && str.indexOf('p2') !== -1)) {
+                return true;
+              }
+            } catch (e) {}
             return false;
           }
 
-          function search(obj, depth, visited) {
-            if (!obj || (typeof obj !== 'object' && typeof obj !== 'function')) return null;
-            if (depth > 4) return null;
-            if (visited.indexOf(obj) !== -1) return null;
-            visited.push(obj);
-
-            if (isBattleCtor(obj)) return obj;
-            if (obj.Battle && isBattleCtor(obj.Battle)) return obj.Battle;
-            if (obj.Sim && isBattleCtor(obj.Sim.Battle)) return obj.Sim.Battle;
-            if (obj.default) {
-              if (isBattleCtor(obj.default)) return obj.default;
-              if (obj.default.Battle && isBattleCtor(obj.default.Battle)) return obj.default.Battle;
-            }
-
-            try {
-              var keys = Object.keys(obj);
-              for (var i = 0; i < keys.length; i++) {
-                var k = keys[i];
-                if (k === 'globalThis' || k === 'global' || k === 'window' || k === 'self' || k === 'root' || k === 'Dex') continue;
-                var val = obj[k];
-                var found = search(val, depth + 1, visited);
-                if (found) return found;
-              }
-            } catch (e) {}
-            return null;
+          // 1. Check direct global properties
+          if (isBattleCtor(globalThis.Battle)) return;
+          if (globalThis.Dex && isBattleCtor(globalThis.Dex.Battle)) {
+            globalThis.Battle = globalThis.Dex.Battle;
+            return;
+          }
+          if (globalThis.Sim && isBattleCtor(globalThis.Sim.Battle)) {
+            globalThis.Battle = globalThis.Sim.Battle;
+            return;
           }
 
-          var targets = [
-            globalThis.module ? globalThis.module.exports : null,
-            globalThis.exports,
-            globalThis.Sim,
-            globalThis.PokemonShowdown,
-            globalThis.Pkmn,
-            globalThis
-          ];
-
-          var visited = [];
-          for (var i = 0; i < targets.length; i++) {
-            var res = search(targets[i], 0, visited);
-            if (res) {
-              globalThis.Battle = res;
+          // 2. Check module.exports (Direct function or Object container)
+          var modExp = globalThis.module ? globalThis.module.exports : null;
+          if (isBattleCtor(modExp)) {
+            globalThis.Battle = modExp;
+            return;
+          }
+          if (modExp && typeof modExp === 'object') {
+            if (isBattleCtor(modExp.Battle)) {
+              globalThis.Battle = modExp.Battle;
               return;
+            }
+            if (modExp.Sim && isBattleCtor(modExp.Sim.Battle)) {
+              globalThis.Battle = modExp.Sim.Battle;
+              return;
+            }
+            if (modExp.Dex && isBattleCtor(modExp.Dex.Battle)) {
+              globalThis.Battle = modExp.Dex.Battle;
+              return;
+            }
+            if (modExp.default) {
+              if (isBattleCtor(modExp.default)) {
+                globalThis.Battle = modExp.default;
+                return;
+              }
+              if (isBattleCtor(modExp.default.Battle)) {
+                globalThis.Battle = modExp.default.Battle;
+                return;
+              }
+            }
+          }
+
+          // 3. Deep search global scope and module exports
+          var searchTargets = [modExp, globalThis.Dex, globalThis.Sim, globalThis.exports, globalThis];
+          for (var t = 0; t < searchTargets.length; t++) {
+            var target = searchTargets[t];
+            if (!target || (typeof target !== 'object' && typeof target !== 'function')) continue;
+
+            var keys = Object.getOwnPropertyNames(target);
+            for (var k = 0; k < keys.length; k++) {
+              var key = keys[k];
+              if (key === 'globalThis' || key === 'global' || key === 'window' || key === 'self' || key === 'root') continue;
+              try {
+                var val = target[key];
+                if (isBattleCtor(val)) {
+                  globalThis.Battle = val;
+                  return;
+                }
+              } catch (e) {}
             }
           }
         })();
@@ -414,12 +434,22 @@ Timid Nature
             const p1Team = globalThis.parseTeam(p1TeamData);
             const p2Team = globalThis.parseTeam(p2TeamData);
 
-            const BattleCtor = globalThis.Battle;
+            let BattleCtor = globalThis.Battle;
+            if (typeof BattleCtor !== 'function') {
+              if (globalThis.module && typeof globalThis.module.exports === 'function') {
+                BattleCtor = globalThis.module.exports;
+              } else if (globalThis.module && globalThis.module.exports && typeof globalThis.module.exports.Battle === 'function') {
+                BattleCtor = globalThis.module.exports.Battle;
+              } else if (globalThis.Dex && typeof globalThis.Dex.Battle === 'function') {
+                BattleCtor = globalThis.Dex.Battle;
+              }
+            }
+
             if (typeof BattleCtor !== 'function') {
               const bType = typeof globalThis.Battle;
+              const modType = globalThis.module ? typeof globalThis.module.exports : 'none';
               const keys = Object.getOwnPropertyNames(globalThis).join(', ');
-              const modKeys = globalThis.module && globalThis.module.exports ? Object.keys(globalThis.module.exports).join(', ') : 'none';
-              throw new Error('Battle constructor invalid on globalThis (type: ' + bType + '). Module Exports: [' + modKeys + ']. Global Keys: [' + keys + ']');
+              throw new Error('Battle constructor invalid on globalThis (type: ' + bType + ', modExportType: ' + modType + '). Global Keys: [' + keys + ']');
             }
 
             globalThis.battle = new BattleCtor({
