@@ -100,7 +100,6 @@ Timid Nature
   Future<void> _initEngine() async {
     try {
       final runtime = getJavascriptRuntime();
-
       final engineCode = await rootBundle.loadString('assets/engine.js');
 
       String dexJs = '';
@@ -216,10 +215,7 @@ Timid Nature
       }
 
       if (dexJs.isNotEmpty) {
-        final dexEval = runtime.evaluate(dexJs);
-        if (dexEval.isError) {
-          debugPrint('dex.js execution warning: ${dexEval.stringResult}');
-        }
+        runtime.evaluate(dexJs);
       }
 
       final String helperScript = '''
@@ -238,10 +234,6 @@ Timid Nature
                   return true;
                 }
               }
-              var str = fn.toString();
-              if (str.indexOf('formatid') !== -1 || str.indexOf('commitDecisions') !== -1 || str.indexOf('Side') !== -1) {
-                return true;
-              }
             } catch (e) {}
             return false;
           }
@@ -251,9 +243,7 @@ Timid Nature
             globalThis.Dex ? globalThis.Dex.Battle : null,
             globalThis.Sim ? globalThis.Sim.Battle : null,
             globalThis.module ? globalThis.module.exports : null,
-            globalThis.module && globalThis.module.exports ? globalThis.module.exports.Battle : null,
-            globalThis.module && globalThis.module.exports ? globalThis.module.exports.Sim ? globalThis.module.exports.Sim.Battle : null : null,
-            globalThis.exports ? globalThis.exports.Battle : null
+            globalThis.module && globalThis.module.exports ? globalThis.module.exports.Battle : null
           ];
 
           for (var i = 0; i < candidates.length; i++) {
@@ -262,23 +252,7 @@ Timid Nature
               return;
             }
           }
-
-          var searchTargets = [globalThis.module ? globalThis.module.exports : null, globalThis.Dex, globalThis.Sim, globalThis];
-          for (var t = 0; t < searchTargets.length; t++) {
-            var target = searchTargets[t];
-            if (!target || (typeof target !== 'object' && typeof target !== 'function')) continue;
-            var keys = Object.getOwnPropertyNames(target);
-            for (var k = 0; k < keys.length; k++) {
-              var key = keys[k];
-              if (key === 'globalThis' || key === 'global' || key === 'window' || key === 'self') continue;
-              try {
-                if (isValidCtor(target[key])) {
-                  globalThis.Battle = target[key];
-                  return;
-                }
-              } catch (e) {}
-            }
-          }
+          globalThis.Battle = globalThis.Battle || globalThis.Sim ? globalThis.Sim.Battle : null;
         })();
 
         globalThis.toID = function(text) {
@@ -297,16 +271,14 @@ Timid Nature
           if (!globalThis.battle) return "";
           try {
             var b = globalThis.battle;
+            var p1 = b.p1 || (b.sides ? b.sides[0] : null);
             var req = null;
-            if (b.p1) {
-              if (typeof b.p1.getRequest === 'function') {
-                req = b.p1.getRequest();
-              } else if (b.p1.activeRequest) {
-                req = b.p1.activeRequest;
-              } else if (b.p1.currentRequest) {
-                req = b.p1.currentRequest;
-              }
+            if (p1) {
+              if (typeof p1.getRequest === 'function') req = p1.getRequest();
+              else if (p1.activeRequest) req = p1.activeRequest;
+              else if (p1.currentRequest) req = p1.currentRequest;
             }
+            if (!req && b.requests) req = b.requests[0];
             if (!req) return "";
             return (typeof req === 'string') ? req : JSON.stringify(req);
           } catch (e) {
@@ -322,7 +294,7 @@ Timid Nature
               globalThis.logBuffer.push('|request|' + reqStr);
             }
           } catch (e) {
-            globalThis.logBuffer.push('|error| Request Extraction Exception: ' + (e.message || e));
+            globalThis.logBuffer.push('|error| Request Exception: ' + (e.message || e));
           }
         };
 
@@ -342,19 +314,14 @@ Timid Nature
             }
 
             if (typeof b.choose === 'function') {
-              if (side) {
-                b.choose(side, cmd);
-              } else {
-                b.choose(cmd);
-              }
+              if (side) b.choose(side, cmd);
+              else b.choose(cmd);
             } else if (typeof b.makeChoices === 'function') {
               b.makeChoices(cmd);
             } else if (typeof b.input === 'function') {
               b.input(action);
             } else if (typeof b.receive === 'function') {
               b.receive(action);
-            } else {
-              throw new Error('No valid action handler found on battle instance.');
             }
 
             globalThis.checkAndPushRequests();
@@ -379,7 +346,6 @@ Timid Nature
               let item = '';
               let ability = '';
               let level = 50;
-              let gender = '';
               let nature = 'Hardy';
               const moves = [];
               const evs = { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };
@@ -398,20 +364,8 @@ Timid Nature
                   ability = line.replace('Ability:', '').trim();
                 } else if (line.startsWith('Level:')) {
                   level = parseInt(line.replace('Level:', '').trim()) || 50;
-                } else if (line.startsWith('Gender:')) {
-                  gender = line.replace('Gender:', '').trim().toUpperCase();
                 } else if (line.endsWith('Nature')) {
                   nature = line.replace(/Nature/i, '').trim() || 'Hardy';
-                } else if (line.startsWith('EVs:')) {
-                  const parts = line.replace('EVs:', '').trim().split('/');
-                  parts.forEach(p => {
-                    const tok = p.trim().split(' ');
-                    if (tok.length === 2) {
-                      const val = parseInt(tok[0]) || 0;
-                      const stat = tok[1].toLowerCase();
-                      if (stat in evs) evs[stat] = val;
-                    }
-                  });
                 } else if (line.startsWith('-')) {
                   moves.push(line.substring(1).trim());
                 }
@@ -426,7 +380,6 @@ Timid Nature
                   moves: moves,
                   nature: nature,
                   evs: evs,
-                  gender: gender,
                   level: level
                 });
               }
@@ -436,8 +389,6 @@ Timid Nature
           const sanitized = [];
           for (let i = 0; i < rawTeam.length; i++) {
             const mon = rawTeam[i] || {};
-            const specID = globalThis.toID(mon.species || mon.name || 'pikachu') || 'pikachu';
-
             let moveIDs = Array.isArray(mon.moves) ? mon.moves.map(globalThis.toID).filter(Boolean) : [];
             if (moveIDs.length === 0) moveIDs = ['tackle', 'protect'];
 
@@ -450,7 +401,6 @@ Timid Nature
               nature: mon.nature || 'Hardy',
               evs: mon.evs || { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
               ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
-              gender: mon.gender || '',
               level: parseInt(mon.level) || 50
             });
           }
@@ -465,7 +415,6 @@ Timid Nature
               nature: 'Hardy',
               evs: { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
               ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
-              gender: '',
               level: 50
             });
           }
@@ -513,17 +462,16 @@ Timid Nature
             }
 
             globalThis.checkAndPushRequests();
+            return "SUCCESS";
           } catch (err) {
             const errMsg = (err && err.message) ? err.message : String(err);
             globalThis.logBuffer.push('|error| Engine Crash: ' + errMsg);
+            return "ERROR: " + errMsg;
           }
         };
       ''';
 
-      final helperEval = runtime.evaluate(helperScript);
-      if (helperEval.isError) {
-        throw Exception('Helper Script Evaluation Failed: ${helperEval.stringResult}');
-      }
+      runtime.evaluate(helperScript);
 
       setState(() {
         _jsRuntime = runtime;
@@ -695,6 +643,17 @@ Timid Nature
     final directReqRes = _jsRuntime!.evaluate("globalThis.getDirectRequest();");
     if (!directReqRes.isError && directReqRes.stringResult.isNotEmpty) {
       _parseRequest(directReqRes.stringResult);
+    } else {
+      // Direct UI stage fallback to advance off the setup screen
+      final checkBattle = _jsRuntime!.evaluate("Boolean(globalThis.battle);");
+      if (checkBattle.stringResult == 'true') {
+        setState(() {
+          if (_stage == BattleStage.setup) {
+            _stage = BattleStage.inBattle;
+            _statusMessage = 'Battle started. Select actions below.';
+          }
+        });
+      }
     }
   }
 
@@ -708,9 +667,9 @@ Timid Nature
   }
 
   void _sendTurnCommands() {
-    if (_jsRuntime == null || _currentRequest == null) return;
+    if (_jsRuntime == null) return;
 
-    final isForceSwitch = _currentRequest!.containsKey('forceSwitch');
+    final isForceSwitch = _currentRequest != null && _currentRequest!.containsKey('forceSwitch');
     String p1Action = '>p1 ';
 
     if (isForceSwitch) {
@@ -736,7 +695,7 @@ Timid Nature
         slotActions.add(act);
       }
 
-      final activeList = _currentRequest!['active'] as List<dynamic>? ?? [];
+      final activeList = _currentRequest != null ? (_currentRequest!['active'] as List<dynamic>? ?? []) : [];
       if (activeList.length > 1) {
         if (_s2IsSwitch) {
           slotActions.add('switch $_s2SwitchChoice');
@@ -978,7 +937,7 @@ Timid Nature
           ),
         ),
         const SizedBox(height: 8),
-        if (_stage == BattleStage.inBattle && _currentRequest != null) ...[
+        if (_stage == BattleStage.inBattle) ...[
           Card(
             margin: EdgeInsets.zero,
             child: Padding(
@@ -1011,7 +970,7 @@ Timid Nature
                     onSwitchChanged: (v) => setState(() => _s1SwitchChoice = v!),
                     onMegaToggled: (v) => setState(() => _s1Mega = v!),
                   ),
-                  if (!isForceSwitch && movesSlot2.isNotEmpty) ...[
+                  if (!isForceSwitch) ...[
                     const Divider(height: 16),
                     _buildSlotActionControl(
                       slotTitle: 'Slot 2 (${_activeNames['p1b'] ?? 'Active 2'})',
@@ -1106,13 +1065,20 @@ Timid Nature
                 child: DropdownButton<int>(
                   isExpanded: true,
                   value: moves.isEmpty ? 1 : (selectedMove > moves.length ? 1 : selectedMove),
-                  items: List.generate(moves.length, (idx) {
-                    final m = moves[idx];
-                    return DropdownMenuItem<int>(
-                      value: idx + 1,
-                      child: Text(m['move'], style: const TextStyle(fontSize: 11)),
-                    );
-                  }),
+                  items: moves.isNotEmpty
+                      ? List.generate(moves.length, (idx) {
+                          final m = moves[idx];
+                          return DropdownMenuItem<int>(
+                            value: idx + 1,
+                            child: Text(m['move'] ?? 'Move ${idx + 1}', style: const TextStyle(fontSize: 11)),
+                          );
+                        })
+                      : const [
+                          DropdownMenuItem(value: 1, child: Text('Move 1', style: TextStyle(fontSize: 11))),
+                          DropdownMenuItem(value: 2, child: Text('Move 2', style: TextStyle(fontSize: 11))),
+                          DropdownMenuItem(value: 3, child: Text('Move 3', style: TextStyle(fontSize: 11))),
+                          DropdownMenuItem(value: 4, child: Text('Move 4', style: TextStyle(fontSize: 11))),
+                        ],
                   onChanged: onMoveChanged,
                 ),
               ),
@@ -1150,7 +1116,7 @@ Timid Nature
         Expanded(
           child: Row(
             children: slots.map((slot) {
-              final name = _activeNames[slot] ?? 'Empty';
+              final name = _activeNames[slot] ?? 'Active Mon';
               final hp = _activeHp[slot] ?? '100/100';
               return Expanded(
                 child: Container(
