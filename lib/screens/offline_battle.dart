@@ -230,7 +230,7 @@ Timid Nature
             try {
               if (fn.prototype) {
                 var p = fn.prototype;
-                if (typeof p.choose === 'function' || typeof p.makeChoices === 'function' || typeof p.start === 'function' || typeof p.init === 'function') {
+                if (typeof p.choose === 'function' || typeof p.makeChoices === 'function' || typeof p.start === 'function' || typeof p.init === 'function' || typeof p.setPlayer === 'function') {
                   return true;
                 }
               }
@@ -238,12 +238,15 @@ Timid Nature
             return false;
           }
 
+          // Direct location candidates
           var candidates = [
             globalThis.Battle,
-            globalThis.Dex ? globalThis.Dex.Battle : null,
             globalThis.Sim ? globalThis.Sim.Battle : null,
-            globalThis.module ? globalThis.module.exports : null,
-            globalThis.module && globalThis.module.exports ? globalThis.module.exports.Battle : null
+            globalThis.Dex ? globalThis.Dex.Battle : null,
+            globalThis.PokemonShowdown ? globalThis.PokemonShowdown.Battle : null,
+            globalThis.exports ? globalThis.exports.Battle : null,
+            globalThis.module && globalThis.module.exports ? globalThis.module.exports.Battle : null,
+            globalThis.module && globalThis.module.exports ? globalThis.module.exports : null
           ];
 
           for (var i = 0; i < candidates.length; i++) {
@@ -252,7 +255,27 @@ Timid Nature
               return;
             }
           }
-          globalThis.Battle = globalThis.Battle || globalThis.Sim ? globalThis.Sim.Battle : null;
+
+          // Deep object scan across global scope for bundled modules
+          for (var key in globalThis) {
+            try {
+              var obj = globalThis[key];
+              if (isValidCtor(obj)) {
+                globalThis.Battle = obj;
+                return;
+              }
+              if (obj && typeof obj === 'object') {
+                if (isValidCtor(obj.Battle)) {
+                  globalThis.Battle = obj.Battle;
+                  return;
+                }
+                if (obj.Sim && isValidCtor(obj.Sim.Battle)) {
+                  globalThis.Battle = obj.Sim.Battle;
+                  return;
+                }
+              }
+            } catch (e) {}
+          }
         })();
 
         globalThis.toID = function(text) {
@@ -262,7 +285,7 @@ Timid Nature
         };
 
         globalThis.getLogs = function() {
-          const logs = JSON.stringify(globalThis.logBuffer);
+          const logs = JSON.stringify(globalThis.logBuffer || []);
           globalThis.logBuffer = [];
           return logs;
         };
@@ -430,7 +453,7 @@ Timid Nature
 
             let BattleCtor = globalThis.Battle;
             if (typeof BattleCtor !== 'function') {
-              throw new Error('Battle constructor resolution failed.');
+              throw new Error('Battle constructor resolution failed. Available keys: ' + Object.keys(globalThis).join(', '));
             }
 
             var battleInstance = new BattleCtor({
