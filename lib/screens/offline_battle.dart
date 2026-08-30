@@ -293,6 +293,32 @@ Timid Nature
           return logs;
         };
 
+        globalThis.checkAndPushRequests = function() {
+          if (!globalThis.battle) return;
+          try {
+            var b = globalThis.battle;
+            var req = null;
+            if (b.p1) {
+              if (typeof b.p1.getRequest === 'function') {
+                req = b.p1.getRequest();
+              } else if (b.p1.activeRequest) {
+                req = b.p1.activeRequest;
+              } else if (b.p1.currentRequest) {
+                req = b.p1.currentRequest;
+              }
+            }
+            if (!req && typeof b.getRequests === 'function') {
+              var reqs = b.getRequests();
+              if (reqs && reqs[0]) req = reqs[0];
+            }
+            if (req) {
+              globalThis.logBuffer.push('|request|' + JSON.stringify(req));
+            }
+          } catch (e) {
+            globalThis.logBuffer.push('|error| Request Extraction Exception: ' + (e.message || e));
+          }
+        };
+
         globalThis.sendAction = function(action) {
           if (!globalThis.battle) return;
           try {
@@ -321,8 +347,10 @@ Timid Nature
             } else if (typeof b.receive === 'function') {
               b.receive(action);
             } else {
-              throw new Error('No valid action handler (choose/makeChoices/input) found on battle instance.');
+              throw new Error('No valid action handler found on battle instance.');
             }
+
+            globalThis.checkAndPushRequests();
           } catch (err) {
             globalThis.logBuffer.push('|error| Action Exception: ' + (err.message || err));
           }
@@ -446,7 +474,7 @@ Timid Nature
 
             let BattleCtor = globalThis.Battle;
             if (typeof BattleCtor !== 'function') {
-              throw new Error('Battle constructor resolution failed. Value is ' + (typeof BattleCtor));
+              throw new Error('Battle constructor resolution failed.');
             }
 
             globalThis.battle = new BattleCtor({
@@ -468,6 +496,8 @@ Timid Nature
             } else if (typeof globalThis.battle.init === 'function') {
               globalThis.battle.init();
             }
+
+            globalThis.checkAndPushRequests();
           } catch (err) {
             const errMsg = (err && err.message) ? err.message : String(err);
             globalThis.logBuffer.push('|error| Engine Crash: ' + errMsg);
@@ -637,6 +667,8 @@ Timid Nature
         _statusMessage = 'JS Evaluation Error: ${result.stringResult}';
       });
       _announce('Failed to start battle.');
+    } else {
+      _fetchLogs();
     }
   }
 
@@ -645,6 +677,7 @@ Timid Nature
     final teamOrder = _selectedPreviewSlots.join('');
     _jsRuntime!.evaluate("globalThis.sendAction('>p1 team $teamOrder');");
     _jsRuntime!.evaluate("globalThis.sendAction('>p2 team 1234');");
+    _fetchLogs();
     _announce('Submitted team selection. Entering battle turn 1.');
   }
 
@@ -692,6 +725,7 @@ Timid Nature
 
     _jsRuntime!.evaluate("globalThis.sendAction('$p1Action');");
     _jsRuntime!.evaluate("globalThis.sendAction('>p2 default');");
+    _fetchLogs();
 
     _announce('Player actions submitted.');
     setState(() => _currentRequest = null);
