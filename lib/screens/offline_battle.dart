@@ -214,36 +214,32 @@ Timid Nature
         throw Exception('engine.js execution error: ${engineEval.stringResult}');
       }
 
-      // --- DIAGNOSTIC PROBE: inspect what engine.js actually exposes ---
-      final probe = runtime.evaluate('''
-        JSON.stringify({
-          moduleExportsKeys: (globalThis.module && globalThis.module.exports)
-            ? Object.keys(globalThis.module.exports)
-            : [],
-          exportsKeys: globalThis.exports ? Object.keys(globalThis.exports) : [],
-          dexKeys: (typeof Dex !== 'undefined' && Dex) ? Object.keys(Dex) : [],
-          dexPrototypeKeys: (typeof Dex !== 'undefined' && Dex && Dex.constructor && Dex.constructor.prototype)
-            ? Object.getOwnPropertyNames(Dex.constructor.prototype)
-            : [],
-          hasSimGlobal: typeof Sim,
-          hasBattleGlobal: typeof Battle,
-          hasPokemonShowdownGlobal: typeof PokemonShowdown,
-          globalKeysSample: Object.keys(globalThis).filter(function(k) {
-            return !['sendMessage','console','setTimeout','xhrRequests','idRequest',
-              'XMLHttpRequestExtension_send_native','XMLHttpRequest','fetch','exp',
-              'dummyModules','global','window','self','root','navigator','setImmediate',
-              'clearImmediate','queueMicrotask','process','performance','crypto',
-              'TextEncoder','TextDecoder','require','logBuffer'].includes(k)
-              && k.indexOf('FLUTTER_NATIVEJS') !== 0
-              && k.indexOf('__NATIVE_FLUTTER_JS__') !== 0;
-          })
+      // --- DIAGNOSTIC PROBE: push results into on-screen terminal log ---
+      // Split into small single-key evals so each line is short and readable
+      // on a phone screen. No desktop debug console required.
+      void probeLine(String label, String jsExpression) {
+        final res = runtime.evaluate(
+          "(function(){ try { return JSON.stringify($jsExpression); } catch(e) { return 'ERR:' + (e.message || e); } })();"
+        );
+        final value = res.isError ? 'EVAL_ERROR: ${res.stringResult}' : res.stringResult;
+        setState(() {
+          _rawLogs.add('|probe| $label: $value');
         });
-      ''');
-      if (probe.isError) {
-        debugPrint('ENGINE PROBE ERROR: ${probe.stringResult}');
-      } else {
-        debugPrint('ENGINE PROBE: ${probe.stringResult}');
       }
+
+      probeLine('hasBattleGlobal', "typeof Battle");
+      probeLine('hasSimGlobal', "typeof Sim");
+      probeLine('hasPokemonShowdownGlobal', "typeof PokemonShowdown");
+      probeLine('dexKeys', "(typeof Dex !== 'undefined' && Dex) ? Object.keys(Dex) : []");
+      probeLine(
+        'dexProtoKeys',
+        "(typeof Dex !== 'undefined' && Dex && Dex.constructor && Dex.constructor.prototype) ? Object.getOwnPropertyNames(Dex.constructor.prototype) : []",
+      );
+      probeLine(
+        'moduleExportsKeys',
+        "(globalThis.module && globalThis.module.exports) ? Object.keys(globalThis.module.exports) : []",
+      );
+      probeLine('exportsKeys', "globalThis.exports ? Object.keys(globalThis.exports) : []");
       // --- END DIAGNOSTIC PROBE ---
 
       if (dexJs.isNotEmpty) {
