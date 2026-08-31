@@ -200,7 +200,11 @@ Timid Nature
             if (globalThis[id]) return globalThis[id];
             var fallback = globalThis.module.exports || globalThis.exports || {};
             var knownArrays = ['Formats'];
-            var knownObjects = ['Scripts', 'FormatsData', 'Learnsets', 'Aliases', 'Pokedex', 'Movedex', 'Abilities', 'Items', 'Natures', 'TypeChart', 'Conditions', 'PokemonGoData', 'Rulesets'];
+            var knownObjects = ['Scripts', 'FormatsData', 'Learnsets', 'Aliases', 'Pokedex', 'Movedex', 'Moves', 'Abilities', 'Items', 'Natures', 'TypeChart', 'Conditions', 'PokemonGoData', 'Rulesets', 'Species', 'TextData', 'Text'];
+
+I also threw in `Species`, `TextData`, and `Text` preemptively since those are other common Showdown data-file export names likely to show up next in this same whack-a-mole sequence (species data, and localized text tables).
+
+Rebuild and try again — if another "must export an object whose 'X' property..." error appears, just tell me the property name `X` and I'll give you the one-line addition each time.
             for (var i = 0; i < knownArrays.length; i++) {
               if (typeof fallback[knownArrays[i]] === 'undefined') {
                 fallback[knownArrays[i]] = [];
