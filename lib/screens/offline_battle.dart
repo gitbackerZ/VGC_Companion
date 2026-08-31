@@ -211,12 +211,6 @@ Timid Nature
       }
 
       final String helperScript = '''
-        if (typeof Dex !== "undefined") {
-          Dex.data = Dex.data || {};
-          Dex.data.Learnsets = $learnsetsJson;
-          Dex.data.Aliases = Dex.data.Aliases || {};
-        }
-
         (function resolveBattleConstructor() {
           function isValidCtor(fn) {
             if (typeof fn !== 'function') return false;
@@ -261,7 +255,13 @@ Timid Nature
               }
             } catch (e) {}
           }
-        })();
+})();
+
+        if (typeof Dex !== "undefined") {
+          Dex.data = Dex.data || {};
+          Dex.data.Learnsets = $learnsetsJson;
+          Dex.data.Aliases = Dex.data.Aliases || {};
+        }
 
         globalThis.toID = function(text) {
           if (text && text.id) return text.id;
@@ -442,7 +442,7 @@ Timid Nature
             }
 
             var battleInstance = new BattleCtor({
-              formatid: 'gen9customgame',
+              formatid: 'gen9championsdoublescustomgame',
               gameType: 'doubles',
               send: function(type, data) {
                 if (Array.isArray(data)) {
