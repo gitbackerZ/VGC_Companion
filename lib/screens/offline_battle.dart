@@ -199,10 +199,16 @@ Timid Nature
             if (dummyModules[id]) return dummyModules[id];
             if (globalThis[id]) return globalThis[id];
             var fallback = globalThis.module.exports || globalThis.exports || {};
-            var known = ['Scripts', 'Formats', 'FormatsData', 'Learnsets', 'Aliases', 'Pokedex', 'Movedex', 'Abilities', 'Items', 'Natures', 'TypeChart', 'Conditions', 'PokemonGoData', 'Rulesets'];
-            for (var i = 0; i < known.length; i++) {
-              if (typeof fallback[known[i]] === 'undefined') {
-                fallback[known[i]] = {};
+            var knownArrays = ['Formats'];
+            var knownObjects = ['Scripts', 'FormatsData', 'Learnsets', 'Aliases', 'Pokedex', 'Movedex', 'Abilities', 'Items', 'Natures', 'TypeChart', 'Conditions', 'PokemonGoData', 'Rulesets'];
+            for (var i = 0; i < knownArrays.length; i++) {
+              if (typeof fallback[knownArrays[i]] === 'undefined') {
+                fallback[knownArrays[i]] = [];
+              }
+            }
+            for (var i = 0; i < knownObjects.length; i++) {
+              if (typeof fallback[knownObjects[i]] === 'undefined') {
+                fallback[knownObjects[i]] = {};
               }
             }
             return fallback;
