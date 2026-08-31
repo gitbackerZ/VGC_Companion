@@ -438,7 +438,7 @@ Timid Nature
             }
 
             var battleInstance = new BattleCtor({
-              formatid: 'gen9customgame',
+              formatid: 'gen9championsdoublescustomgame',
               gameType: 'doubles',
               send: function(type, data) {
                 if (Array.isArray(data)) {
@@ -631,7 +631,7 @@ Timid Nature
     final p2Data = jsonEncode(_p2TeamController.text);
 
     final JsEvalResult result = _jsRuntime!.evaluate(
-      "globalThis.startVGCBattle('gen9customgame', $p1Data, $p2Data);"
+      "globalThis.startVGCBattle('gen9championsdoublescustomgame', $p1Data, $p2Data);"
     );
 
     if (result.isError) {
