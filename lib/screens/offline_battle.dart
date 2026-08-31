@@ -180,7 +180,12 @@ Timid Nature
         globalThis.module = { exports: exp };
 
         var dummyModules = {
-          fs: { readFileSync: function() { return ''; }, existsSync: function() { return false; } },
+          fs: {
+            readFileSync: function() { return ''; },
+            existsSync: function() { return false; },
+            readdirSync: function() { return []; },
+            statSync: function() { return { isDirectory: function() { return false; }, isFile: function() { return false; } }; }
+          },
           path: { resolve: function() { return ''; }, join: function() { return ''; }, dirname: function() { return ''; } },
           util: { inspect: function(o) { return String(o); }, inherits: function() {} },
           os: { platform: function() { return 'browser'; }, homedir: function() { return ''; } },
