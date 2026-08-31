@@ -198,7 +198,14 @@ Timid Nature
           globalThis.require = function(id) {
             if (dummyModules[id]) return dummyModules[id];
             if (globalThis[id]) return globalThis[id];
-            return globalThis.module.exports || globalThis.exports || {};
+            var fallback = globalThis.module.exports || globalThis.exports || {};
+            var known = ['Scripts', 'Formats', 'FormatsData', 'Learnsets', 'Aliases', 'Pokedex', 'Movedex', 'Abilities', 'Items', 'Natures', 'TypeChart', 'Conditions', 'PokemonGoData', 'Rulesets'];
+            for (var i = 0; i < known.length; i++) {
+              if (typeof fallback[known[i]] === 'undefined') {
+                fallback[known[i]] = {};
+              }
+            }
+            return fallback;
           };
         }
 
