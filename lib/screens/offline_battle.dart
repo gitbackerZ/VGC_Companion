@@ -197,6 +197,9 @@ Timid Nature
           };
         }
 
+        globalThis.__dirname = '';
+        globalThis.__filename = 'engine.js';
+
         globalThis.logBuffer = [];
       ''';
 
