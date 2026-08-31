@@ -214,6 +214,7 @@ Timid Nature
         if (typeof Dex !== "undefined") {
           Dex.data = Dex.data || {};
           Dex.data.Learnsets = $learnsetsJson;
+          Dex.data.Aliases = Dex.data.Aliases || {};
         }
 
         (function resolveBattleConstructor() {
