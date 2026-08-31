@@ -102,13 +102,6 @@ Timid Nature
       final runtime = getJavascriptRuntime();
       final engineCode = await rootBundle.loadString('assets/engine.js');
 
-      String dexJs = '';
-      try {
-        dexJs = await rootBundle.loadString('assets/js/dex.js');
-      } catch (e) {
-        debugPrint('dex.js asset load warning: $e');
-      }
-
       String learnsetsJson = '{}';
       try {
         learnsetsJson = await rootBundle.loadString('assets/js/learnsets.json');
@@ -214,51 +207,6 @@ Timid Nature
         throw Exception('engine.js execution error: ${engineEval.stringResult}');
       }
 
-      if (dexJs.isNotEmpty) {
-        final dexEval = runtime.evaluate(dexJs);
-        if (dexEval.isError) {
-          setState(() {
-            _rawLogs.add('|probe| dex.js execution error: ${dexEval.stringResult}');
-          });
-        }
-      }
-
-      // --- DIAGNOSTIC PROBE: run AFTER dex.js loads, since that's what ---
-      // --- actually defines Dex / getSpeciesList / etc per the earlier ---
-      // --- crash log. Each check is its own short line for phone screens. ---
-      void probeLine(String label, String jsExpression) {
-        final res = runtime.evaluate(
-          "(function(){ try { return JSON.stringify($jsExpression); } catch(e) { return 'ERR:' + (e.message || e); } })();"
-        );
-        final value = res.isError ? 'EVAL_ERROR: ${res.stringResult}' : res.stringResult;
-        setState(() {
-          _rawLogs.add('|probe2| $label: $value');
-        });
-      }
-
-      probeLine('hasBattleGlobal', "typeof Battle");
-      probeLine('hasSimGlobal', "typeof Sim");
-      probeLine('hasPokemonShowdownGlobal', "typeof PokemonShowdown");
-      probeLine('dexKeys', "(typeof Dex !== 'undefined' && Dex) ? Object.keys(Dex) : []");
-      probeLine(
-        'dexProtoKeys',
-        "(typeof Dex !== 'undefined' && Dex && Dex.constructor && Dex.constructor.prototype) ? Object.getOwnPropertyNames(Dex.constructor.prototype) : []",
-      );
-      probeLine(
-        'moduleExportsKeys',
-        "(globalThis.module && globalThis.module.exports) ? Object.keys(globalThis.module.exports) : []",
-      );
-      probeLine('exportsKeys', "globalThis.exports ? Object.keys(globalThis.exports) : []");
-      probeLine(
-        'dexBattleType',
-        "(typeof Dex !== 'undefined' && Dex && Dex.Battle) ? typeof Dex.Battle : 'no-dex-battle'",
-      );
-      probeLine(
-        'globalKeysWithBattleWord',
-        "Object.keys(globalThis).filter(function(k){ return /battle/i.test(k); })",
-      );
-      // --- END DIAGNOSTIC PROBE ---
-
       final String helperScript = '''
         if (typeof Dex !== "undefined") {
           Dex.data = Dex.data || {};
@@ -279,41 +227,33 @@ Timid Nature
             return false;
           }
 
-          // Direct location candidates
+          // Primary: PSSim bundle exposes Battle/Dex/Teams/PRNG directly
+          if (globalThis.PSSim && isValidCtor(globalThis.PSSim.Battle)) {
+            globalThis.Battle = globalThis.PSSim.Battle;
+            if (globalThis.PSSim.Dex && !globalThis.Dex) {
+              globalThis.Dex = globalThis.PSSim.Dex;
+            }
+            return;
+          }
+
+          // Fallback: old deep scan, in case bundle shape changes
           var candidates = [
             globalThis.Battle,
             globalThis.Sim ? globalThis.Sim.Battle : null,
             globalThis.Dex ? globalThis.Dex.Battle : null,
-            globalThis.PokemonShowdown ? globalThis.PokemonShowdown.Battle : null,
-            globalThis.exports ? globalThis.exports.Battle : null,
-            globalThis.module && globalThis.module.exports ? globalThis.module.exports.Battle : null,
-            globalThis.module && globalThis.module.exports ? globalThis.module.exports : null
           ];
-
           for (var i = 0; i < candidates.length; i++) {
             if (isValidCtor(candidates[i])) {
               globalThis.Battle = candidates[i];
               return;
             }
           }
-
-          // Deep object scan across global scope for bundled modules
           for (var key in globalThis) {
             try {
               var obj = globalThis[key];
               if (isValidCtor(obj)) {
                 globalThis.Battle = obj;
                 return;
-              }
-              if (obj && typeof obj === 'object') {
-                if (isValidCtor(obj.Battle)) {
-                  globalThis.Battle = obj.Battle;
-                  return;
-                }
-                if (obj.Sim && isValidCtor(obj.Sim.Battle)) {
-                  globalThis.Battle = obj.Sim.Battle;
-                  return;
-                }
               }
             } catch (e) {}
           }
