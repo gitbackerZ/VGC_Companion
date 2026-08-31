@@ -480,7 +480,10 @@ Timid Nature
         };
       ''';
 
-      runtime.evaluate(helperScript);
+      final helperEval = runtime.evaluate(helperScript);
+      if (helperEval.isError) {
+        throw Exception('helperScript execution error: ${helperEval.stringResult}');
+      }
 
       setState(() {
         _jsRuntime = runtime;
