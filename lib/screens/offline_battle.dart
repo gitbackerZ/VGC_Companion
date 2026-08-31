@@ -441,7 +441,7 @@ Timid Nature
             }
 
             var battleInstance = new BattleCtor({
-              formatid: 'gen9championsdoublescustomgame',
+              formatid: 'gen9customgame',
               gameType: 'doubles',
               send: function(type, data) {
                 if (Array.isArray(data)) {
