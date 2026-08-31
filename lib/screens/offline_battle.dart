@@ -472,7 +472,8 @@ Timid Nature
             return "SUCCESS";
           } catch (err) {
             const errMsg = (err && err.message) ? err.message : String(err);
-            globalThis.logBuffer.push('|error| Engine Crash: ' + errMsg);
+            const errStack = (err && err.stack) ? err.stack : 'no stack';
+            globalThis.logBuffer.push('|error| Engine Crash: ' + errMsg + ' | STACK: ' + errStack);
             return "ERROR: " + errMsg;
           }
         };
