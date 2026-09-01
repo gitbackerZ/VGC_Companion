@@ -844,6 +844,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       p1Action += slotActions.join(', ');
     }
 
+    _rawLogs.add('|debug-dart| p1Action sent: $p1Action');
     _jsRuntime!.evaluate("globalThis.sendAction('$p1Action');");
     _jsRuntime!.evaluate("globalThis.sendAction('>p2 default');");
     _fetchLogs();
