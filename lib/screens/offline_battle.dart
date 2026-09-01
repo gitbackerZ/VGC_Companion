@@ -223,7 +223,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
             if (dummyModules[id]) return dummyModules[id];
             if (globalThis[id]) return globalThis[id];
             var fallback = globalThis.module.exports || globalThis.exports || {};
-            var knownArrays = ['Formats', 'Aliases'];
+            var knownArrays = ['Formats', 'Aliases', 'CompoundWordNames'];
             var knownObjects = ['Scripts', 'FormatsData', 'Learnsets', 'Aliases', 'Pokedex', 'Movedex', 'Moves', 'Abilities', 'Items', 'Natures', 'TypeChart', 'Conditions', 'PokemonGoData', 'Rulesets', 'Species', 'TextData', 'Text'];
 
             for (var i = 0; i < knownArrays.length; i++) {
