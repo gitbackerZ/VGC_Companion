@@ -222,6 +222,44 @@ if (typeof globalThis.TextDecoder === 'undefined') {
           globalThis.require = function(id) {
             if (dummyModules[id]) return dummyModules[id];
             if (globalThis[id]) return globalThis[id];
+
+            // Try to resolve real bundled data by matching the filename suffix
+            if (globalThis.PSStaticData) {
+              var dataKeyMap = {
+                abilities: 'Abilities',
+                rulesets: 'Rulesets',
+                'formats-data': 'FormatsData',
+                items: 'Items',
+                learnsets: 'Learnsets',
+                moves: 'Moves',
+                natures: 'Natures',
+                pokedex: 'Pokedex',
+                scripts: 'Scripts',
+                conditions: 'Conditions',
+                typechart: 'TypeChart',
+                aliases: 'Aliases',
+              };
+              var lowerId = String(id).toLowerCase();
+              for (var fileKey in dataKeyMap) {
+                if (lowerId.indexOf(fileKey) !== -1 && lowerId.indexOf('mods/champions') === -1) {
+                  var exportName = dataKeyMap[fileKey];
+                  var result = {};
+                  result[exportName] = globalThis.PSStaticData.base[fileKey] || {};
+                  return result;
+                }
+              }
+              if (lowerId.indexOf('champions') !== -1) {
+                for (var fileKey2 in dataKeyMap) {
+                  if (lowerId.indexOf(fileKey2) !== -1) {
+                    var exportName2 = dataKeyMap[fileKey2];
+                    var result2 = {};
+                    result2[exportName2] = (globalThis.PSStaticData.mods.champions && globalThis.PSStaticData.mods.champions[fileKey2]) || {};
+                    return result2;
+                  }
+                }
+              }
+            }
+
             var fallback = globalThis.module.exports || globalThis.exports || {};
             var knownArrays = ['Formats', 'Aliases', 'CompoundWordNames'];
             var knownObjects = ['Scripts', 'FormatsData', 'Learnsets', 'Aliases', 'Pokedex', 'Movedex', 'Moves', 'Abilities', 'Items', 'Natures', 'TypeChart', 'Conditions', 'PokemonGoData', 'Rulesets', 'Species', 'TextData', 'Text'];
