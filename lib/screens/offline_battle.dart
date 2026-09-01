@@ -309,6 +309,16 @@ if (typeof globalThis.TextDecoder === 'undefined') {
           Dex.data.Aliases = Dex.data.Aliases || [];
         }
 
+        (function probeSpecies() {
+          try {
+            var fDex = Dex.forFormat('gen9championsdoublescustomgame');
+            var sp = fDex.species.get('whimsicott');
+            globalThis.logBuffer.push('|probe3| species exists: ' + sp.exists + ' name: ' + sp.name);
+          } catch (e) {
+            globalThis.logBuffer.push('|probe3| ERROR: ' + (e.message || e) + ' STACK: ' + (e.stack || 'none'));
+          }
+        })();
+
         globalThis.toID = function(text) {
           if (text && text.id) return text.id;
           if (typeof text !== 'string' && typeof text !== 'number') return '';
