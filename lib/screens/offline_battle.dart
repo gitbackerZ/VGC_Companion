@@ -174,6 +174,30 @@ Timid Nature
             return String.fromCharCode.apply(null, arr);
           };
         }
+if (typeof globalThis.TextDecoder === 'undefined') {
+          globalThis.TextDecoder = function TextDecoder() {};
+          globalThis.TextDecoder.prototype.decode = function(arr) {
+            return String.fromCharCode.apply(null, arr);
+          };
+        }
+
+        (function patchObjectEntries() {
+          var origEntries = Object.entries;
+          Object.entries = function(obj) {
+            if (obj === undefined || obj === null) return [];
+            return origEntries(obj);
+          };
+          var origKeys = Object.keys;
+          Object.keys = function(obj) {
+            if (obj === undefined || obj === null) return [];
+            return origKeys(obj);
+          };
+          var origValues = Object.values;
+          Object.values = function(obj) {
+            if (obj === undefined || obj === null) return [];
+            return origValues(obj);
+          };
+        })();
 
         var exp = {};
         globalThis.exports = exp;
