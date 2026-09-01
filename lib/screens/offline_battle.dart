@@ -447,7 +447,8 @@ if (typeof globalThis.TextDecoder === 'undefined') {
             else if (b.sides && b.sides.length > 0) targetSide = b.sides[0];
 
             if (targetSide && typeof targetSide.choose === 'function') {
-              targetSide.choose(cmd);
+              var chooseResult = targetSide.choose(cmd);
+              globalThis.logBuffer.push('|debug| choose(' + cmd + ') result: ' + chooseResult + ' | choiceError: ' + (targetSide.choiceError || 'none'));
             } else if (typeof b.choose === 'function') {
               if (side) b.choose(side, cmd);
               else b.choose(cmd);
