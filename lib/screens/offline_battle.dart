@@ -278,6 +278,10 @@ if (typeof globalThis.TextDecoder === 'undefined') {
                   }
                 }
               }
+
+              if (lowerId.indexOf('config/formats') !== -1 || (lowerId.indexOf('formats') !== -1 && lowerId.indexOf('config') !== -1)) {
+                return { Formats: globalThis.PSStaticData.configFormats || [] };
+              }
             }
 
             var fallback = globalThis.module.exports || globalThis.exports || {};
