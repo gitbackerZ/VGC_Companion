@@ -1282,11 +1282,50 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       margin: const EdgeInsets.all(8),
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(6)),
-      child: ListView.builder(
-        itemCount: _rawLogs.length,
-        itemBuilder: (context, index) {
-          return Text(_rawLogs[index], style: const TextStyle(color: Colors.greenAccent, fontFamily: 'monospace', fontSize: 10));
-        },
+      child: Column(
+        children: [
+          Expanded(
+            child: ListView.builder(
+              itemCount: _rawLogs.length,
+              itemBuilder: (context, index) {
+                return Text(_rawLogs[index], style: const TextStyle(color: Colors.greenAccent, fontFamily: 'monospace', fontSize: 10));
+              },
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: _showFullLogDialog,
+              child: const Text('View Full Log', style: TextStyle(fontSize: 10)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showFullLogDialog() {
+    final fullLog = _rawLogs.join('\n');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Full Battle Log'),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 500,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              fullLog,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
       ),
     );
   }
