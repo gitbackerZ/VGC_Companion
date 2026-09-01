@@ -579,6 +579,8 @@ if (typeof globalThis.TextDecoder === 'undefined') {
 
             globalThis.battle = battleInstance;
 
+            globalThis.logBuffer.push('|debug-gametype| battle.gameType: ' + battleInstance.gameType + ' | format.gameType: ' + (battleInstance.format ? battleInstance.format.gameType : 'no format'));
+
             if (typeof battleInstance.setPlayer === 'function') {
               battleInstance.setPlayer('p1', { name: 'Player 1', team: p1Team });
               battleInstance.setPlayer('p2', { name: 'Computer AI', team: p2Team });
