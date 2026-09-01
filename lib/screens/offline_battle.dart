@@ -371,21 +371,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
           Dex.data.Aliases = Dex.data.Aliases || [];
         }
 
-        (function probeSpecies() {
-          try {
-            var fDex = Dex.forFormat('gen9championsdoublescustomgame');
-            var sp = fDex.species.get('whimsicott');
-            globalThis.logBuffer.push('|probe3| champions exists: ' + sp.exists);
-
-            var baseSp = Dex.species.get('whimsicott');
-            globalThis.logBuffer.push('|probe3| base exists: ' + baseSp.exists);
-
-            globalThis.logBuffer.push('|probe3| base Pokedex keys: ' + Object.keys(Dex.data.Pokedex || {}).length);
-            globalThis.logBuffer.push('|probe3| fDex Pokedex keys: ' + Object.keys(fDex.data.Pokedex || {}).length);
-          } catch (e) {
-            globalThis.logBuffer.push('|probe3| ERROR: ' + (e.message || e) + ' STACK: ' + (e.stack || 'none'));
-          }
-        })();
+        
 
         globalThis.toID = function(text) {
           if (text && text.id) return text.id;
