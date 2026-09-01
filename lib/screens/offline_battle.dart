@@ -239,13 +239,33 @@ if (typeof globalThis.TextDecoder === 'undefined') {
                 typechart: 'TypeChart',
                 aliases: 'Aliases',
               };
+              var safetyArrays = ['Formats', 'Aliases', 'CompoundWordNames'];
+              var safetyObjects = ['Scripts', 'FormatsData', 'Learnsets', 'Pokedex', 'Moves', 'Abilities', 'Items', 'Natures', 'TypeChart', 'Conditions', 'PokemonGoData', 'Rulesets'];
+
+              function withSafetyDefaults(result) {
+                for (var a = 0; a < safetyArrays.length; a++) {
+                  if (typeof result[safetyArrays[a]] === 'undefined') {
+                    result[safetyArrays[a]] = [];
+                  }
+                }
+                for (var o = 0; o < safetyObjects.length; o++) {
+                  if (typeof result[safetyObjects[o]] === 'undefined') {
+                    result[safetyObjects[o]] = {};
+                  }
+                }
+                if (result.Scripts && typeof result.Scripts.gen === 'undefined') {
+                  result.Scripts.gen = 9;
+                }
+                return result;
+              }
+
               var lowerId = String(id).toLowerCase();
               for (var fileKey in dataKeyMap) {
                 if (lowerId.indexOf(fileKey) !== -1 && lowerId.indexOf('mods/champions') === -1) {
                   var exportName = dataKeyMap[fileKey];
                   var result = {};
                   result[exportName] = globalThis.PSStaticData.base[fileKey] || {};
-                  return result;
+                  return withSafetyDefaults(result);
                 }
               }
               if (lowerId.indexOf('champions') !== -1) {
@@ -254,7 +274,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
                     var exportName2 = dataKeyMap[fileKey2];
                     var result2 = {};
                     result2[exportName2] = (globalThis.PSStaticData.mods.champions && globalThis.PSStaticData.mods.champions[fileKey2]) || {};
-                    return result2;
+                    return withSafetyDefaults(result2);
                   }
                 }
               }
