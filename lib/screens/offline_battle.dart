@@ -212,6 +212,9 @@ Timid Nature
                 fallback[knownObjects[i]] = {};
               }
             }
+            if (fallback.Scripts && typeof fallback.Scripts.gen === 'undefined') {
+              fallback.Scripts.gen = 9;
+            }
             return fallback;
           };
         }
