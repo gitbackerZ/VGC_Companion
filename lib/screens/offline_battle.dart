@@ -827,8 +827,6 @@ Timid Nature
   void _confirmTeamPreviewSelection() {
     if (_selectedPreviewSlots.length < 2 || _jsRuntime == null) return;
     
-    // VGC rules require ordering ALL Pokémon on the team (all 6).
-    // Automatically append any unselected slots to the end of the order.
     List<int> fullOrder = List.from(_selectedPreviewSlots);
     for (int i = 1; i <= _p1TeamList.length; i++) {
       if (!fullOrder.contains(i)) {
@@ -837,8 +835,14 @@ Timid Nature
     }
 
     final teamOrder = fullOrder.join('');
+    
+    // Send team selection for Player 1 AND explicitly trigger the AI for Player 2
     _jsRuntime!.evaluate("globalThis.sendAction('>p1 team $teamOrder');");
     _jsRuntime!.evaluate("globalThis.sendAction('>p2 team 123456');");
+    
+    // Force the battle to process the choices and check for new requests
+    _jsRuntime!.evaluate("globalThis.checkAndPushRequests();");
+    
     _fetchLogs();
     _announce('Submitted team selection. Entering battle turn 1.');
   }
