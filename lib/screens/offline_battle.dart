@@ -45,56 +45,14 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   int _s2SwitchChoice = 1;
   bool _s2Mega = false;
 
-  String _statusMessage = 'Engine initializing...';
-
-  static const String _defaultP1Team = '''
-Whimsicott @ Focus Sash
-Ability: Prankster
-Level: 50
-EVs: 252 SpA / 4 SpD / 252 Spe
-Timid Nature
-- Energy Ball
-- Tailwind
-- Beat Up
-- Protect
-
-Urshifu-Rapid-Strike @ Choice Scarf
-Ability: Unseen Fist
-Level: 50
-EVs: 252 Atk / 4 SpD / 252 Spe
-Jolly Nature
-- Surging Strikes
-- Close Combat
-- Aqua Jet
-- U-turn''';
-
-  static const String _defaultP2Team = '''
-Raichu @ Life Orb
-Ability: Lightning Rod
-Level: 50
-EVs: 4 HP / 252 SpA / 252 Spe
-Timid Nature
-- Thunderbolt
-- Volt Switch
-- Fake Out
-- Protect
-
-Gholdengo @ Choice Specs
-Ability: Good as Gold
-Level: 50
-EVs: 252 SpA / 4 SpD / 252 Spe
-Timid Nature
-- Make It Rain
-- Shadow Ball
-- Focus Blast
-- Trick''';
+  String _statusMessage = 'Enter both team sheets to begin.';
+  bool _engineInitialized = false;
 
   @override
   void initState() {
     super.initState();
-    _p1TeamController.text = _defaultP1Team;
-    _p2TeamController.text = _defaultP2Team;
-    _initEngine();
+    // Engine no longer initializes automatically.
+    // It starts only after the player submits both team sheets.
   }
 
   Future<void> _initEngine() async {
@@ -783,6 +741,49 @@ Timid Nature
     }
   }
 
+  bool _looksLikeValidTeamSheet(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return false;
+    final blocks = trimmed.split(RegExp(r'\n\s*\n'));
+    int validBlocks = 0;
+    for (final block in blocks) {
+      final lines = block.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
+      if (lines.isEmpty) continue;
+      final hasMove = lines.any((l) => l.startsWith('-'));
+      if (lines.first.isNotEmpty && hasMove) {
+        validBlocks++;
+      }
+    }
+    return validBlocks > 0;
+  }
+
+  Future<void> _handleTeamSubmission() async {
+    final p1Text = _p1TeamController.text;
+    final p2Text = _p2TeamController.text;
+
+    if (!_looksLikeValidTeamSheet(p1Text)) {
+      setState(() => _statusMessage = 'Player 1 team sheet is missing or invalid. Add at least one Pokémon with moves.');
+      _announce('Player 1 team sheet is invalid.');
+      return;
+    }
+    if (!_looksLikeValidTeamSheet(p2Text)) {
+      setState(() => _statusMessage = 'Computer team sheet is missing or invalid. Add at least one Pokémon with moves.');
+      _announce('Computer team sheet is invalid.');
+      return;
+    }
+
+    if (!_engineInitialized) {
+      setState(() {
+        _isLoading = true;
+        _statusMessage = 'Loading engine...';
+      });
+      await _initEngine();
+      _engineInitialized = true;
+    }
+
+    _startMatch();
+  }
+
   void _startMatch() {
     if (_jsRuntime == null) return;
     setState(() {
@@ -829,20 +830,25 @@ Timid Nature
 
   void _confirmTeamPreviewSelection() {
     if (_selectedPreviewSlots.length < 2 || _jsRuntime == null) return;
-    
+
     List<int> fullOrder = List.from(_selectedPreviewSlots);
     for (int i = 1; i <= _p1TeamList.length; i++) {
       if (!fullOrder.contains(i)) {
         fullOrder.add(i);
       }
     }
+    final p1Order = fullOrder.join('');
 
-    final teamOrder = fullOrder.join('');
-    
+    // Build a randomized, non-repeating permutation for p2 sized to its actual team count
+    final p2Count = _p2TeamList.isNotEmpty ? _p2TeamList.length : 2;
+    final p2Digits = List.generate(p2Count, (i) => i + 1);
+    p2Digits.shuffle();
+    final p2Order = p2Digits.join('');
+
     // Safely route through sendAction helper
-    _jsRuntime!.evaluate("globalThis.sendAction('>p1 team $teamOrder');");
-    _jsRuntime!.evaluate("globalThis.sendAction('>p2 team 123456');");
-    
+    _jsRuntime!.evaluate("globalThis.sendAction('>p1 team $p1Order');");
+    _jsRuntime!.evaluate("globalThis.sendAction('>p2 team $p2Order');");
+
     _fetchLogs();
     _announce('Submitted team selection. Entering battle turn 1.');
   }
@@ -981,7 +987,11 @@ Timid Nature
           controller: _p1TeamController,
           maxLines: 5,
           style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
-          decoration: const InputDecoration(labelText: 'Player 1 Team Sheet', border: OutlineInputBorder()),
+          decoration: const InputDecoration(
+            labelText: 'Player 1 Team Sheet',
+            hintText: 'Species @ Item\nAbility: X\nLevel: 50\nNature\n- Move 1\n- Move 2',
+            border: OutlineInputBorder(),
+          ),
         ),
         const SizedBox(height: 16),
         const Text('Player 2 Team (Computer AI)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.redAccent)),
@@ -990,14 +1000,18 @@ Timid Nature
           controller: _p2TeamController,
           maxLines: 5,
           style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
-          decoration: const InputDecoration(labelText: 'Computer Team Sheet', border: OutlineInputBorder()),
+          decoration: const InputDecoration(
+            labelText: 'Computer Team Sheet',
+            hintText: 'Species @ Item\nAbility: X\nLevel: 50\nNature\n- Move 1\n- Move 2',
+            border: OutlineInputBorder(),
+          ),
         ),
         const SizedBox(height: 16),
         SizedBox(
           width: double.infinity,
           height: 48,
           child: ElevatedButton.icon(
-            onPressed: _startMatch,
+            onPressed: _handleTeamSubmission,
             style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
             icon: const Icon(Icons.play_arrow, color: Colors.white),
             label: const Text('Start PvC Battle', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
