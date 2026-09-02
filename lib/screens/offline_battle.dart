@@ -197,20 +197,29 @@ Timid Nature
         globalThis.exports = exp;
         globalThis.module = { exports: exp };
 
+        var fsStub = {
+          readFileSync: function() { return ''; },
+          existsSync: function() { return false; },
+          readdirSync: function() { return ['champions']; },
+          statSync: function() { return { isDirectory: function() { return false; }, isFile: function() { return false; } }; }
+        };
+
         var dummyModules = {
-          fs: {
-            readFileSync: function() { return ''; },
-            existsSync: function() { return false; },
-            readdirSync: function() { return ['champions']; },
-            statSync: function() { return { isDirectory: function() { return false; }, isFile: function() { return false; } }; }
-          },
-          path: { resolve: function() { return ''; }, join: function() { return ''; }, dirname: function() { return ''; } },
+          fs: fsStub,
+          'node:fs': fsStub,
+          path: { resolve: function() { return ''; }, join: function() { return ''; }, dirname: function() { return ''; }, basename: function() { return ''; }, extname: function() { return ''; } },
+          'node:path': { resolve: function() { return ''; }, join: function() { return ''; }, dirname: function() { return ''; }, basename: function() { return ''; }, extname: function() { return ''; } },
           util: { inspect: function(o) { return String(o); }, inherits: function() {} },
+          'node:util': { inspect: function(o) { return String(o); }, inherits: function() {} },
           os: { platform: function() { return 'browser'; }, homedir: function() { return ''; } },
+          'node:os': { platform: function() { return 'browser'; }, homedir: function() { return ''; } },
           events: function EventEmitter() {},
           crypto: globalThis.crypto || {},
           buffer: { Buffer: { isBuffer: function() { return false; }, from: function() { return []; } } }
         };
+
+        // The bundle uses fs2, not fs
+        globalThis.fs2 = fsStub;
 
         if (!globalThis.require) {
           globalThis.require = function(id) {
@@ -366,6 +375,19 @@ Timid Nature
           Dex.data = Dex.data || {};
           Dex.data.Learnsets = $learnsetsJson;
           Dex.data.Aliases = Dex.data.Aliases || [];
+        }
+
+        // Force mod registration + debug
+        try {
+          var _Dex = globalThis.PSSim && globalThis.PSSim.Dex ? globalThis.PSSim.Dex : globalThis.Dex;
+          if (_Dex && typeof _Dex.includeMods === 'function') {
+            _Dex.includeMods();
+            globalThis.logBuffer.push('|debug-mods| keys after includeMods: ' + Object.keys(_Dex.dexes || {}).join(','));
+          } else {
+            globalThis.logBuffer.push('|debug-mods| Dex or includeMods not found');
+          }
+        } catch (e) {
+          globalThis.logBuffer.push('|debug-mods-error| ' + (e.message || e));
         }
 
         
