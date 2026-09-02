@@ -460,7 +460,14 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                   b.nextTurn();
                   globalThis.logBuffer.push('|debug-commit| nextTurn() called, requestState now=' + b.requestState);
                 } else {
-                  globalThis.logBuffer.push('|debug-commit| nextTurn not found on battle object');
+                  var protoMethods = [];
+                  try {
+                    var proto = Object.getPrototypeOf(b);
+                    protoMethods = Object.getOwnPropertyNames(proto).filter(function(n) {
+                      return typeof b[n] === 'function';
+                    });
+                  } catch (introspectErr) {}
+                  globalThis.logBuffer.push('|debug-methods| ' + protoMethods.join(', '));
                 }
               }
             } catch (commitErr) {
@@ -665,6 +672,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             for (var line in chunk.toString().split('\n')) {
               final trimmed = line.trim();
               if (trimmed.isEmpty) continue;
+              if (trimmed.startsWith('|poke|')) {
+                _rawLogs.add('|debug-raw-poke| $trimmed');
+              }
               _processProtocolLine(trimmed);
               _rawLogs.add(trimmed);
             }
