@@ -415,7 +415,7 @@ Timid Nature
         globalThis.toID = function(text) {
           if (text && text.id) return text.id;
           if (typeof text !== 'string' && typeof text !== 'number') return '';
-          return ('' + text).toLowerCase().replace(/[^a-z0-9]/g, '');
+          return ('' + text).toLowerCase().replace(new RegExp('[^a-z0-9]', 'g'), '');
         };
 
         globalThis.getLogs = function() {
@@ -493,9 +493,9 @@ Timid Nature
           if (Array.isArray(teamData)) rawTeam = teamData;
 
           if (rawTeam.length === 0 && typeof teamData === 'string') {
-            const blocks = teamData.split(/\n\s*\n/);
+            const blocks = teamData.split(new RegExp('\\n\\s*\\n'));
             for (let b = 0; b < blocks.length; b++) {
-              const lines = blocks[b].split('\n').map(l => l.trim()).filter(Boolean);
+              const lines = blocks[b].split(new RegExp('\\n')).map(l => l.trim()).filter(Boolean);
               if (lines.length === 0) continue;
 
               let species = '';
@@ -521,7 +521,7 @@ Timid Nature
                 } else if (line.startsWith('Level:')) {
                   level = parseInt(line.replace('Level:', '').trim()) || 50;
                 } else if (line.endsWith('Nature')) {
-                  nature = line.replace(/Nature/i, '').trim() || 'Hardy';
+                  nature = line.replace(new RegExp('Nature', 'i'), '').trim() || 'Hardy';
                 } else if (line.startsWith('-')) {
                   moves.push(line.substring(1).trim());
                 }
