@@ -218,7 +218,6 @@ Timid Nature
           buffer: { Buffer: { isBuffer: function() { return false; }, from: function() { return []; } } }
         };
 
-        // The bundle uses fs2, not fs
         globalThis.fs2 = fsStub;
 
         if (!globalThis.require) {
@@ -371,23 +370,31 @@ Timid Nature
           }
 })();
 
+        // Manually register the champions mod so includeFormats does not crash
+        try {
+          var _Dex = (globalThis.PSSim && globalThis.PSSim.Dex) ? globalThis.PSSim.Dex : globalThis.Dex;
+          if (_Dex) {
+            if (!_Dex.dexes) _Dex.dexes = Object.create(null);
+            if (!_Dex.dexes.base) _Dex.dexes.base = _Dex;
+
+            if (!_Dex.dexes.champions) {
+              var ModdedDexCtor = _Dex.ModdedDex || _Dex.constructor;
+              _Dex.dexes.champions = new ModdedDexCtor('champions');
+            }
+
+            _Dex.modsLoaded = true;
+            if (_Dex.dexes.base) _Dex.dexes.base.modsLoaded = true;
+
+            globalThis.logBuffer.push('|debug-mods| manually registered. keys = ' + Object.keys(_Dex.dexes).join(','));
+          }
+        } catch (e) {
+          globalThis.logBuffer.push('|debug-mods-error| ' + (e.message || e));
+        }
+
         if (typeof Dex !== "undefined") {
           Dex.data = Dex.data || {};
           Dex.data.Learnsets = $learnsetsJson;
           Dex.data.Aliases = Dex.data.Aliases || [];
-        }
-
-        // Force mod registration + debug
-        try {
-          var _Dex = globalThis.PSSim && globalThis.PSSim.Dex ? globalThis.PSSim.Dex : globalThis.Dex;
-          if (_Dex && typeof _Dex.includeMods === 'function') {
-            _Dex.includeMods();
-            globalThis.logBuffer.push('|debug-mods| keys after includeMods: ' + Object.keys(_Dex.dexes || {}).join(','));
-          } else {
-            globalThis.logBuffer.push('|debug-mods| Dex or includeMods not found');
-          }
-        } catch (e) {
-          globalThis.logBuffer.push('|debug-mods-error| ' + (e.message || e));
         }
 
         
