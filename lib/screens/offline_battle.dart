@@ -869,6 +869,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     final p1Order = fullOrder.join('');
 
     // Build a randomized, non-repeating permutation for p2 sized to its actual team count
+    setState(() {
+      _rawLogs.add('|debug-p2team| length=${_p2TeamList.length} contents=$_p2TeamList');
+    });
     final p2Count = _p2TeamList.isNotEmpty ? _p2TeamList.length : 2;
     final p2Digits = List.generate(p2Count, (i) => i + 1);
     p2Digits.shuffle();
