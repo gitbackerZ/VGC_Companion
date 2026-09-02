@@ -451,6 +451,22 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
             globalThis.logBuffer.push('|debug-choose| action="' + action + '" cmd="' + cmd + '" side=' + side + ' result=' + result);
 
+            // If both sides have finished choosing, explicitly commit so the battle advances.
+            try {
+              var p1Ready = b.p1 && typeof b.p1.isChoiceDone === 'function' ? b.p1.isChoiceDone() : false;
+              var p2Ready = b.p2 && typeof b.p2.isChoiceDone === 'function' ? b.p2.isChoiceDone() : false;
+              if (p1Ready && p2Ready) {
+                if (typeof b.commitDecisions === 'function') {
+                  b.commitDecisions();
+                  globalThis.logBuffer.push('|debug-commit| commitDecisions() called');
+                } else {
+                  globalThis.logBuffer.push('|debug-commit| commitDecisions not found on battle object');
+                }
+              }
+            } catch (commitErr) {
+              globalThis.logBuffer.push('|debug-commit-error| ' + (commitErr && commitErr.message ? commitErr.message : String(commitErr)));
+            }
+
             globalThis.checkAndPushRequests();
           } catch (err) {
             globalThis.logBuffer.push('|debug-choose-error| ' + (err && err.message ? err.message : String(err)));
