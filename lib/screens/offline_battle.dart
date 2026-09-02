@@ -589,6 +589,15 @@ Timid Nature
               throw new Error('Battle constructor resolution failed.');
             }
 
+            if (BattleCtor.prototype && typeof BattleCtor.prototype.start === 'function' && !BattleCtor.prototype._patchedStart) {
+              var origStart = BattleCtor.prototype.start;
+              BattleCtor.prototype.start = function() {
+                if (this.started) return;
+                return origStart.apply(this, arguments);
+              };
+              BattleCtor.prototype._patchedStart = true;
+            }
+
             var battleInstance = new BattleCtor({
               formatid: formatId,
               gameType: 'doubles',
