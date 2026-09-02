@@ -201,7 +201,7 @@ Timid Nature
           readFileSync: function() { return ''; },
           existsSync: function(filePath) {
             if (typeof filePath === 'string' && (filePath.includes('champions') || filePath.includes('championsregma'))) {
-              return true; // Let Showdown think mod files exist so it tries to load them
+              return true; 
             }
             return false;
           },
@@ -715,22 +715,25 @@ Timid Nature
         break;
       case 'switch':
       case 'drag':
-        final slot = parts[2].split(':').first;
-        final name = parts[2].split(': ').last;
+        final slotParts = parts[2].split(':');
+        final slot = slotParts.first.trim();
+        final name = slotParts.length > 1 ? slotParts.sublist(1).join(':').trim() : slot;
         final hp = parts.length > 4 ? parts[4] : '';
         _activeNames[slot] = name;
         _activeHp[slot] = hp;
         _announce('$name entered battle on $slot.');
         break;
       case '-damage':
-        final slot = parts[2].split(':').first;
-        final name = parts[2].split(': ').last;
+        final slotParts = parts[2].split(':');
+        final slot = slotParts.first.trim();
+        final name = slotParts.length > 1 ? slotParts.sublist(1).join(':').trim() : slot;
         if (parts.length > 3) _activeHp[slot] = parts[3];
         _announce('$name took damage. Health is now ${parts[3]}.');
         break;
       case 'faint':
-        final slot = parts[2].split(':').first;
-        final name = parts[2].split(': ').last;
+        final slotParts = parts[2].split(':');
+        final slot = slotParts.first.trim();
+        final name = slotParts.length > 1 ? slotParts.sublist(1).join(':').trim() : slot;
         _activeHp[slot] = '0/100';
         _announce('$name fainted!');
         break;
@@ -759,7 +762,7 @@ Timid Nature
 
         if (data.containsKey('teamPreview') && data['teamPreview'] == true) {
           _stage = BattleStage.teamPreview;
-          _p1TeamList = data['side']['pokemon'] ?? [];
+          _p1TeamList = data['side']?['pokemon'] ?? [];
           _selectedPreviewSlots.clear();
           _statusMessage = 'Team preview active. Choose Pokémon.';
           _announce('Team preview started.');
@@ -836,12 +839,9 @@ Timid Nature
 
     final teamOrder = fullOrder.join('');
     
-    // Send team selection for Player 1 AND explicitly trigger the AI for Player 2
+    // Safely route through sendAction helper
     _jsRuntime!.evaluate("globalThis.sendAction('>p1 team $teamOrder');");
     _jsRuntime!.evaluate("globalThis.sendAction('>p2 team 123456');");
-    
-    // Force the battle to process the choices and check for new requests
-    _jsRuntime!.evaluate("globalThis.checkAndPushRequests();");
     
     _fetchLogs();
     _announce('Submitted team selection. Entering battle turn 1.');
@@ -899,15 +899,15 @@ Timid Nature
 
   List<dynamic> _getAvailableSwitches() {
     if (_currentRequest == null || !_currentRequest!.containsKey('side')) return [];
-    final pokemonList = _currentRequest!['side']['pokemon'] as List<dynamic>;
+    final pokemonList = _currentRequest!['side']?['pokemon'] as List<dynamic>? ?? [];
     List<Map<String, dynamic>> choices = [];
     for (int i = 0; i < pokemonList.length; i++) {
       final p = pokemonList[i];
-      if (!(p['active'] ?? false) && !p['condition'].toString().startsWith('0')) {
+      if (!(p['active'] ?? false) && !(p['condition']?.toString().startsWith('0') ?? false)) {
         choices.add({
           'slot': i + 1,
-          'name': p['details'].toString().split(',')[0],
-          'condition': p['condition'],
+          'name': p['details']?.toString().split(',')[0] ?? 'Unknown',
+          'condition': p['condition'] ?? '',
         });
       }
     }
@@ -1023,7 +1023,8 @@ Timid Nature
           itemCount: _p1TeamList.length,
           itemBuilder: (context, index) {
             final slotIndex = index + 1;
-            final monName = _p1TeamList[index]['details'].toString().split(',')[0];
+            final monData = _p1TeamList[index];
+            final monName = monData is Map ? (monData['details']?.toString().split(',')[0] ?? 'Pokémon $slotIndex') : 'Pokémon $slotIndex';
             final selectedPos = _selectedPreviewSlots.indexOf(slotIndex);
             final String posText = selectedPos == -1
                 ? 'Not selected'
@@ -1119,10 +1120,10 @@ Timid Nature
                     isMega: _s1Mega,
                     canMega: activeList.isNotEmpty && (activeList[0]['canMegaEvolve'] == true),
                     onToggleSwitch: (v) => setState(() => _s1IsSwitch = v),
-                    onMoveChanged: (v) => setState(() => _s1MoveChoice = v!),
-                    onTargetChanged: (v) => setState(() => _s1Target = v!),
-                    onSwitchChanged: (v) => setState(() => _s1SwitchChoice = v!),
-                    onMegaToggled: (v) => setState(() => _s1Mega = v!),
+                    onMoveChanged: (v) => setState(() => _s1MoveChoice = v ?? 1),
+                    onTargetChanged: (v) => setState(() => _s1Target = v ?? 1),
+                    onSwitchChanged: (v) => setState(() => _s1SwitchChoice = v ?? 1),
+                    onMegaToggled: (v) => setState(() => _s1Mega = v),
                   ),
                   if (!isForceSwitch) ...[
                     const Divider(height: 16),
@@ -1138,10 +1139,10 @@ Timid Nature
                       isMega: _s2Mega,
                       canMega: activeList.length > 1 && (activeList[1]['canMegaEvolve'] == true),
                       onToggleSwitch: (v) => setState(() => _s2IsSwitch = v),
-                      onMoveChanged: (v) => setState(() => _s2MoveChoice = v!),
-                      onTargetChanged: (v) => setState(() => _s2Target = v!),
-                      onSwitchChanged: (v) => setState(() => _s2SwitchChoice = v!),
-                      onMegaToggled: (v) => setState(() => _s2Mega = v!),
+                      onMoveChanged: (v) => setState(() => _s2MoveChoice = v ?? 1),
+                      onTargetChanged: (v) => setState(() => _s2Target = v ?? 1),
+                      onSwitchChanged: (v) => setState(() => _s2SwitchChoice = v ?? 1),
+                      onMegaToggled: (v) => setState(() => _s2Mega = v),
                     ),
                   ],
                   const SizedBox(height: 10),
@@ -1179,6 +1180,20 @@ Timid Nature
     required ValueChanged<int?> onSwitchChanged,
     required ValueChanged<bool> onMegaToggled,
   }) {
+    // Validate current switch choice against available options to prevent Flutter assertion errors
+    final validSwitchSlots = switches.map((s) => s['slot'] as int).toList();
+    final currentSwitchValue = validSwitchSlots.contains(selectedSwitch)
+        ? selectedSwitch
+        : (validSwitchSlots.isNotEmpty ? validSwitchSlots.first : 1);
+
+    // Validate move choice index
+    final maxMoves = moves.isNotEmpty ? moves.length : 4;
+    final currentMoveValue = (selectedMove >= 1 && selectedMove <= maxMoves) ? selectedMove : 1;
+
+    // Validate target value
+    const validTargets = [1, 2, -2];
+    final currentTargetValue = validTargets.contains(selectedTarget) ? selectedTarget : 1;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1196,7 +1211,7 @@ Timid Nature
         if (isSwitch || isForceSwitch) ...[
           DropdownButton<int>(
             isExpanded: true,
-            value: switches.isEmpty ? 1 : (selectedSwitch > switches.length ? switches.first['slot'] as int : selectedSwitch),
+            value: switches.isEmpty ? 1 : currentSwitchValue,
             items: switches.map((s) {
               return DropdownMenuItem<int>(
                 value: s['slot'] as int,
@@ -1211,13 +1226,14 @@ Timid Nature
               Expanded(
                 child: DropdownButton<int>(
                   isExpanded: true,
-                  value: moves.isEmpty ? 1 : (selectedMove > moves.length ? 1 : selectedMove),
+                  value: currentMoveValue,
                   items: moves.isNotEmpty
                       ? List.generate(moves.length, (idx) {
                           final m = moves[idx];
+                          final moveName = m is Map ? (m['move'] ?? 'Move ${idx + 1}') : 'Move ${idx + 1}';
                           return DropdownMenuItem<int>(
                             value: idx + 1,
-                            child: Text(m['move'] ?? 'Move ${idx + 1}', style: const TextStyle(fontSize: 11)),
+                            child: Text(moveName, style: const TextStyle(fontSize: 11)),
                           );
                         })
                       : const [
@@ -1233,7 +1249,7 @@ Timid Nature
               Expanded(
                 child: DropdownButton<int>(
                   isExpanded: true,
-                  value: selectedTarget,
+                  value: currentTargetValue,
                   items: const [
                     DropdownMenuItem(value: 1, child: Text('Target: Computer 1 (p2a)', style: TextStyle(fontSize: 10))),
                     DropdownMenuItem(value: 2, child: Text('Target: Computer 2 (p2b)', style: TextStyle(fontSize: 10))),
