@@ -456,18 +456,11 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               var p1Ready = b.p1 && typeof b.p1.isChoiceDone === 'function' ? b.p1.isChoiceDone() : false;
               var p2Ready = b.p2 && typeof b.p2.isChoiceDone === 'function' ? b.p2.isChoiceDone() : false;
               if (p1Ready && p2Ready) {
-                if (typeof b.nextTurn === 'function') {
-                  b.nextTurn();
-                  globalThis.logBuffer.push('|debug-commit| nextTurn() called, requestState now=' + b.requestState);
+                if (typeof b.commitChoices === 'function') {
+                  b.commitChoices();
+                  globalThis.logBuffer.push('|debug-commit| commitChoices() called, requestState now=' + b.requestState);
                 } else {
-                  var protoMethods = [];
-                  try {
-                    var proto = Object.getPrototypeOf(b);
-                    protoMethods = Object.getOwnPropertyNames(proto).filter(function(n) {
-                      return typeof b[n] === 'function';
-                    });
-                  } catch (introspectErr) {}
-                  globalThis.logBuffer.push('|debug-methods| ' + protoMethods.join(', '));
+                  globalThis.logBuffer.push('|debug-commit| commitChoices not found on battle object');
                 }
               }
             } catch (commitErr) {
@@ -878,11 +871,13 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     }
     final p1Order = fullOrder.join('');
 
-    // Build a randomized, non-repeating permutation for p2 sized to its actual team count
-    setState(() {
-      _rawLogs.add('|debug-p2team| length=${_p2TeamList.length} contents=$_p2TeamList');
-    });
-    final p2Count = _p2TeamList.isNotEmpty ? _p2TeamList.length : 2;
+    // Build a randomized, non-repeating permutation for p2 sized to its actual typed team sheet
+    final p2SheetBlocks = _p2TeamController.text
+        .trim()
+        .split(RegExp(r'\n\s*\n'))
+        .where((b) => b.trim().isNotEmpty)
+        .toList();
+    final p2Count = p2SheetBlocks.isNotEmpty ? p2SheetBlocks.length : 2;
     final p2Digits = List.generate(p2Count, (i) => i + 1);
     p2Digits.shuffle();
     final p2Order = p2Digits.join('');
