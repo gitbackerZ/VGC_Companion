@@ -201,7 +201,7 @@ Timid Nature
           fs: {
             readFileSync: function() { return ''; },
             existsSync: function() { return false; },
-            readdirSync: function() { return []; },
+            readdirSync: function() { return ['champions']; },
             statSync: function() { return { isDirectory: function() { return false; }, isFile: function() { return false; } }; }
           },
           path: { resolve: function() { return ''; }, join: function() { return ''; }, dirname: function() { return ''; } },
