@@ -404,11 +404,19 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         globalThis.checkAndPushRequests = function() {
           if (!globalThis.battle) return;
           try {
+            var b = globalThis.battle;
+            var p1Done = b.p1 && typeof b.p1.isChoiceDone === 'function' ? b.p1.isChoiceDone() : 'n/a';
+            var p2Done = b.p2 && typeof b.p2.isChoiceDone === 'function' ? b.p2.isChoiceDone() : 'n/a';
+            var requestState = b.requestState || 'n/a';
+            globalThis.logBuffer.push('|debug-state| requestState=' + requestState + ' p1Done=' + p1Done + ' p2Done=' + p2Done);
+
             var reqStr = globalThis.getDirectRequest();
             if (reqStr && reqStr.length > 0) {
               globalThis.logBuffer.push('|request|' + reqStr);
             }
-          } catch (e) {}
+          } catch (e) {
+            globalThis.logBuffer.push('|debug-state-error| ' + (e && e.message ? e.message : String(e)));
+          }
         };
 
         globalThis.sendAction = function(action) {
