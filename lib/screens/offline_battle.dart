@@ -200,7 +200,7 @@ Timid Nature
         var fsStub = {
           readFileSync: function() { return ''; },
           existsSync: function(filePath) {
-            if (typeof filePath === 'string' && (filePath.includes('champions'))) {
+            if (typeof filePath === 'string' && (filePath.includes('champions') || filePath.includes('championsregma'))) {
               return true; // Let Showdown think mod files exist so it tries to load them
             }
             return false;
@@ -211,7 +211,7 @@ Timid Nature
             }
             return [];
           },
-          statSync: function() { return { isDirectory: function() { return false; }, isFile: function() { return false; } }; }
+          statSync: function() { return { isDirectory: function() { return true; }, isFile: function() { return false; } }; }
         };
 
         var dummyModules = {
@@ -235,7 +235,6 @@ Timid Nature
             if (dummyModules[id]) return dummyModules[id];
             if (globalThis[id]) return globalThis[id];
 
-            // Try to resolve real bundled data by matching the filename suffix
             if (globalThis.PSStaticData) {
               var dataKeyMap = {
                 abilities: 'Abilities',
@@ -273,20 +272,30 @@ Timid Nature
 
               var lowerId = String(id).toLowerCase();
               for (var fileKey in dataKeyMap) {
-                if (lowerId.indexOf(fileKey) !== -1 && lowerId.indexOf('mods/champions') === -1) {
+                if (lowerId.indexOf(fileKey) !== -1 && lowerId.indexOf('mods/champions') === -1 && lowerId.indexOf('mods/championsregma') === -1) {
                   var exportName = dataKeyMap[fileKey];
                   var result = {};
                   result[exportName] = globalThis.PSStaticData.base[fileKey] || {};
                   return withSafetyDefaults(result);
                 }
               }
-              if (lowerId.indexOf('champions') !== -1) {
+              if (lowerId.indexOf('championsregma') !== -1) {
                 for (var fileKey2 in dataKeyMap) {
                   if (lowerId.indexOf(fileKey2) !== -1) {
                     var exportName2 = dataKeyMap[fileKey2];
                     var result2 = {};
-                    result2[exportName2] = (globalThis.PSStaticData.mods.champions && globalThis.PSStaticData.mods.champions[fileKey2]) || {};
+                    result2[exportName2] = (globalThis.PSStaticData.mods.championsregma && globalThis.PSStaticData.mods.championsregma[fileKey2]) || {};
                     return withSafetyDefaults(result2);
+                  }
+                }
+              }
+              if (lowerId.indexOf('champions') !== -1) {
+                for (var fileKey3 in dataKeyMap) {
+                  if (lowerId.indexOf(fileKey3) !== -1) {
+                    var exportName3 = dataKeyMap[fileKey3];
+                    var result3 = {};
+                    result3[exportName3] = (globalThis.PSStaticData.mods.champions && globalThis.PSStaticData.mods.champions[fileKey3]) || {};
+                    return withSafetyDefaults(result3);
                   }
                 }
               }
@@ -348,7 +357,6 @@ Timid Nature
             return false;
           }
 
-          // Primary: PSSim bundle exposes Battle/Dex/Teams/PRNG directly
           if (globalThis.PSSim && isValidCtor(globalThis.PSSim.Battle)) {
             globalThis.Battle = globalThis.PSSim.Battle;
             if (globalThis.PSSim.Dex && !globalThis.Dex) {
@@ -357,7 +365,6 @@ Timid Nature
             return;
           }
 
-          // Fallback: old deep scan, in case bundle shape changes
           var candidates = [
             globalThis.Battle,
             globalThis.Sim ? globalThis.Sim.Battle : null,
@@ -380,26 +387,24 @@ Timid Nature
           }
         })();
 
-        // Manually register the champions mod so includeFormats does not crash
         try {
           var _Dex = (globalThis.PSSim && globalThis.PSSim.Dex) ? globalThis.PSSim.Dex : globalThis.Dex;
           if (_Dex) {
             if (!_Dex.dexes) _Dex.dexes = Object.create(null);
             if (!_Dex.dexes.base) _Dex.dexes.base = _Dex;
 
+            var ModdedDexCtor = _Dex.ModdedDex || _Dex.constructor;
             if (!_Dex.dexes.champions) {
-              var ModdedDexCtor = _Dex.ModdedDex || _Dex.constructor;
               _Dex.dexes.champions = new ModdedDexCtor('champions');
+            }
+            if (!_Dex.dexes.championsregma) {
+              _Dex.dexes.championsregma = new ModdedDexCtor('championsregma');
             }
 
             _Dex.modsLoaded = true;
             if (_Dex.dexes.base) _Dex.dexes.base.modsLoaded = true;
-
-            globalThis.logBuffer.push('|debug-mods| manually registered. keys = ' + Object.keys(_Dex.dexes).join(','));
           }
-        } catch (e) {
-          globalThis.logBuffer.push('|debug-mods-error| ' + (e.message || e));
-        }
+        } catch (e) {}
 
         if (typeof Dex !== "undefined") {
           Dex.data = Dex.data || {};
@@ -445,9 +450,7 @@ Timid Nature
             if (reqStr && reqStr.length > 0) {
               globalThis.logBuffer.push('|request|' + reqStr);
             }
-          } catch (e) {
-            globalThis.logBuffer.push('|error| Request Exception: ' + (e.message || e));
-          }
+          } catch (e) {}
         };
 
         globalThis.sendAction = function(action) {
@@ -471,8 +474,7 @@ Timid Nature
             else if (b.sides && b.sides.length > 0) targetSide = b.sides[0];
 
             if (targetSide && typeof targetSide.choose === 'function') {
-              var chooseResult = targetSide.choose(cmd);
-              globalThis.logBuffer.push('|debug| choose(' + cmd + ') result: ' + chooseResult + ' | choiceError: ' + (targetSide.choiceError || 'none'));
+              targetSide.choose(cmd);
             } else if (typeof b.choose === 'function') {
               if (side) b.choose(side, cmd);
               else b.choose(cmd);
@@ -481,9 +483,7 @@ Timid Nature
             }
 
             globalThis.checkAndPushRequests();
-          } catch (err) {
-            globalThis.logBuffer.push('|error| Action Exception: ' + (err.message || err));
-          }
+          } catch (err) {}
         };
 
         globalThis.parseTeam = function(teamData) {
@@ -493,9 +493,9 @@ Timid Nature
           if (Array.isArray(teamData)) rawTeam = teamData;
 
           if (rawTeam.length === 0 && typeof teamData === 'string') {
-            const blocks = teamData.split(/\\n\\s*\\n/);
+            const blocks = teamData.split(/\n\s*\n/);
             for (let b = 0; b < blocks.length; b++) {
-              const lines = blocks[b].split('\\n').map(l => l.trim()).filter(Boolean);
+              const lines = blocks[b].split('\n').map(l => l.trim()).filter(Boolean);
               if (lines.length === 0) continue;
 
               let species = '';
@@ -586,11 +586,11 @@ Timid Nature
 
             let BattleCtor = globalThis.Battle;
             if (typeof BattleCtor !== 'function') {
-              throw new Error('Battle constructor resolution failed. Available keys: ' + Object.keys(globalThis).join(', '));
+              throw new Error('Battle constructor resolution failed.');
             }
 
             var battleInstance = new BattleCtor({
-              formatid: 'gen9championsdoublescustomgame',
+              formatid: formatId,
               gameType: 'doubles',
               send: function(type, data) {
                 if (Array.isArray(data)) {
@@ -602,8 +602,6 @@ Timid Nature
             });
 
             globalThis.battle = battleInstance;
-
-            globalThis.logBuffer.push('|debug-gametype| battle.gameType: ' + battleInstance.gameType + ' | format.gameType: ' + (battleInstance.format ? battleInstance.format.gameType : 'no format'));
 
             if (typeof battleInstance.setPlayer === 'function') {
               battleInstance.setPlayer('p1', { name: 'Player 1', team: p1Team });
@@ -623,8 +621,7 @@ Timid Nature
             return "SUCCESS";
           } catch (err) {
             const errMsg = (err && err.message) ? err.message : String(err);
-            const errStack = (err && err.stack) ? err.stack : 'no stack';
-            globalThis.logBuffer.push('|error| Engine Crash: ' + errMsg + ' | STACK: ' + errStack);
+            globalThis.logBuffer.push('|error| Engine Crash: ' + errMsg);
             return "ERROR: " + errMsg;
           }
         };
@@ -638,7 +635,7 @@ Timid Nature
       setState(() {
         _jsRuntime = runtime;
         _isLoading = false;
-        _statusMessage = 'Engine ready. Gen 9 Custom Doubles Active.';
+        _statusMessage = 'Engine ready. Format active.';
       });
       _announce('Engine initialized successfully.');
       _startLogPolling();
@@ -781,9 +778,9 @@ Timid Nature
       _p2TeamList.clear();
       _activeHp.clear();
       _activeNames.clear();
-      _statusMessage = 'Starting Gen 9 Custom Double Battle...';
+      _statusMessage = 'Starting Battle...';
     });
-    _announce('Starting Gen 9 Custom Double Battle.');
+    _announce('Starting Battle.');
 
     final p1Data = jsonEncode(_p1TeamController.text);
     final p2Data = jsonEncode(_p2TeamController.text);
@@ -869,7 +866,6 @@ Timid Nature
       p1Action += slotActions.join(', ');
     }
 
-    _rawLogs.add('|debug-dart| p1Action sent: $p1Action');
     _jsRuntime!.evaluate("globalThis.sendAction('$p1Action');");
     _jsRuntime!.evaluate("globalThis.sendAction('>p2 default');");
     _fetchLogs();
@@ -958,46 +954,30 @@ Timid Nature
         const SizedBox(height: 12),
         const Text('Player 1 Team (Human)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blueAccent)),
         const SizedBox(height: 4),
-        Semantics(
-          label: 'Player 1 Human Team Input Text Area',
-          child: TextField(
-            controller: _p1TeamController,
-            maxLines: 5,
-            style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
-            decoration: const InputDecoration(
-              labelText: 'Player 1 Team Sheet',
-              border: OutlineInputBorder(),
-            ),
-          ),
+        TextField(
+          controller: _p1TeamController,
+          maxLines: 5,
+          style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+          decoration: const InputDecoration(labelText: 'Player 1 Team Sheet', border: OutlineInputBorder()),
         ),
         const SizedBox(height: 16),
         const Text('Player 2 Team (Computer AI)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.redAccent)),
         const SizedBox(height: 4),
-        Semantics(
-          label: 'Player 2 Computer AI Team Input Text Area',
-          child: TextField(
-            controller: _p2TeamController,
-            maxLines: 5,
-            style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
-            decoration: const InputDecoration(
-              labelText: 'Computer Team Sheet',
-              border: OutlineInputBorder(),
-            ),
-          ),
+        TextField(
+          controller: _p2TeamController,
+          maxLines: 5,
+          style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+          decoration: const InputDecoration(labelText: 'Computer Team Sheet', border: OutlineInputBorder()),
         ),
         const SizedBox(height: 16),
-        Semantics(
-          button: true,
-          label: 'Start Player versus Computer Battle',
-          child: SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: ElevatedButton.icon(
-              onPressed: _startMatch,
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
-              icon: const Icon(Icons.play_arrow, color: Colors.white),
-              label: const Text('Start PvC Battle', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
+        SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: ElevatedButton.icon(
+            onPressed: _startMatch,
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
+            icon: const Icon(Icons.play_arrow, color: Colors.white),
+            label: const Text('Start PvC Battle', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         ),
       ],
@@ -1026,50 +1006,42 @@ Timid Nature
                 ? 'Not selected'
                 : (selectedPos < 2 ? 'Lead Position ${selectedPos + 1}' : 'Back Position ${selectedPos - 1}');
 
-            return Semantics(
-              button: true,
-              label: '$monName. Status: $posText.',
-              child: InkWell(
-                onTap: () {
-                  setState(() {
-                    if (selectedPos != -1) {
-                      _selectedPreviewSlots.removeAt(selectedPos);
-                    } else if (_selectedPreviewSlots.length < _p1TeamList.length) {
-                      _selectedPreviewSlots.add(slotIndex);
-                    }
-                  });
-                },
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: selectedPos != -1 ? Colors.blue.withOpacity(0.3) : Colors.grey[850],
-                    border: Border.all(color: selectedPos != -1 ? Colors.blue : Colors.grey),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  padding: const EdgeInsets.all(6),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(monName, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                      if (selectedPos != -1) Text(posText, style: const TextStyle(fontSize: 10, color: Colors.amberAccent)),
-                    ],
-                  ),
+            return InkWell(
+              onTap: () {
+                setState(() {
+                  if (selectedPos != -1) {
+                    _selectedPreviewSlots.removeAt(selectedPos);
+                  } else if (_selectedPreviewSlots.length < _p1TeamList.length) {
+                    _selectedPreviewSlots.add(slotIndex);
+                  }
+                });
+              },
+              child: Container(
+                decoration: BoxDecoration(
+                  color: selectedPos != -1 ? Colors.blue.withOpacity(0.3) : Colors.grey[850],
+                  border: Border.all(color: selectedPos != -1 ? Colors.blue : Colors.grey),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                padding: const EdgeInsets.all(6),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(monName, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                    if (selectedPos != -1) Text(posText, style: const TextStyle(fontSize: 10, color: Colors.amberAccent)),
+                  ],
                 ),
               ),
             );
           },
         ),
         const SizedBox(height: 12),
-        Semantics(
-          button: true,
-          enabled: _selectedPreviewSlots.length >= 2,
-          child: SizedBox(
-            width: double.infinity,
-            height: 44,
-            child: ElevatedButton(
-              onPressed: _selectedPreviewSlots.length >= 2 ? _confirmTeamPreviewSelection : null,
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700]),
-              child: Text('Confirm Selection (${_selectedPreviewSlots.length}/${_p1TeamList.length})'),
-            ),
+        SizedBox(
+          width: double.infinity,
+          height: 44,
+          child: ElevatedButton(
+            onPressed: _selectedPreviewSlots.length >= 2 ? _confirmTeamPreviewSelection : null,
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700]),
+            child: Text('Confirm Selection (${_selectedPreviewSlots.length}/${_p1TeamList.length})'),
           ),
         ),
       ],
@@ -1107,12 +1079,9 @@ Timid Nature
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Semantics(
-                    header: true,
-                    child: Text(
-                      isForceSwitch ? 'Select Replacement Pokémon' : 'Select Player Turn Actions',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                    ),
+                  Text(
+                    isForceSwitch ? 'Select Replacement Pokémon' : 'Select Player Turn Actions',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                   ),
                   const SizedBox(height: 6),
                   _buildSlotActionControl(
@@ -1153,16 +1122,12 @@ Timid Nature
                     ),
                   ],
                   const SizedBox(height: 10),
-                  Semantics(
-                    button: true,
-                    label: 'Submit Player Actions to Engine',
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _sendTurnCommands,
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700]),
-                        child: const Text('Submit Actions (Trigger AI)', style: TextStyle(color: Colors.white)),
-                      ),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _sendTurnCommands,
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700]),
+                      child: const Text('Submit Actions (Trigger AI)', style: TextStyle(color: Colors.white)),
                     ),
                   ),
                 ],
@@ -1199,12 +1164,9 @@ Timid Nature
           children: [
             Text(slotTitle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
             if (!isForceSwitch && switches.isNotEmpty)
-              Semantics(
-                button: true,
-                child: TextButton(
-                  onPressed: () => onToggleSwitch(!isSwitch),
-                  child: Text(isSwitch ? 'Use Move' : 'Switch Out', style: const TextStyle(fontSize: 11)),
-                ),
+              TextButton(
+                onPressed: () => onToggleSwitch(!isSwitch),
+                child: Text(isSwitch ? 'Use Move' : 'Switch Out', style: const TextStyle(fontSize: 11)),
               ),
           ],
         ),
