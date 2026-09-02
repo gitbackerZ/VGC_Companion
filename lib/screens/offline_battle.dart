@@ -684,6 +684,19 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               if (trimmed.startsWith('|poke|')) {
                 _rawLogs.add('|debug-raw-poke| $trimmed');
               }
+
+              // If the computer side needs a forced switch, auto-resolve it immediately.
+              if (_pendingRequestSide == 'p2' && trimmed.startsWith('|request|')) {
+                try {
+                  dynamic p2Data = jsonDecode(trimmed.substring(9));
+                  if (p2Data is String) p2Data = jsonDecode(p2Data);
+                  if (p2Data is Map && p2Data.containsKey('forceSwitch')) {
+                    _rawLogs.add('|debug-p2-forceswitch| auto-sending default switch');
+                    _jsRuntime?.evaluate("globalThis.sendAction('>p2 default');");
+                  }
+                } catch (_) {}
+              }
+
               _processProtocolLine(trimmed);
               _rawLogs.add(trimmed);
             }
@@ -774,6 +787,11 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           _selectedPreviewSlots.clear();
           _statusMessage = 'Team preview active. Choose Pokémon.';
           _announce('Team preview started.');
+        } else if (data.containsKey('wait') && data['wait'] == true) {
+          _stage = BattleStage.inBattle;
+          _statusMessage = 'Waiting for the computer to send out a replacement...';
+          _announce('Waiting for opponent.');
+          // Don't touch _currentRequest's move data — keep UI disabled until a real request arrives.
         } else {
           _stage = BattleStage.inBattle;
           _s1IsSwitch = false;
@@ -1218,7 +1236,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: _sendTurnCommands,
+                      onPressed: (_currentRequest != null && _currentRequest!.containsKey('wait'))
+                          ? null
+                          : _sendTurnCommands,
                       style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700]),
                       child: const Text('Submit Actions (Trigger AI)', style: TextStyle(color: Colors.white)),
                     ),
