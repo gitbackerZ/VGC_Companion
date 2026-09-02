@@ -174,12 +174,6 @@ Timid Nature
             return String.fromCharCode.apply(null, arr);
           };
         }
-if (typeof globalThis.TextDecoder === 'undefined') {
-          globalThis.TextDecoder = function TextDecoder() {};
-          globalThis.TextDecoder.prototype.decode = function(arr) {
-            return String.fromCharCode.apply(null, arr);
-          };
-        }
 
         (function patchObjectEntries() {
           var origEntries = Object.entries;
@@ -279,7 +273,10 @@ if (typeof globalThis.TextDecoder === 'undefined') {
                 }
               }
 
-              if (lowerId.indexOf('config/formats') !== -1 || (lowerId.indexOf('formats') !== -1 && lowerId.indexOf('config') !== -1)) {
+              if (lowerId.indexOf('custom-formats') !== -1) {
+                return { Formats: [] };
+              }
+              if (lowerId.indexOf('config/formats') !== -1) {
                 return { Formats: globalThis.PSStaticData.configFormats || [] };
               }
             }
