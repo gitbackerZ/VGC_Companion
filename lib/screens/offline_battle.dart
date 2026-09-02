@@ -459,6 +459,13 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                 if (typeof b.commitChoices === 'function') {
                   b.commitChoices();
                   globalThis.logBuffer.push('|debug-commit| commitChoices() called, requestState now=' + b.requestState);
+
+                  if (typeof b.sendUpdates === 'function') {
+                    b.sendUpdates();
+                    globalThis.logBuffer.push('|debug-flush| sendUpdates() called');
+                  } else {
+                    globalThis.logBuffer.push('|debug-flush| sendUpdates not found on battle object');
+                  }
                 } else {
                   globalThis.logBuffer.push('|debug-commit| commitChoices not found on battle object');
                 }
