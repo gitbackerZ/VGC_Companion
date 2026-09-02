@@ -17,7 +17,7 @@ class OfflineBattleScreen extends StatefulWidget {
 class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   JavascriptRuntime? _jsRuntime;
   Timer? _logTimer;
-  bool _isLoading = true;
+  bool _isLoading = false;
   BattleStage _stage = BattleStage.setup;
 
   final List<String> _rawLogs = [];
