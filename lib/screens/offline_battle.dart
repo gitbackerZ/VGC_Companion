@@ -659,6 +659,8 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     _logTimer = Timer.periodic(const Duration(milliseconds: 250), (_) => _fetchLogs());
   }
 
+  String _pendingRequestSide = 'p1';
+
   void _fetchLogs() {
     if (_jsRuntime == null) return;
     try {
@@ -672,6 +674,13 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             for (var line in chunk.toString().split('\n')) {
               final trimmed = line.trim();
               if (trimmed.isEmpty) continue;
+
+              // Track which side the next |request| line belongs to
+              if (trimmed == 'p1' || trimmed == 'p2') {
+                _pendingRequestSide = trimmed;
+                continue;
+              }
+
               if (trimmed.startsWith('|poke|')) {
                 _rawLogs.add('|debug-raw-poke| $trimmed');
               }
@@ -747,6 +756,8 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
   void _parseRequest(String jsonString) {
     if (jsonString.isEmpty) return;
+    // Only track the player's (p1) request — ignore the computer's (p2) own request block.
+    if (_pendingRequestSide == 'p2') return;
     try {
       dynamic data = jsonDecode(jsonString);
       if (data is String) {
