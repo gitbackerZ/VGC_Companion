@@ -199,8 +199,18 @@ Timid Nature
 
         var fsStub = {
           readFileSync: function() { return ''; },
-          existsSync: function() { return false; },
-          readdirSync: function() { return ['champions']; },
+          existsSync: function(filePath) {
+            if (typeof filePath === 'string' && (filePath.includes('champions'))) {
+              return true; // Let Showdown think mod files exist so it tries to load them
+            }
+            return false;
+          },
+          readdirSync: function(dirPath, options) {
+            if (typeof dirPath === 'string' && (dirPath.includes('mods') || dirPath.endsWith('mods'))) {
+              return ['champions', 'championsregma'];
+            }
+            return [];
+          },
           statSync: function() { return { isDirectory: function() { return false; }, isFile: function() { return false; } }; }
         };
 
@@ -368,7 +378,7 @@ Timid Nature
               }
             } catch (e) {}
           }
-})();
+        })();
 
         // Manually register the champions mod so includeFormats does not crash
         try {
@@ -396,8 +406,6 @@ Timid Nature
           Dex.data.Learnsets = $learnsetsJson;
           Dex.data.Aliases = Dex.data.Aliases || [];
         }
-
-        
 
         globalThis.toID = function(text) {
           if (text && text.id) return text.id;
@@ -798,7 +806,6 @@ Timid Nature
     if (!directReqRes.isError && directReqRes.stringResult.isNotEmpty) {
       _parseRequest(directReqRes.stringResult);
     } else {
-      // Direct UI stage fallback to advance off the setup screen
       final checkBattle = _jsRuntime!.evaluate("Boolean(globalThis.battle);");
       if (checkBattle.stringResult == 'true') {
         setState(() {
