@@ -431,17 +431,22 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             else if (side === 'p2' && b.p2) targetSide = b.p2;
             else if (b.sides && b.sides.length > 0) targetSide = b.sides[0];
 
+            var result = 'no-op';
             if (targetSide && typeof targetSide.choose === 'function') {
-              targetSide.choose(cmd);
+              result = targetSide.choose(cmd);
             } else if (typeof b.choose === 'function') {
-              if (side) b.choose(side, cmd);
-              else b.choose(cmd);
+              if (side) result = b.choose(side, cmd);
+              else result = b.choose(cmd);
             } else if (typeof b.makeChoices === 'function') {
-              b.makeChoices(cmd);
+              result = b.makeChoices(cmd);
             }
 
+            globalThis.logBuffer.push('|debug-choose| action="' + action + '" cmd="' + cmd + '" side=' + side + ' result=' + result);
+
             globalThis.checkAndPushRequests();
-          } catch (err) {}
+          } catch (err) {
+            globalThis.logBuffer.push('|debug-choose-error| ' + (err && err.message ? err.message : String(err)));
+          }
         };
 
         globalThis.parseTeam = function(teamData) {
