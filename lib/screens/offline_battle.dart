@@ -785,9 +785,6 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   bool _p1HasMegaEvolved = false;
   bool _p2HasMegaEvolved = false;
 
-  // Target-overlay state: which slot is currently picking a target, and for which move.
-  int? _targetOverlaySlot; // 0 or 1, null = hidden
-  int? _targetOverlayMoveIdx;
   final List<Map<String, dynamic>> _turnHistory = []; // {turn: int, lines: List<String>}
   int _currentTurnNumber = 0;
 
@@ -1636,20 +1633,29 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                 style: const TextStyle(fontSize: 11, color: Colors.amberAccent),
               ),
             ),
+          if (canMega) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.purple.withOpacity(0.15),
+                border: Border.all(color: Colors.purpleAccent, width: 1.5),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Checkbox(value: isMega, onChanged: (v) => onMegaToggled(v ?? false)),
+                  const Text('MEGA EVOLVE', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.purpleAccent)),
+                ],
+              ),
+            ),
+          ],
           if (switches.isNotEmpty) ...[
             const SizedBox(height: 6),
             TextButton(
               onPressed: () => onToggleSwitch(true),
               child: const Text('Switch Out Instead', style: TextStyle(fontSize: 11)),
-            ),
-          ],
-          if (canMega) ...[
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Checkbox(value: isMega, onChanged: (v) => onMegaToggled(v ?? false)),
-                const Text('Mega Evolve', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.purpleAccent)),
-              ],
             ),
           ],
         ],
