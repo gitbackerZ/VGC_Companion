@@ -1164,7 +1164,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     _fetchLogs();
 
     _announce('Player actions submitted.');
-    setState(() => _currentRequest = null);
+    // Do NOT null out _currentRequest here — _fetchLogs() above already parsed
+    // and applied the next turn's real request (or a "wait" state). Wiping it
+    // afterward discards that data and permanently freezes the UI.
   }
 
   String _buildP2MoveAction() {
@@ -1436,8 +1438,15 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                     isForceSwitch ? 'Select Replacement Pokémon' : 'Select Player Turn Actions',
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                   ),
-                  const SizedBox(height: 6),
-                  Builder(builder: (context) {
+                  conBuilder(builder: (context) {
+                    // DEBUG: verify mega eligibility inputs, visible in-app
+                    if (activeList.isNotEmpty && (_rawLogs.isEmpty || !_rawLogs.last.startsWith('|debug-mega-check|'))) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        setState(() {
+                          _rawLogs.add('|debug-mega-check| p1HasMegaEvolved=$_p1HasMegaEvolved canMegaEvoSlot0=${activeList[0]['canMegaEvo']} canMegaEvoSlot1=${activeList.length > 1 ? activeList[1]['canMegaEvo'] : 'n/a'}');
+                        });
+                      });
+                    }
                     final forceList = (isForceSwitch && _currentRequest != null)
                         ? (_currentRequest!['forceSwitch'] as List<dynamic>? ?? [])
                         : [];
