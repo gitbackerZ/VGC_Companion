@@ -783,6 +783,10 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   final math.Random _rng = math.Random();
   bool _p1HasMegaEvolved = false;
   bool _p2HasMegaEvolved = false;
+
+  // Target-overlay state: which slot is currently picking a target, and for which move.
+  int? _targetOverlaySlot; // 0 or 1, null = hidden
+  int? _targetOverlayMoveIdx;
   final List<Map<String, dynamic>> _turnHistory = []; // {turn: int, lines: List<String>}
   int _currentTurnNumber = 0;
 
@@ -1437,6 +1441,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                       children: [
                         if (slot1NeedsSwitch)
                           _buildSlotActionControl(
+                            slotNumber: 1,
                             slotTitle: 'Slot 1 (${_activeNames['p1a'] ?? 'Active 1'})',
                             moves: movesSlot1,
                             switches: availableSwitches,
@@ -1456,6 +1461,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                         if (slot2Exists && (!isForceSwitch || slot2NeedsSwitch)) ...[
                           const Divider(height: 16),
                           _buildSlotActionControl(
+                            slotNumber: 2,
                             slotTitle: 'Slot 2 (${_activeNames['p1b'] ?? 'Active 2'})',
                             moves: movesSlot2,
                             switches: availableSwitches,
@@ -1512,99 +1518,249 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     required ValueChanged<int?> onTargetChanged,
     required ValueChanged<int?> onSwitchChanged,
     required ValueChanged<bool> onMegaToggled,
+    required int slotNumber, // 1 or 2, used to route the target overlay
   }) {
-    // Validate current switch choice against available options to prevent Flutter assertion errors
-    final validSwitchSlots = switches.map((s) => s['slot'] as int).toList();
-    final currentSwitchValue = validSwitchSlots.contains(selectedSwitch)
-        ? selectedSwitch
-        : (validSwitchSlots.isNotEmpty ? validSwitchSlots.first : 1);
-
-    // Validate move choice index
-    final maxMoves = moves.isNotEmpty ? moves.length : 4;
-    final currentMoveValue = (selectedMove >= 1 && selectedMove <= maxMoves) ? selectedMove : 1;
-
-    // Validate target value
-    const validTargets = [1, 2, -2];
-    final currentTargetValue = validTargets.contains(selectedTarget) ? selectedTarget : 1;
+    if (isForceSwitch) {
+      // Forced switches get their own dedicated overlay — see _showForcedSwitchOverlay.
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Expanded(child: Text('$slotTitle needs a replacement', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+            ElevatedButton(
+              onPressed: () => _showForcedSwitchOverlay(
+                slotNumber: slotNumber,
+                switches: switches,
+                onSwitchChanged: onSwitchChanged,
+              ),
+              child: Text(selectedSwitch > 0 ? 'Switching to #$selectedSwitch' : 'Choose Switch-In'),
+            ),
+          ],
+        ),
+      );
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(slotTitle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-            if (!isForceSwitch && switches.isNotEmpty)
-              TextButton(
-                onPressed: () => onToggleSwitch(!isSwitch),
-                child: Text(isSwitch ? 'Use Move' : 'Switch Out', style: const TextStyle(fontSize: 11)),
-              ),
-          ],
-        ),
-        if (isSwitch || isForceSwitch) ...[
-          DropdownButton<int>(
-            isExpanded: true,
-            value: switches.isEmpty ? 1 : currentSwitchValue,
-            items: switches.map((s) {
-              return DropdownMenuItem<int>(
-                value: s['slot'] as int,
-                child: Text('Switch to: ${s['name']} (${s['condition']})', style: const TextStyle(fontSize: 11)),
+        Text(slotTitle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+        const SizedBox(height: 6),
+
+        if (isSwitch) ...[
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: switches.map((s) {
+              final slot = s['slot'] as int;
+              final selected = slot == selectedSwitch;
+              return ElevatedButton(
+                onPressed: () => onSwitchChanged(slot),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: selected ? Colors.blue[700] : Colors.grey[800],
+                ),
+                child: Text('${s['name']} (${s['condition']})', style: const TextStyle(fontSize: 11)),
               );
             }).toList(),
-            onChanged: onSwitchChanged,
+          ),
+          const SizedBox(height: 6),
+          TextButton(
+            onPressed: () => onToggleSwitch(false),
+            child: const Text('Use a Move Instead', style: TextStyle(fontSize: 11)),
           ),
         ] else ...[
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButton<int>(
-                  isExpanded: true,
-                  value: currentMoveValue,
-                  items: moves.isNotEmpty
-                      ? List.generate(moves.length, (idx) {
-                          final m = moves[idx];
-                          final moveName = m is Map ? (m['move'] ?? 'Move ${idx + 1}') : 'Move ${idx + 1}';
-                          return DropdownMenuItem<int>(
-                            value: idx + 1,
-                            child: Text(moveName, style: const TextStyle(fontSize: 11)),
+          // Move buttons, 2 per row.
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: List.generate(moves.length, (idx) {
+              final m = moves[idx];
+              final moveNum = idx + 1;
+              final moveName = m is Map ? (m['move'] ?? 'Move $moveNum') : 'Move $moveNum';
+              final disabled = m is Map && (m['disabled'] == true);
+              final selected = moveNum == selectedMove;
+              return ElevatedButton(
+                onPressed: disabled
+                    ? null
+                    : () {
+                        onMoveChanged(moveNum);
+                        if (_moveNeedsTargetForOverlay(m)) {
+                          _showTargetOverlay(
+                            slotNumber: slotNumber,
+                            moveIdx: moveNum,
+                            onTargetChanged: onTargetChanged,
+                            currentTarget: selectedTarget,
                           );
-                        })
-                      : const [
-                          DropdownMenuItem(value: 1, child: Text('Move 1', style: TextStyle(fontSize: 11))),
-                          DropdownMenuItem(value: 2, child: Text('Move 2', style: TextStyle(fontSize: 11))),
-                          DropdownMenuItem(value: 3, child: Text('Move 3', style: TextStyle(fontSize: 11))),
-                          DropdownMenuItem(value: 4, child: Text('Move 4', style: TextStyle(fontSize: 11))),
-                        ],
-                  onChanged: onMoveChanged,
+                        } else {
+                          onTargetChanged(null); // no target needed, clear stale value
+                        }
+                      },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: disabled ? Colors.grey[900] : (selected ? Colors.green[700] : Colors.grey[800]),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: DropdownButton<int>(
-                  isExpanded: true,
-                  value: currentTargetValue,
-                  items: const [
-                    DropdownMenuItem(value: 1, child: Text('Target: Computer 1 (p2a)', style: TextStyle(fontSize: 10))),
-                    DropdownMenuItem(value: 2, child: Text('Target: Computer 2 (p2b)', style: TextStyle(fontSize: 10))),
-                    DropdownMenuItem(value: -2, child: Text('Target: Ally Slot 2', style: TextStyle(fontSize: 10))),
-                  ],
-                  onChanged: onTargetChanged,
+                child: Text(
+                  disabled ? '$moveName (disabled)' : moveName,
+                  style: TextStyle(fontSize: 11, color: disabled ? Colors.grey : null),
                 ),
-              ),
-            ],
+              );
+            }),
           ),
-          if (canMega)
+          if (selectedMove > 0 && _moveNeedsTargetForOverlay(moves[selectedMove - 1]))
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                'Target: ${_targetLabel(selectedTarget)}',
+                style: const TextStyle(fontSize: 11, color: Colors.amberAccent),
+              ),
+            ),
+          if (switches.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            TextButton(
+              onPressed: () => onToggleSwitch(true),
+              child: const Text('Switch Out Instead', style: TextStyle(fontSize: 11)),
+            ),
+          ],
+          if (canMega) ...[
+            const SizedBox(height: 4),
             Row(
               children: [
                 Checkbox(value: isMega, onChanged: (v) => onMegaToggled(v ?? false)),
                 const Text('Mega Evolve', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.purpleAccent)),
               ],
             ),
+          ],
         ],
       ],
     );
   }
 
+  String _targetLabel(int target) {
+    switch (target) {
+      case 1: return 'Computer 1 (p2a)';
+      case 2: return 'Computer 2 (p2b)';
+      case -2: return 'Ally Slot 2';
+      default: return 'Unset';
+    }
+  }
+
+  bool _moveNeedsTargetForOverlay(dynamic moveData) {
+    final target = moveData is Map ? moveData['target']?.toString() : null;
+    const noTargetTypes = {
+      'allySide', 'self', 'all', 'allyTeam', 'foeSide', 'allAdjacent', 'allAdjacentFoes',
+    };
+    return !(target != null && noTargetTypes.contains(target));
+  }
+
+  void _showTargetOverlay({
+    required int slotNumber,
+    required int moveIdx,
+    required ValueChanged<int?> onTargetChanged,
+    required int currentTarget,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey[900],
+      builder: (context) {
+        int chosen = currentTarget;
+        return StatefulBuilder(builder: (context, setSheetState) {
+          return Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Choose Target — Slot $slotNumber', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                const SizedBox(height: 12),
+                ...[
+                  {'label': 'Computer 1 (p2a)', 'value': 1},
+                  {'label': 'Computer 2 (p2b)', 'value': 2},
+                  {'label': 'Ally Slot 2', 'value': -2},
+                ].map((opt) {
+                  final val = opt['value'] as int;
+                  final selected = chosen == val;
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: ElevatedButton(
+                      onPressed: () => setSheetState(() => chosen = val),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: selected ? Colors.green[700] : Colors.grey[800],
+                        minimumSize: const Size(double.infinity, 44),
+                      ),
+                      child: Text(opt['label'] as String),
+                    ),
+                  );
+                }),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      onTargetChanged(chosen);
+                      Navigator.of(context).pop();
+                    },
+                    icon: const Icon(Icons.arrow_back),
+                    label: const Text('Confirm & Return'),
+                  ),
+                ),
+              ],
+            ),
+          );
+        });
+      },
+    );
+  }
+
+  void _showForcedSwitchOverlay({
+    required int slotNumber,
+    required List<dynamic> switches,
+    required ValueChanged<int?> onSwitchChanged,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey[900],
+      isScrollControlled: true,
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Forced Switch — Slot $slotNumber', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const SizedBox(height: 4),
+              const Text('Your Pokémon fainted or was forced out. Choose a replacement.',
+                  style: TextStyle(fontSize: 11, color: Colors.grey)),
+              const SizedBox(height: 12),
+              ...switches.map((s) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: ElevatedButton(
+                    onPressed: () {
+                      onSwitchChanged(s['slot'] as int);
+                      Navigator.of(context).pop();
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.grey[800],
+                      minimumSize: const Size(double.infinity, 44),
+                    ),
+                    child: Text('${s['name']} (${s['condition']})'),
+                  ),
+                );
+              }),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.arrow_back),
+                  label: const Text('Return (no selection)'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
   static const Map<String, Color> _typeColors = {
     'Normal': Color(0xFFA8A878), 'Fire': Color(0xFFF08030), 'Water': Color(0xFF6890F0),
     'Electric': Color(0xFFF8D030), 'Grass': Color(0xFF78C850), 'Ice': Color(0xFF98D8D8),
