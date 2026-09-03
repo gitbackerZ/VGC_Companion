@@ -1438,7 +1438,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                     isForceSwitch ? 'Select Replacement Pokémon' : 'Select Player Turn Actions',
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                   ),
-                  conBuilder(builder: (context) {
+                  Builder(builder: (context) {
                     // DEBUG: verify mega eligibility inputs, visible in-app
                     if (activeList.isNotEmpty && (_rawLogs.isEmpty || !_rawLogs.last.startsWith('|debug-mega-check|'))) {
                       WidgetsBinding.instance.addPostFrameCallback((_) {
