@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -660,6 +661,12 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   }
 
   String _pendingRequestSide = 'p1';
+  Map<String, dynamic>? _lastP2Request;
+  final math.Random _rng = math.Random();
+  bool _p1HasMegaEvolved = false;
+  bool _p2HasMegaEvolved = false;
+  final List<Map<String, dynamic>> _turnHistory = []; // {turn: int, lines: List<String>}
+  int _currentTurnNumber = 0;
 
   void _fetchLogs() {
     if (_jsRuntime == null) return;
@@ -685,14 +692,29 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                 _rawLogs.add('|debug-raw-poke| $trimmed');
               }
 
-              // If the computer side needs a forced switch, auto-resolve it immediately.
+              // Track per-turn log segments for turn-by-turn browsing.
+              if (trimmed.startsWith('|turn|')) {
+                final parts = trimmed.split('|');
+                final turnNum = parts.length > 2 ? int.tryParse(parts[2]) ?? (_currentTurnNumber + 1) : (_currentTurnNumber + 1);
+                _currentTurnNumber = turnNum;
+                _turnHistory.add({'turn': turnNum, 'lines': <String>[]});
+              }
+              if (_turnHistory.isNotEmpty) {
+                (_turnHistory.last['lines'] as List<String>).add(trimmed);
+              }
+
+              // Track p2's own request so we can build its move choice manually (for mega chance).
               if (_pendingRequestSide == 'p2' && trimmed.startsWith('|request|')) {
                 try {
                   dynamic p2Data = jsonDecode(trimmed.substring(9));
                   if (p2Data is String) p2Data = jsonDecode(p2Data);
-                  if (p2Data is Map && p2Data.containsKey('forceSwitch')) {
-                    _rawLogs.add('|debug-p2-forceswitch| auto-sending default switch');
-                    _jsRuntime?.evaluate("globalThis.sendAction('>p2 default');");
+                  if (p2Data is Map) {
+                    if (p2Data.containsKey('forceSwitch')) {
+                      _rawLogs.add('|debug-p2-forceswitch| auto-sending default switch');
+                      _jsRuntime?.evaluate("globalThis.sendAction('>p2 default');");
+                    } else if (p2Data.containsKey('active')) {
+                      _lastP2Request = Map<String, dynamic>.from(p2Data);
+                    }
                   }
                 } catch (_) {}
               }
@@ -860,6 +882,10 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       _activeHp.clear();
       _activeNames.clear();
       _statusMessage = 'Starting Battle...';
+      _p1HasMegaEvolved = false;
+      _p2HasMegaEvolved = false;
+      _turnHistory.clear();
+      _currentTurnNumber = 0;
     });
     _announce('Starting Battle.');
 
@@ -989,12 +1015,67 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       p1Action += slotActions.join(', ');
     }
 
+    if (!isForceSwitch) {
+      if (_s1Mega || _s2Mega) _p1HasMegaEvolved = true;
+    }
+
     _jsRuntime!.evaluate("globalThis.sendAction('$p1Action');");
-    _jsRuntime!.evaluate("globalThis.sendAction('>p2 default');");
+    _jsRuntime!.evaluate("globalThis.sendAction('${_buildP2MoveAction()}');");
     _fetchLogs();
 
     _announce('Player actions submitted.');
     setState(() => _currentRequest = null);
+  }
+
+  String _buildP2MoveAction() {
+    if (_lastP2Request == null || !_lastP2Request!.containsKey('active')) {
+      return '>p2 default';
+    }
+    final active = _lastP2Request!['active'] as List<dynamic>? ?? [];
+    if (active.isEmpty) return '>p2 default';
+
+    List<String> slotActions = [];
+    for (int slot = 0; slot < active.length; slot++) {
+      final moves = active[slot]['moves'] as List<dynamic>? ?? [];
+      final usable = <int>[];
+      for (int i = 0; i < moves.length; i++) {
+        final m = moves[i];
+        final disabled = m is Map && (m['disabled'] == true);
+        if (!disabled) usable.add(i + 1);
+      }
+      if (usable.isEmpty) {
+        slotActions.add('pass');
+        continue;
+      }
+      final moveIdx = usable[_rng.nextInt(usable.length)];
+      final moveData = moves[moveIdx - 1];
+      final targetType = moveData is Map ? moveData['target']?.toString() : null;
+      const noTargetTypes = {
+        'allySide', 'self', 'all', 'allyTeam', 'foeSide', 'allAdjacent', 'allAdjacentFoes',
+      };
+      String act = 'move $moveIdx';
+      if (!(targetType != null && noTargetTypes.contains(targetType))) {
+        // Random valid target: p1a or p1b (opposing slots), rarely -2 (ally) if relevant.
+        final targets = ['1', '2'];
+        act += ' ${targets[_rng.nextInt(targets.length)]}';
+      }
+      final canMega = active[slot] is Map && (active[slot]['canMegaEvo'] == true);
+      bool willMega = false;
+      if (canMega && !_p2HasMegaEvolved && _rng.nextDouble() < 0.75) {
+        act += ' mega';
+        willMega = true;
+      }
+      slotActions.add(act);
+      if (willMega) {
+        _p2HasMegaEvolved = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          setState(() {
+            _rawLogs.add('|debug-p2-action| slot $slot chose to Mega Evolve');
+          });
+        });
+      }
+    }
+    return '>p2 ${slotActions.join(', ')}';
   }
 
   List<dynamic> _getAvailableSwitches() {
@@ -1237,7 +1318,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                             selectedTarget: _s1Target,
                             selectedSwitch: _s1SwitchChoice,
                             isMega: _s1Mega,
-                            canMega: activeList.isNotEmpty && (activeList[0]['canMegaEvolve'] == true),
+                            canMega: !_p1HasMegaEvolved && activeList.isNotEmpty && (activeList[0]['canMegaEvo'] == true),
                             onToggleSwitch: (v) => setState(() => _s1IsSwitch = v),
                             onMoveChanged: (v) => setState(() => _s1MoveChoice = v ?? 1),
                             onTargetChanged: (v) => setState(() => _s1Target = v ?? 1),
@@ -1256,7 +1337,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                             selectedTarget: _s2Target,
                             selectedSwitch: _s2SwitchChoice,
                             isMega: _s2Mega,
-                            canMega: activeList.length > 1 && (activeList[1]['canMegaEvolve'] == true),
+                            canMega: !_p1HasMegaEvolved && activeList.length > 1 && (activeList[1]['canMegaEvo'] == true),
                             onToggleSwitch: (v) => setState(() => _s2IsSwitch = v),
                             onMoveChanged: (v) => setState(() => _s2MoveChoice = v ?? 1),
                             onTargetChanged: (v) => setState(() => _s2Target = v ?? 1),
@@ -1443,12 +1524,75 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               },
             ),
           ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: _showFullLogDialog,
-              child: const Text('View Full Log', style: TextStyle(fontSize: 10)),
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              TextButton(
+                onPressed: _showTurnHistoryDialog,
+                child: const Text('View Turn History', style: TextStyle(fontSize: 10)),
+              ),
+              TextButton(
+                onPressed: _showFullLogDialog,
+                child: const Text('View Full Log', style: TextStyle(fontSize: 10)),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showTurnHistoryDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Turn History'),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 400,
+          child: _turnHistory.isEmpty
+              ? const Text('No turns recorded yet.')
+              : ListView.builder(
+                  itemCount: _turnHistory.length,
+                  itemBuilder: (context, index) {
+                    final entry = _turnHistory[index];
+                    return ListTile(
+                      title: Text('Turn ${entry['turn']}'),
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        _showTurnDetailDialog(entry);
+                      },
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showTurnDetailDialog(Map<String, dynamic> entry) {
+    final lines = (entry['lines'] as List<String>).join('\n');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Turn ${entry['turn']} Log'),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 500,
+          child: SingleChildScrollView(
+            child: SelectableText(lines, style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
           ),
         ],
       ),
