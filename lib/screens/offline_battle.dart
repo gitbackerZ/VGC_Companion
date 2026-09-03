@@ -68,6 +68,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
   String _statusMessage = 'Enter both team sheets to begin.';
   bool _engineInitialized = false;
+  bool _isWaiting = false;
 
   @override
   void initState() {
@@ -943,10 +944,12 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         } else if (data.containsKey('wait') && data['wait'] == true) {
           // Genuinely don't touch _currentRequest here — keep whatever move/active
           // data we already had, so the UI doesn't go blank while waiting.
+          _isWaiting = true;
           _stage = BattleStage.inBattle;
           _statusMessage = 'Waiting for the computer to send out a replacement...';
           _announce('Waiting for opponent.');
         } else {
+          _isWaiting = false;
           _currentRequest = Map<String, dynamic>.from(data);
           _stage = BattleStage.inBattle;
           _s1IsSwitch = false;
@@ -1026,6 +1029,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       _p2HasMegaEvolved = false;
       _turnHistory.clear();
       _currentTurnNumber = 0;
+      _isWaiting = false;
     });
     _announce('Starting Battle.');
 
@@ -1503,9 +1507,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: (_currentRequest != null && _currentRequest!.containsKey('wait'))
-                          ? null
-                          : _sendTurnCommands,
+                      onPressed: _isWaiting ? null : _sendTurnCommands,
                       style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700]),
                       child: const Text('Submit Actions (Trigger AI)', style: TextStyle(color: Colors.white)),
                     ),
