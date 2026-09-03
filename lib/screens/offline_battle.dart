@@ -933,20 +933,21 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       if (sideId == 'p2') return;
 
       setState(() {
-        _currentRequest = Map<String, dynamic>.from(data);
-
         if (data.containsKey('teamPreview') && data['teamPreview'] == true) {
+          _currentRequest = Map<String, dynamic>.from(data);
           _stage = BattleStage.teamPreview;
           _p1TeamList = data['side']?['pokemon'] ?? [];
           _selectedPreviewSlots.clear();
           _statusMessage = 'Team preview active. Choose Pokémon.';
           _announce('Team preview started.');
         } else if (data.containsKey('wait') && data['wait'] == true) {
+          // Genuinely don't touch _currentRequest here — keep whatever move/active
+          // data we already had, so the UI doesn't go blank while waiting.
           _stage = BattleStage.inBattle;
           _statusMessage = 'Waiting for the computer to send out a replacement...';
           _announce('Waiting for opponent.');
-          // Don't touch _currentRequest's move data — keep UI disabled until a real request arrives.
         } else {
+          _currentRequest = Map<String, dynamic>.from(data);
           _stage = BattleStage.inBattle;
           _s1IsSwitch = false;
           _s2IsSwitch = false;
