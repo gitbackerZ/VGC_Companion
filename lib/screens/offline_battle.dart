@@ -926,10 +926,30 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     _announce('Submitted team selection. Entering battle turn 1.');
   }
 
+  bool _moveNeedsTarget(List<dynamic> activeList, int slotIndex, int moveChoice) {
+    if (activeList.length <= slotIndex) return true;
+    final moves = activeList[slotIndex]['moves'] as List<dynamic>? ?? [];
+    if (moveChoice < 1 || moveChoice > moves.length) return true;
+    final moveData = moves[moveChoice - 1];
+    final target = moveData is Map ? moveData['target']?.toString() : null;
+    // Target types that Showdown resolves automatically — no explicit target index needed.
+    const noTargetTypes = {
+      'allySide',        // e.g. Tailwind, Wide Guard, Light Screen
+      'self',            // e.g. Protect, Substitute
+      'all',             // e.g. Perish Song
+      'allyTeam',        // team-wide heal/buff moves
+      'foeSide',         // e.g. Toxic Spikes, Stealth Rock
+      'allAdjacent',     // e.g. Parabolic Charge, Earthquake — hits everyone nearby automatically
+      'allAdjacentFoes', // e.g. Rock Slide, Muddy Water — hits all adjacent foes automatically
+    };
+    return !(target != null && noTargetTypes.contains(target));
+  }
+
   void _sendTurnCommands() {
     if (_jsRuntime == null) return;
 
     final isForceSwitch = _currentRequest != null && _currentRequest!.containsKey('forceSwitch');
+    final activeList = _currentRequest != null ? (_currentRequest!['active'] as List<dynamic>? ?? []) : [];
     String p1Action = '>p1 ';
 
     if (isForceSwitch) {
@@ -950,17 +970,18 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       if (_s1IsSwitch) {
         slotActions.add('switch $_s1SwitchChoice');
       } else {
-        String act = 'move $_s1MoveChoice $_s1Target';
+        String act = 'move $_s1MoveChoice';
+        if (_moveNeedsTarget(activeList, 0, _s1MoveChoice)) act += ' $_s1Target';
         if (_s1Mega) act += ' mega';
         slotActions.add(act);
       }
 
-      final activeList = _currentRequest != null ? (_currentRequest!['active'] as List<dynamic>? ?? []) : [];
       if (activeList.length > 1) {
         if (_s2IsSwitch) {
           slotActions.add('switch $_s2SwitchChoice');
         } else {
-          String act = 'move $_s2MoveChoice $_s2Target';
+          String act = 'move $_s2MoveChoice';
+          if (_moveNeedsTarget(activeList, 1, _s2MoveChoice)) act += ' $_s2Target';
           if (_s2Mega) act += ' mega';
           slotActions.add(act);
         }
