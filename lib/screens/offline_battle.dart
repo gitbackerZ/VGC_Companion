@@ -33,6 +33,26 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
   final Map<String, String> _activeHp = {};
   final Map<String, String> _activeNames = {};
+  final Map<String, List<String>> _activeTypes = {};
+  final Map<String, String> _activeStatus = {};
+
+  void _refreshActiveMonInfo() {
+    if (_jsRuntime == null) return;
+    for (final entry in {'p1a': 'p1,a', 'p1b': 'p1,b', 'p2a': 'p2,a', 'p2b': 'p2,b'}.entries) {
+      final args = entry.value.split(',');
+      final result = _jsRuntime!.evaluate("globalThis.getPokemonInfo('${args[0]}', '${args[1]}');");
+      if (result.isError) continue;
+      try {
+        final data = jsonDecode(result.stringResult);
+        if (data is Map) {
+          final types = (data['types'] as List<dynamic>?)?.map((t) => t.toString()).toList() ?? [];
+          if (types.isNotEmpty) _activeTypes[entry.key] = types;
+          final status = data['status']?.toString() ?? '';
+          _activeStatus[entry.key] = status;
+        }
+      } catch (_) {}
+    }
+  }
 
   bool _s1IsSwitch = false;
   int _s1MoveChoice = 1;
@@ -383,6 +403,23 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           return logs;
         };
 
+        globalThis.getPokemonInfo = function(side, slotLetter) {
+          try {
+            var b = globalThis.battle;
+            if (!b) return "{}";
+            var sideObj = (side === 'p1') ? b.p1 : b.p2;
+            if (!sideObj || !sideObj.active) return "{}";
+            var slotIdx = slotLetter === 'a' ? 0 : 1;
+            var mon = sideObj.active[slotIdx];
+            if (!mon) return "{}";
+            var types = mon.types || (mon.getTypes ? mon.getTypes() : []);
+            var status = mon.status || '';
+            return JSON.stringify({ types: types, status: status, name: mon.name || '' });
+          } catch (e) {
+            return "{}";
+          }
+        };
+
         globalThis.getDirectRequest = function() {
           if (!globalThis.battle) return "";
           try {
@@ -651,6 +688,87 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     }
   }
 
+  String _humanizeLogLine(String line) {
+    final parts = line.split('|');
+    if (parts.length < 2) return line;
+    final cmd = parts[1];
+
+    String nameOf(String raw) {
+      final idx = raw.indexOf(':');
+      return idx != -1 ? raw.substring(idx + 1).trim() : raw;
+    }
+
+    switch (cmd) {
+      case 'move':
+        if (parts.length < 4) return line;
+        return '${nameOf(parts[2])} used ${parts[3]}!';
+      case '-damage':
+        if (parts.length < 4) return line;
+        final hp = parts[3].split(' ')[0];
+        return '${nameOf(parts[2])} took damage → $hp HP';
+      case '-heal':
+        if (parts.length < 4) return line;
+        final hp = parts[3].split(' ')[0];
+        return '${nameOf(parts[2])} healed → $hp HP';
+      case 'faint':
+        if (parts.length < 3) return line;
+        return '${nameOf(parts[2])} fainted!';
+      case 'switch':
+      case 'drag':
+        if (parts.length < 4) return line;
+        return '${nameOf(parts[3])} was sent out';
+      case '-supereffective':
+        return "It's super effective!";
+      case '-resisted':
+        return "It's not very effective...";
+      case '-immune':
+        if (parts.length < 3) return line;
+        return "It doesn't affect ${nameOf(parts[2])}...";
+      case '-boost':
+        if (parts.length < 5) return line;
+        return '${nameOf(parts[2])}\'s ${parts[3]} rose!';
+      case '-unboost':
+        if (parts.length < 5) return line;
+        return '${nameOf(parts[2])}\'s ${parts[3]} fell!';
+      case '-status':
+        if (parts.length < 4) return line;
+        return '${nameOf(parts[2])} was afflicted with ${parts[3]}!';
+      case '-curestatus':
+        if (parts.length < 3) return line;
+        return '${nameOf(parts[2])} recovered from its status!';
+      case '-weather':
+        if (parts.length < 3) return line;
+        if (parts[2] == 'none') return 'The weather cleared.';
+        return 'The weather is ${parts[2]}.';
+      case '-ability':
+        if (parts.length < 4) return line;
+        return "${nameOf(parts[2])}'s ${parts[3]} activated";
+      case '-start':
+        if (parts.length < 4) return line;
+        return '${nameOf(parts[2])} started ${parts[3]}';
+      case '-end':
+        if (parts.length < 4) return line;
+        return '${nameOf(parts[2])}\'s ${parts[3]} ended';
+      case '-sidestart':
+        if (parts.length < 4) return line;
+        return '${parts[3].replaceAll('move: ', '')} started for ${parts[2]}';
+      case 'turn':
+        if (parts.length < 3) return line;
+        return '── Turn ${parts[2]} ──';
+      case 'cant':
+        if (parts.length < 4) return line;
+        return "${nameOf(parts[2])} couldn't move (${parts[3]})";
+      case '-crit':
+        return 'A critical hit!';
+      case '-fail':
+        return 'But it failed!';
+      case '-miss':
+        return 'The attack missed!';
+      default:
+        return line; // fall back to raw for anything not covered
+    }
+  }
+
   void _announce(String message) {
     if (message.isEmpty) return;
     SemanticsService.announce(message, TextDirection.ltr);
@@ -677,6 +795,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       final List<dynamic> parsed = jsonDecode(rawJson);
       if (parsed.isNotEmpty) {
         setState(() {
+          _refreshActiveMonInfo();
           for (var chunk in parsed) {
             for (var line in chunk.toString().split('\n')) {
               final trimmed = line.trim();
@@ -796,14 +915,18 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
   void _parseRequest(String jsonString) {
     if (jsonString.isEmpty) return;
-    // Only track the player's (p1) request — ignore the computer's (p2) own request block.
-    if (_pendingRequestSide == 'p2') return;
     try {
       dynamic data = jsonDecode(jsonString);
       if (data is String) {
         data = jsonDecode(data);
       }
       if (data is! Map<String, dynamic>) return;
+
+      // Only track the player's (p1) request — ignore the computer's (p2) own request block.
+      // Check the request's own side.id rather than a preceding marker line, since the
+      // marker line can be absent (e.g. the very first request after committing choices).
+      final sideId = data['side']?['id']?.toString();
+      if (sideId == 'p2') return;
 
       setState(() {
         _currentRequest = Map<String, dynamic>.from(data);
@@ -1482,6 +1605,24 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     );
   }
 
+  static const Map<String, Color> _typeColors = {
+    'Normal': Color(0xFFA8A878), 'Fire': Color(0xFFF08030), 'Water': Color(0xFF6890F0),
+    'Electric': Color(0xFFF8D030), 'Grass': Color(0xFF78C850), 'Ice': Color(0xFF98D8D8),
+    'Fighting': Color(0xFFC03028), 'Poison': Color(0xFFA040A0), 'Ground': Color(0xFFE0C068),
+    'Flying': Color(0xFFA890F0), 'Psychic': Color(0xFFF85888), 'Bug': Color(0xFFA8B820),
+    'Rock': Color(0xFFB8A038), 'Ghost': Color(0xFF705898), 'Dragon': Color(0xFF7038F8),
+    'Dark': Color(0xFF705848), 'Steel': Color(0xFFB8B8D0), 'Fairy': Color(0xFFEE99AC),
+  };
+
+  static const Map<String, Color> _statusColors = {
+    'brn': Colors.deepOrange, 'par': Colors.amber, 'psn': Colors.purple,
+    'tox': Colors.purple, 'slp': Colors.indigo, 'frz': Colors.cyan,
+  };
+
+  static const Map<String, String> _statusLabels = {
+    'brn': 'BRN', 'par': 'PAR', 'psn': 'PSN', 'tox': 'TOX', 'slp': 'SLP', 'frz': 'FRZ',
+  };
+
   Widget _buildActiveSlotRow(String title, List<String> slots, Color color) {
     return Row(
       children: [
@@ -1491,16 +1632,49 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             children: slots.map((slot) {
               final name = _activeNames[slot] ?? 'Active Mon';
               final hp = _activeHp[slot] ?? '100/100';
+              final types = _activeTypes[slot] ?? [];
+              final status = _activeStatus[slot] ?? '';
               return Expanded(
                 child: Container(
                   margin: const EdgeInsets.symmetric(horizontal: 2),
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(color: Colors.grey[850], borderRadius: BorderRadius.circular(4)),
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(color: Colors.grey[850], borderRadius: BorderRadius.circular(6)),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(name, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                      Row(
+                        children: [
+                          Expanded(child: Text(name, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
+                          if (status.isNotEmpty && _statusLabels.containsKey(status))
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                              margin: const EdgeInsets.only(left: 4),
+                              decoration: BoxDecoration(
+                                color: _statusColors[status] ?? Colors.grey,
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                              child: Text(_statusLabels[status]!, style: const TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold)),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
                       Text('HP: $hp', style: const TextStyle(fontSize: 9, fontFamily: 'monospace')),
+                      if (types.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Wrap(
+                          spacing: 3,
+                          children: types.map((t) {
+                            return Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: _typeColors[t] ?? Colors.grey,
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                              child: Text(t, style: const TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold)),
+                            );
+                          }).toList(),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -1582,7 +1756,13 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   }
 
   void _showTurnDetailDialog(Map<String, dynamic> entry) {
-    final lines = (entry['lines'] as List<String>).join('\n');
+    final rawLines = entry['lines'] as List<String>;
+    final humanLines = rawLines
+        .where((l) => l.isNotEmpty && !l.startsWith('|debug') && !l.startsWith('|request') && !l.startsWith('|t:'))
+        .map(_humanizeLogLine)
+        .where((l) => l.trim().isNotEmpty)
+        .toList();
+    final lines = humanLines.join('\n');
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
