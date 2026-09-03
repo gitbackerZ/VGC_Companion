@@ -1195,43 +1195,57 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                   ),
                   const SizedBox(height: 6),
-                  _buildSlotActionControl(
-                    slotTitle: 'Slot 1 (${_activeNames['p1a'] ?? 'Active 1'})',
-                    moves: movesSlot1,
-                    switches: availableSwitches,
-                    isForceSwitch: isForceSwitch,
-                    isSwitch: _s1IsSwitch,
-                    selectedMove: _s1MoveChoice,
-                    selectedTarget: _s1Target,
-                    selectedSwitch: _s1SwitchChoice,
-                    isMega: _s1Mega,
-                    canMega: activeList.isNotEmpty && (activeList[0]['canMegaEvolve'] == true),
-                    onToggleSwitch: (v) => setState(() => _s1IsSwitch = v),
-                    onMoveChanged: (v) => setState(() => _s1MoveChoice = v ?? 1),
-                    onTargetChanged: (v) => setState(() => _s1Target = v ?? 1),
-                    onSwitchChanged: (v) => setState(() => _s1SwitchChoice = v ?? 1),
-                    onMegaToggled: (v) => setState(() => _s1Mega = v),
-                  ),
-                  if (!isForceSwitch) ...[
-                    const Divider(height: 16),
-                    _buildSlotActionControl(
-                      slotTitle: 'Slot 2 (${_activeNames['p1b'] ?? 'Active 2'})',
-                      moves: movesSlot2,
-                      switches: availableSwitches,
-                      isForceSwitch: isForceSwitch,
-                      isSwitch: _s2IsSwitch,
-                      selectedMove: _s2MoveChoice,
-                      selectedTarget: _s2Target,
-                      selectedSwitch: _s2SwitchChoice,
-                      isMega: _s2Mega,
-                      canMega: activeList.length > 1 && (activeList[1]['canMegaEvolve'] == true),
-                      onToggleSwitch: (v) => setState(() => _s2IsSwitch = v),
-                      onMoveChanged: (v) => setState(() => _s2MoveChoice = v ?? 1),
-                      onTargetChanged: (v) => setState(() => _s2Target = v ?? 1),
-                      onSwitchChanged: (v) => setState(() => _s2SwitchChoice = v ?? 1),
-                      onMegaToggled: (v) => setState(() => _s2Mega = v),
-                    ),
-                  ],
+                  Builder(builder: (context) {
+                    final forceList = (isForceSwitch && _currentRequest != null)
+                        ? (_currentRequest!['forceSwitch'] as List<dynamic>? ?? [])
+                        : [];
+                    final slot1NeedsSwitch = !isForceSwitch || (forceList.isNotEmpty && forceList[0] == true);
+                    final slot2NeedsSwitch = isForceSwitch && forceList.length > 1 && forceList[1] == true;
+                    final slot2Exists = activeList.length > 1 || (isForceSwitch && forceList.length > 1);
+
+                    return Column(
+                      children: [
+                        if (slot1NeedsSwitch)
+                          _buildSlotActionControl(
+                            slotTitle: 'Slot 1 (${_activeNames['p1a'] ?? 'Active 1'})',
+                            moves: movesSlot1,
+                            switches: availableSwitches,
+                            isForceSwitch: isForceSwitch,
+                            isSwitch: _s1IsSwitch,
+                            selectedMove: _s1MoveChoice,
+                            selectedTarget: _s1Target,
+                            selectedSwitch: _s1SwitchChoice,
+                            isMega: _s1Mega,
+                            canMega: activeList.isNotEmpty && (activeList[0]['canMegaEvolve'] == true),
+                            onToggleSwitch: (v) => setState(() => _s1IsSwitch = v),
+                            onMoveChanged: (v) => setState(() => _s1MoveChoice = v ?? 1),
+                            onTargetChanged: (v) => setState(() => _s1Target = v ?? 1),
+                            onSwitchChanged: (v) => setState(() => _s1SwitchChoice = v ?? 1),
+                            onMegaToggled: (v) => setState(() => _s1Mega = v),
+                          ),
+                        if (slot2Exists && (!isForceSwitch || slot2NeedsSwitch)) ...[
+                          const Divider(height: 16),
+                          _buildSlotActionControl(
+                            slotTitle: 'Slot 2 (${_activeNames['p1b'] ?? 'Active 2'})',
+                            moves: movesSlot2,
+                            switches: availableSwitches,
+                            isForceSwitch: isForceSwitch,
+                            isSwitch: _s2IsSwitch,
+                            selectedMove: _s2MoveChoice,
+                            selectedTarget: _s2Target,
+                            selectedSwitch: _s2SwitchChoice,
+                            isMega: _s2Mega,
+                            canMega: activeList.length > 1 && (activeList[1]['canMegaEvolve'] == true),
+                            onToggleSwitch: (v) => setState(() => _s2IsSwitch = v),
+                            onMoveChanged: (v) => setState(() => _s2MoveChoice = v ?? 1),
+                            onTargetChanged: (v) => setState(() => _s2Target = v ?? 1),
+                            onSwitchChanged: (v) => setState(() => _s2SwitchChoice = v ?? 1),
+                            onMegaToggled: (v) => setState(() => _s2Mega = v),
+                          ),
+                        ],
+                      ],
+                    );
+                  }),
                   const SizedBox(height: 10),
                   SizedBox(
                     width: double.infinity,
