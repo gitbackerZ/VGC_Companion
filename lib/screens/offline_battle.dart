@@ -1567,6 +1567,11 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             onPressed: () => onToggleSwitch(false),
             child: const Text('Use a Move Instead', style: TextStyle(fontSize: 11)),
           ),
+        ] else if (moves.isEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Text('Waiting for move data...', style: TextStyle(fontSize: 11, color: Colors.grey)),
+          ),
         ] else ...[
           // Move buttons, 2 per row.
           Wrap(
@@ -1604,7 +1609,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               );
             }),
           ),
-          if (selectedMove > 0 && _moveNeedsTargetForOverlay(moves[selectedMove - 1]))
+          if (moves.isNotEmpty && selectedMove > 0 && selectedMove <= moves.length && _moveNeedsTargetForOverlay(moves[selectedMove - 1]))
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(

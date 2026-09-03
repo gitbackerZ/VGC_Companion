@@ -4,6 +4,20 @@ import 'screens/team_builder.dart';
 import 'screens/offline_battle.dart';
 
 void main() {
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return Material(
+      color: Colors.red[900],
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: SingleChildScrollView(
+          child: SelectableText(
+            '${details.exceptionAsString()}\n\n${details.stack}',
+            style: const TextStyle(color: Colors.white, fontSize: 10, fontFamily: 'monospace'),
+          ),
+        ),
+      ),
+    );
+  };
   runApp(const MyApp());
 }
 
