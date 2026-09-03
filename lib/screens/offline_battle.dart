@@ -957,10 +957,17 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           _s2MoveChoice = 1;
           _statusMessage = 'Waiting for player actions...';
           _announce('New turn requested.');
+
+          final activeCheck = data['active'] as List<dynamic>?;
+          _rawLogs.add('|debug-request-applied| activeSlots=${activeCheck?.length ?? 'null'} slot1Moves=${activeCheck != null && activeCheck.isNotEmpty ? (activeCheck[0]['moves'] as List<dynamic>?)?.length : 'n/a'}');
         }
       });
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('Error parsing request JSON: $e');
+      setState(() {
+        _rawLogs.add('|debug-parse-error| $e');
+        _rawLogs.add('|debug-parse-stack| ${st.toString().split('\n').take(3).join(' | ')}');
+      });
     }
   }
 
