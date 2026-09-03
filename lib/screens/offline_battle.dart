@@ -703,17 +703,22 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                 (_turnHistory.last['lines'] as List<String>).add(trimmed);
               }
 
-              // Track p2's own request so we can build its move choice manually (for mega chance).
-              if (_pendingRequestSide == 'p2' && trimmed.startsWith('|request|')) {
+              // Track p2's own request by inspecting side.id directly — do NOT rely on
+              // the preceding bare "p1"/"p2" marker line, since the very first move
+              // request of a battle can arrive without one.
+              if (trimmed.startsWith('|request|')) {
                 try {
-                  dynamic p2Data = jsonDecode(trimmed.substring(9));
-                  if (p2Data is String) p2Data = jsonDecode(p2Data);
-                  if (p2Data is Map) {
-                    if (p2Data.containsKey('forceSwitch')) {
-                      _rawLogs.add('|debug-p2-forceswitch| auto-sending default switch');
-                      _jsRuntime?.evaluate("globalThis.sendAction('>p2 default');");
-                    } else if (p2Data.containsKey('active')) {
-                      _lastP2Request = Map<String, dynamic>.from(p2Data);
+                  dynamic reqData = jsonDecode(trimmed.substring(9));
+                  if (reqData is String) reqData = jsonDecode(reqData);
+                  if (reqData is Map) {
+                    final sideId = reqData['side']?['id']?.toString();
+                    if (sideId == 'p2') {
+                      if (reqData.containsKey('forceSwitch')) {
+                        _rawLogs.add('|debug-p2-forceswitch| auto-sending default switch');
+                        _jsRuntime?.evaluate("globalThis.sendAction('>p2 default');");
+                      } else if (reqData.containsKey('active')) {
+                        _lastP2Request = Map<String, dynamic>.from(reqData);
+                      }
                     }
                   }
                 } catch (_) {}
