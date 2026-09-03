@@ -1177,6 +1177,22 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     final active = _lastP2Request!['active'] as List<dynamic>? ?? [];
     if (active.isEmpty) return '>p2 default';
 
+    // Cross-check against p2's actual living Pokémon count from the same
+    // cached request. If the number of active move-slots doesn't match the
+    // number of currently-active (non-fainted) Pokémon, this cached request
+    // is stale (e.g. a partner fainted since it was captured) — fall back
+    // to 'default' rather than submitting a mismatched choice count.
+    final pokemonList = _lastP2Request!['side']?['pokemon'] as List<dynamic>? ?? [];
+    final livingActiveCount = pokemonList.where((p) {
+      final isActive = p is Map && (p['active'] == true);
+      final condition = p is Map ? p['condition']?.toString() ?? '' : '';
+      final fainted = condition.startsWith('0') || condition.contains('fnt');
+      return isActive && !fainted;
+    }).length;
+    if (livingActiveCount != active.length) {
+      return '>p2 default';
+    }
+
     List<String> slotActions = [];
     for (int slot = 0; slot < active.length; slot++) {
       final moves = active[slot]['moves'] as List<dynamic>? ?? [];
@@ -1413,18 +1429,19 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
     return Column(
       children: [
-        Card(
-          margin: EdgeInsets.zero,
-          child: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Column(
-              children: [
-                _buildActiveSlotRow('Computer', ['p2a', 'p2b'], Colors.redAccent),
-                const Divider(height: 10),
-                _buildActiveSlotRow('Player', ['p1a', 'p1b'], Colors.blueAccent),
-              ],
-            ),
-          ),
+        GridView.count(
+          crossAxisCount: 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          crossAxisSpacing: 6,
+          mainAxisSpacing: 6,
+          childAspectRatio: 2.6,
+          children: [
+            _buildMonPanel('p2a', 'Computer 1', Colors.redAccent),
+            _buildMonPanel('p2b', 'Computer 2', Colors.redAccent),
+            _buildMonPanel('p1a', 'Player 1', Colors.blueAccent),
+            _buildMonPanel('p1b', 'Player 2', Colors.blueAccent),
+          ],
         ),
         const SizedBox(height: 8),
         if (_stage == BattleStage.inBattle) ...[
@@ -1589,85 +1606,165 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             child: Text('Waiting for move data...', style: TextStyle(fontSize: 11, color: Colors.grey)),
           ),
         ] else ...[
-          // Move buttons, 2 per row.
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: List.generate(moves.length, (idx) {
-              final m = moves[idx];
-              final moveNum = idx + 1;
-              final moveName = m is Map ? (m['move'] ?? 'Move $moveNum') : 'Move $moveNum';
-              final disabled = m is Map && (m['disabled'] == true);
-              final selected = moveNum == selectedMove;
-              return ElevatedButton(
-                onPressed: disabled
-                    ? null
-                    : () {
-                        onMoveChanged(moveNum);
-                        if (_moveNeedsTargetForOverlay(m)) {
-                          _showTargetOverlay(
-                            slotNumber: slotNumber,
-                            moveIdx: moveNum,
-                            onTargetChanged: onTargetChanged,
-                            currentTarget: selectedTarget,
-                          );
-                        } else {
-                          onTargetChanged(null); // no target needed, clear stale value
-                        }
-                      },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: disabled ? Colors.grey[900] : (selected ? Colors.green[700] : Colors.grey[800]),
-                ),
-                child: Text(
-                  disabled ? '$moveName (disabled)' : moveName,
-                  style: TextStyle(fontSize: 11, color: disabled ? Colors.grey : null),
-                ),
-              );
-            }),
+          _buildCompactMoveGrid(
+            moves: moves,
+            selectedMove: selectedMove,
+            slotNumber: slotNumber,
+            canMega: canMega,
+            isMega: isMega,
+            canSwitch: switches.isNotEmpty,
+            onMoveChanged: onMoveChanged,
+            onTargetChanged: onTargetChanged,
+            selectedTarget: selectedTarget,
+            onMegaToggled: onMegaToggled,
+            onToggleSwitch: onToggleSwitch,
           ),
           if (moves.isNotEmpty && selectedMove > 0 && selectedMove <= moves.length && _moveNeedsTargetForOverlay(moves[selectedMove - 1]))
             Padding(
               padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                'Target: ${_targetLabel(selectedTarget)}',
-                style: const TextStyle(fontSize: 11, color: Colors.amberAccent),
+              child: Semantics(
+                label: 'Selected target: ${_targetLabel(selectedTarget)}',
+                child: Text(
+                  'Target: ${_targetLabel(selectedTarget)}',
+                  style: const TextStyle(fontSize: 11, color: Colors.amberAccent),
+                ),
               ),
             ),
-          if (canMega) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.purple.withOpacity(0.15),
-                border: Border.all(color: Colors.purpleAccent, width: 1.5),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Checkbox(value: isMega, onChanged: (v) => onMegaToggled(v ?? false)),
-                  const Text('MEGA EVOLVE', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.purpleAccent)),
-                ],
-              ),
-            ),
-          ],
-          if (switches.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            TextButton(
-              onPressed: () => onToggleSwitch(true),
-              child: const Text('Switch Out Instead', style: TextStyle(fontSize: 11)),
-            ),
-          ],
         ],
       ],
     );
   }
 
+  // Compact 2-row, 3-column grid: [Move1] [Move2] [Mega/blank]
+  //                                [Move3] [Move4] [Switch/blank]
+  Widget _buildCompactMoveGrid({
+    required List<dynamic> moves,
+    required int selectedMove,
+    required int slotNumber,
+    required bool canMega,
+    required bool isMega,
+    required bool canSwitch,
+    required ValueChanged<int?> onMoveChanged,
+    required ValueChanged<int?> onTargetChanged,
+    required int selectedTarget,
+    required ValueChanged<bool> onMegaToggled,
+    required ValueChanged<bool> onToggleSwitch,
+  }) {
+    Widget buildMoveCell(int idx) {
+      if (idx >= moves.length) return const SizedBox.shrink();
+      final m = moves[idx];
+      final moveNum = idx + 1;
+      final moveName = m is Map ? (m['move'] ?? 'Move $moveNum') : 'Move $moveNum';
+      final disabled = m is Map && (m['disabled'] == true);
+      final selected = moveNum == selectedMove;
+      return Semantics(
+        button: true,
+        label: disabled ? '$moveName, disabled' : (selected ? '$moveName, selected' : moveName),
+        child: ElevatedButton(
+          onPressed: disabled
+              ? null
+              : () {
+                  onMoveChanged(moveNum);
+                  if (_moveNeedsTargetForOverlay(m)) {
+                    _showTargetOverlay(
+                      slotNumber: slotNumber,
+                      moveIdx: moveNum,
+                      onTargetChanged: onTargetChanged,
+                      currentTarget: selectedTarget,
+                    );
+                  } else {
+                    onTargetChanged(null);
+                  }
+                },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: disabled ? Colors.grey[900] : (selected ? Colors.green[700] : Colors.grey[800]),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+            minimumSize: const Size(0, 40),
+          ),
+          child: Text(
+            disabled ? '$moveName ✕' : moveName,
+            style: TextStyle(fontSize: 11, color: disabled ? Colors.grey : null),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      );
+    }
+
+    Widget megaCell() {
+      if (!canMega) return const SizedBox.shrink();
+      return Semantics(
+        button: true,
+        checked: isMega,
+        label: isMega ? 'Mega Evolve, enabled' : 'Mega Evolve, disabled. Double tap to toggle.',
+        child: InkWell(
+          onTap: () => onMegaToggled(!isMega),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+            decoration: BoxDecoration(
+              color: isMega ? Colors.purple.withOpacity(0.35) : Colors.purple.withOpacity(0.1),
+              border: Border.all(color: Colors.purpleAccent, width: 1.5),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(isMega ? Icons.check_box : Icons.check_box_outline_blank, size: 16, color: Colors.purpleAccent),
+                const SizedBox(width: 3),
+                const Flexible(
+                  child: Text('MEGA', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.purpleAccent), overflow: TextOverflow.ellipsis),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget switchCell() {
+      if (!canSwitch) return const SizedBox.shrink();
+      return Semantics(
+        button: true,
+        label: 'Switch Out instead of using a move',
+        child: OutlinedButton(
+          onPressed: () => onToggleSwitch(true),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+            minimumSize: const Size(0, 40),
+          ),
+          child: const Text('SWITCH', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+        ),
+      );
+    }
+
+    return Table(
+      columnWidths: const {
+        0: FlexColumnWidth(1),
+        1: FlexColumnWidth(1),
+        2: FlexColumnWidth(1),
+      },
+      children: [
+        TableRow(children: [
+          Padding(padding: const EdgeInsets.all(3), child: buildMoveCell(0)),
+          Padding(padding: const EdgeInsets.all(3), child: buildMoveCell(1)),
+          Padding(padding: const EdgeInsets.all(3), child: megaCell()),
+        ]),
+        TableRow(children: [
+          Padding(padding: const EdgeInsets.all(3), child: buildMoveCell(2)),
+          Padding(padding: const EdgeInsets.all(3), child: buildMoveCell(3)),
+          Padding(padding: const EdgeInsets.all(3), child: switchCell()),
+        ]),
+      ],
+    );
+  }
+
   String _targetLabel(int target) {
+    final p2aName = _activeNames['p2a'] ?? 'Opponent 1';
+    final p2bName = _activeNames['p2b'] ?? 'Opponent 2';
     switch (target) {
-      case 1: return 'Computer 1 (p2a)';
-      case 2: return 'Computer 2 (p2b)';
-      case -2: return 'Ally Slot 2';
+      case 1: return '$p2aName (Opponent)';
+      case 2: return '$p2bName (Opponent)';
+      case -2: return 'Ally';
       default: return 'Unset';
     }
   }
@@ -1686,55 +1783,56 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     required ValueChanged<int?> onTargetChanged,
     required int currentTarget,
   }) {
+    // Build labeled options using real Pokémon names where available.
+    final p2aName = _activeNames['p2a'] ?? 'Opponent 1';
+    final p2bName = _activeNames['p2b'] ?? 'Opponent 2';
+    final allyName = slotNumber == 1
+        ? (_activeNames['p1b'] ?? 'Ally')
+        : (_activeNames['p1a'] ?? 'Ally');
+
+    final options = <Map<String, dynamic>>[
+      {'label': '$p2aName (Opponent)', 'value': 1},
+      {'label': '$p2bName (Opponent)', 'value': 2},
+      {'label': '$allyName (Ally)', 'value': -2},
+    ];
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.grey[900],
       builder: (context) {
-        int chosen = currentTarget;
-        return StatefulBuilder(builder: (context, setSheetState) {
-          return Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Choose Target — Slot $slotNumber', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                const SizedBox(height: 12),
-                ...[
-                  {'label': 'Computer 1 (p2a)', 'value': 1},
-                  {'label': 'Computer 2 (p2b)', 'value': 2},
-                  {'label': 'Ally Slot 2', 'value': -2},
-                ].map((opt) {
-                  final val = opt['value'] as int;
-                  final selected = chosen == val;
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Choose Target — Slot $slotNumber', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const SizedBox(height: 12),
+              ...options.map((opt) {
+                final val = opt['value'] as int;
+                final selected = currentTarget == val;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Semantics(
+                    button: true,
+                    label: selected ? '${opt['label']}, currently selected' : opt['label'] as String,
                     child: ElevatedButton(
-                      onPressed: () => setSheetState(() => chosen = val),
+                      onPressed: () {
+                        onTargetChanged(val);
+                        Navigator.of(context).pop();
+                      },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: selected ? Colors.green[700] : Colors.grey[800],
                         minimumSize: const Size(double.infinity, 44),
                       ),
                       child: Text(opt['label'] as String),
                     ),
-                  );
-                }),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      onTargetChanged(chosen);
-                      Navigator.of(context).pop();
-                    },
-                    icon: const Icon(Icons.arrow_back),
-                    label: const Text('Confirm & Return'),
                   ),
-                ),
-              ],
-            ),
-          );
-        });
+                );
+              }),
+            ],
+          ),
+        );
       },
     );
   }
@@ -1808,6 +1906,63 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   static const Map<String, String> _statusLabels = {
     'brn': 'BRN', 'par': 'PAR', 'psn': 'PSN', 'tox': 'TOX', 'slp': 'SLP', 'frz': 'FRZ',
   };
+
+  Widget _buildMonPanel(String slotKey, String sideLabel, Color color) {
+    final name = _activeNames[slotKey] ?? 'Active Mon';
+    final hp = _activeHp[slotKey] ?? '100/100';
+    final types = _activeTypes[slotKey] ?? [];
+    final status = _activeStatus[slotKey] ?? '';
+
+    return Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: Colors.grey[850],
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withOpacity(0.4), width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(sideLabel, style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: color)),
+          Row(
+            children: [
+              Expanded(child: Text(name, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
+              if (status.isNotEmpty && _statusLabels.containsKey(status))
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                  margin: const EdgeInsets.only(left: 3),
+                  decoration: BoxDecoration(
+                    color: _statusColors[status] ?? Colors.grey,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: Text(_statusLabels[status]!, style: const TextStyle(fontSize: 7, color: Colors.white, fontWeight: FontWeight.bold)),
+                ),
+            ],
+          ),
+          Text('HP: $hp', style: const TextStyle(fontSize: 9, fontFamily: 'monospace')),
+          if (types.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Wrap(
+                spacing: 2,
+                runSpacing: 2,
+                children: types.map((t) {
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: _typeColors[t] ?? Colors.grey,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    child: Text(t, style: const TextStyle(fontSize: 7, color: Colors.white, fontWeight: FontWeight.bold)),
+                  );
+                }).toList(),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildActiveSlotRow(String title, List<String> slots, Color color) {
     return Row(
@@ -1943,11 +2098,21 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
   void _showTurnDetailDialog(Map<String, dynamic> entry) {
     final rawLines = entry['lines'] as List<String>;
-    final humanLines = rawLines
+    final humanLinesRaw = rawLines
         .where((l) => l.isNotEmpty && !l.startsWith('|debug') && !l.startsWith('|request') && !l.startsWith('|t:'))
         .map(_humanizeLogLine)
         .where((l) => l.trim().isNotEmpty)
         .toList();
+
+    // Showdown's |split| protocol directive sends the following line twice
+    // (once per viewer perspective) — collapse immediate consecutive
+    // duplicates so switch-ins / HP updates don't appear twice in the UI.
+    final humanLines = <String>[];
+    for (final line in humanLinesRaw) {
+      if (humanLines.isEmpty || humanLines.last != line) {
+        humanLines.add(line);
+      }
+    }
     final lines = humanLines.join('\n');
     showDialog(
       context: context,
