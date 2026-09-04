@@ -434,7 +434,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             }
             if (!req && b.requests) req = b.requests[0];
             if (!req) return "";
-            return (typeof req === 'string') ? req : JSON.stringify(req);
+            var reqObj = (typeof req === 'string') ? JSON.parse(req) : req;
+            reqObj.__engineTurn = b.turn;
+            return JSON.stringify(reqObj);
           } catch (e) {
             return "";
           }
@@ -787,6 +789,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
   final List<Map<String, dynamic>> _turnHistory = []; // {turn: int, lines: List<String>}
   int _currentTurnNumber = 0;
+  int _lastRequestTurnNumber = 0;
 
   void _fetchLogs() {
     if (_jsRuntime == null) return;
@@ -962,20 +965,39 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           _statusMessage = 'Waiting for the computer to send out a replacement...';
           _announce('Waiting for opponent.');
         } else {
+          // Prefer the authoritative turn number tagged by the engine itself
+          // (__engineTurn) over the locally log-parsed _currentTurnNumber,
+          // since the engine value can't race with async log polling.
+          final int? engineTurn = data['__engineTurn'] is int ? data['__engineTurn'] as int : null;
+          final int effectiveTurn = engineTurn ?? _currentTurnNumber;
+          final bool isNewTurn = effectiveTurn != _lastRequestTurnNumber;
+
           _isWaiting = false;
           _currentRequest = Map<String, dynamic>.from(data);
           _stage = BattleStage.inBattle;
-          _s1IsSwitch = false;
-          _s2IsSwitch = false;
-          _s1Mega = false;
-          _s2Mega = false;
-          _s1MoveChoice = 1;
-          _s2MoveChoice = 1;
-          _statusMessage = 'Waiting for player actions...';
-          _announce('New turn requested.');
+
+          if (isNewTurn) {
+            // Genuine new turn: safe to reset all per-turn selection state.
+            _s1IsSwitch = false;
+            _s2IsSwitch = false;
+            _s1Mega = false;
+            _s2Mega = false;
+            _s1MoveChoice = 1;
+            _s2MoveChoice = 1;
+            _lastRequestTurnNumber = effectiveTurn;
+            _statusMessage = 'Waiting for player actions...';
+            _announce('New turn requested.');
+          } else {
+            // Mid-turn interrupt (e.g. Volt Switch/U-turn/Baton Pass forced
+            // a fresh request before the queued turn fully resolved). Do NOT
+            // wipe move/mega selections here — the other slot's action may
+            // still be pending resolution downstream.
+            _statusMessage = 'Action required mid-turn (self-switch effect)...';
+            _announce('Mid-turn action required.');
+          }
 
           final activeCheck = data['active'] as List<dynamic>?;
-          _rawLogs.add('|debug-request-applied| activeSlots=${activeCheck?.length ?? 'null'} slot1Moves=${activeCheck != null && activeCheck.isNotEmpty ? (activeCheck[0]['moves'] as List<dynamic>?)?.length : 'n/a'}');
+          _rawLogs.add('|debug-request-applied| engineTurn=$engineTurn isNewTurn=$isNewTurn activeSlots=${activeCheck?.length ?? 'null'} slot1Moves=${activeCheck != null && activeCheck.isNotEmpty ? (activeCheck[0]['moves'] as List<dynamic>?)?.length : 'n/a'}');
         }
       });
     } catch (e, st) {
@@ -1129,7 +1151,8 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   }
 
   void _sendTurnCommands() {
-    if (_jsRuntime == null) return;
+    if (_jsRuntime == null || _currentRequest == null) return;
+    if (_isWaiting) return; // already submitted, waiting on interrupt/opponent
 
     final isForceSwitch = _currentRequest != null && _currentRequest!.containsKey('forceSwitch');
     final activeList = _currentRequest != null ? (_currentRequest!['active'] as List<dynamic>? ?? []) : [];
@@ -1780,7 +1803,8 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     switch (target) {
       case 1: return '$p2aName (Opponent)';
       case 2: return '$p2bName (Opponent)';
-      case -2: return 'Ally';
+      case -1: return _activeNames['p1a'] ?? 'Ally (Slot 1)';
+      case -2: return _activeNames['p1b'] ?? 'Ally (Slot 2)';
       default: return 'Unset';
     }
   }
@@ -1802,6 +1826,10 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     // Build labeled options using real Pokémon names where available.
     final p2aName = _activeNames['p2a'] ?? 'Opponent 1';
     final p2bName = _activeNames['p2b'] ?? 'Opponent 2';
+    // Ally target value is position-based (negated), not chooser-relative:
+    // slot 1 (position a) targets its ally in position b => -2
+    // slot 2 (position b) targets its ally in position a => -1
+    final int allyTargetValue = slotNumber == 1 ? -2 : -1;
     final allyName = slotNumber == 1
         ? (_activeNames['p1b'] ?? 'Ally')
         : (_activeNames['p1a'] ?? 'Ally');
@@ -1809,7 +1837,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     final options = <Map<String, dynamic>>[
       {'label': '$p2aName (Opponent)', 'value': 1},
       {'label': '$p2bName (Opponent)', 'value': 2},
-      {'label': '$allyName (Ally)', 'value': -2},
+      {'label': '$allyName (Ally)', 'value': allyTargetValue},
     ];
 
     showModalBottomSheet(
