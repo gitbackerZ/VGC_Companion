@@ -70,6 +70,10 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   bool _engineInitialized = false;
   bool _isWaiting = false;
 
+  final List<String> _announceQueue = [];
+  Timer? _announceDrainTimer;
+  String? _lastRawLineForAnnounce;
+
   @override
   void initState() {
     super.initState();
@@ -788,7 +792,25 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
   void _announce(String message) {
     if (message.isEmpty) return;
-    SemanticsService.announce(message, TextDirection.ltr);
+    // Don't speak immediately — rapid back-to-back SemanticsService.announce
+    // calls within the same frame get dropped/overridden by the OS
+    // accessibility service (only the last one reliably survives). Queue
+    // instead and drain with a small stagger so every line gets heard.
+    _announceQueue.add(message);
+    _startAnnounceDrainIfNeeded();
+  }
+
+  void _startAnnounceDrainIfNeeded() {
+    if (_announceDrainTimer != null && _announceDrainTimer!.isActive) return;
+    _announceDrainTimer = Timer.periodic(const Duration(milliseconds: 700), (timer) {
+      if (_announceQueue.isEmpty) {
+        timer.cancel();
+        _announceDrainTimer = null;
+        return;
+      }
+      final next = _announceQueue.removeAt(0);
+      SemanticsService.announce(next, TextDirection.ltr);
+    });
   }
 
   void _startLogPolling() {
@@ -829,6 +851,15 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               if (trimmed.startsWith('|poke|')) {
                 _rawLogs.add('|debug-raw-poke| $trimmed');
               }
+
+              // The |split| protocol re-broadcasts the same event line twice
+              // (once per viewer perspective). Skip the immediate duplicate
+              // so it isn't processed/announced twice in a row.
+              if (_lastRawLineForAnnounce == trimmed) {
+                _lastRawLineForAnnounce = trimmed;
+                continue;
+              }
+              _lastRawLineForAnnounce = trimmed;
 
               // Track per-turn log segments for turn-by-turn browsing.
               if (trimmed.startsWith('|turn|')) {
@@ -892,6 +923,12 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     final parts = line.split('|');
     if (parts.length < 3) return;
 
+    // Lines that carry no announceable event on their own — protocol
+    // bookkeeping, duplicate-perspective markers, or internal debug noise.
+    const Set<String> silentCommands = {
+      'split', 'request', 't:', 'upkeep', '-anim', 'debug',
+    };
+
     switch (parts[1]) {
       case 'poke':
         if (parts[2] == 'p2') {
@@ -929,24 +966,14 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           _statusMessage = 'Battle ended! Winner: $winner';
         });
         break;
-      case 'move':
-      case '-supereffective':
-      case '-resisted':
-      case '-immune':
-      case '-boost':
-      case '-unboost':
-      case '-status':
-      case '-curestatus':
-      case '-weather':
-      case '-ability':
-      case '-crit':
-      case '-fail':
-      case '-miss':
-      case 'cant':
-      case 'detailschange':
-      case '-mega':
-      case '-fieldstart':
-      case '-hint':
+      default:
+        // Blocklist approach: announce everything except known-silent
+        // bookkeeping lines and anything the debug channel emits. This
+        // covers -heal, -enditem, -prepare, -boost/-unboost, -start/-end/
+        // -sidestart, weather, abilities, and any future mechanic without
+        // needing a manual whitelist add each time.
+        if (line.startsWith('|debug')) break;
+        if (silentCommands.contains(parts[1])) break;
         _announce(_humanizeLogLine(line));
         break;
     }
@@ -1316,6 +1343,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   @override
   void dispose() {
     _logTimer?.cancel();
+    _announceDrainTimer?.cancel();
     _jsRuntime?.dispose();
     _p1TeamController.dispose();
     _p2TeamController.dispose();
