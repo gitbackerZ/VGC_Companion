@@ -767,6 +767,20 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         return 'But it failed!';
       case '-miss':
         return 'The attack missed!';
+      case 'detailschange':
+        if (parts.length < 4) return line;
+        return '${nameOf(parts[2])} transformed into ${nameOf(parts[3])}!';
+      case '-mega':
+        if (parts.length < 4) return line;
+        return '${nameOf(parts[2])} Mega Evolved into ${parts[3]}!';
+      case '-fieldstart':
+        if (parts.length < 3) return line;
+        return '${parts[3.clamp(0, parts.length - 1)]}'.contains('ability:')
+            ? '${parts[2].replaceAll('move: ', '')} activated on the field'
+            : '${parts[2].replaceAll('move: ', '')} started';
+      case '-hint':
+        if (parts.length < 3) return line;
+        return parts[2];
       default:
         return line; // fall back to raw for anything not covered
     }
@@ -929,6 +943,10 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       case '-fail':
       case '-miss':
       case 'cant':
+      case 'detailschange':
+      case '-mega':
+      case '-fieldstart':
+      case '-hint':
         _announce(_humanizeLogLine(line));
         break;
     }
@@ -991,9 +1009,11 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             // Mid-turn interrupt (e.g. Volt Switch/U-turn/Baton Pass forced
             // a fresh request before the queued turn fully resolved). Do NOT
             // wipe move/mega selections here — the other slot's action may
-            // still be pending resolution downstream.
+            // still be pending resolution downstream. No screen-reader
+            // announcement here — the actual triggering event (e.g. the
+            // switch/faint line) is already announced via _processProtocolLine,
+            // so this would just be a redundant, confusing status blurb.
             _statusMessage = 'Action required mid-turn (self-switch effect)...';
-            _announce('Mid-turn action required.');
           }
 
           final activeCheck = data['active'] as List<dynamic>?;
@@ -1704,7 +1724,13 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               ? null
               : () {
                   onMoveChanged(moveNum);
-                  if (_moveNeedsTargetForOverlay(m)) {
+                  final String? targetType = m is Map ? m['target']?.toString() : null;
+                  if (targetType == 'adjacentAlly') {
+                    // Only one possible ally exists in a 2-mon doubles side —
+                    // no real choice to make, so auto-resolve instead of
+                    // prompting the overlay.
+                    onTargetChanged(slotNumber == 1 ? -2 : -1);
+                  } else if (_moveNeedsTargetForOverlay(m)) {
                     _showTargetOverlay(
                       slotNumber: slotNumber,
                       moveIdx: moveNum,
