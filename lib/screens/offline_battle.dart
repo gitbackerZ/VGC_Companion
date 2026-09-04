@@ -861,7 +861,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       setState(() {
         _statusMessage = line.substring(7);
       });
-      _announce('Engine Error: $_statusMessage');
+      // Don't announce internal retry/rejection errors via screen reader —
+      // these are usually just rejected auto-retry attempts, not something
+      // the person needs to hear about mid-battle.
       return;
     }
 
@@ -888,29 +890,43 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         final hp = parts.length > 4 ? parts[4] : '';
         _activeNames[slot] = name;
         _activeHp[slot] = hp;
-        _announce('$name entered battle on $slot.');
+        _announce(_humanizeLogLine(line));
         break;
       case '-damage':
         final slotParts = parts[2].split(':');
         final slot = slotParts.first.trim();
-        final name = slotParts.length > 1 ? slotParts.sublist(1).join(':').trim() : slot;
         if (parts.length > 3) _activeHp[slot] = parts[3];
-        _announce('$name took damage. Health is now ${parts[3]}.');
+        _announce(_humanizeLogLine(line));
         break;
       case 'faint':
         final slotParts = parts[2].split(':');
         final slot = slotParts.first.trim();
-        final name = slotParts.length > 1 ? slotParts.sublist(1).join(':').trim() : slot;
         _activeHp[slot] = '0/100';
-        _announce('$name fainted!');
+        _announce(_humanizeLogLine(line));
         break;
       case 'win':
         final winner = parts[2];
-        _announce('Battle finished! Winner is $winner.');
+        _announce(_humanizeLogLine(line));
         setState(() {
           _stage = BattleStage.ended;
           _statusMessage = 'Battle ended! Winner: $winner';
         });
+        break;
+      case 'move':
+      case '-supereffective':
+      case '-resisted':
+      case '-immune':
+      case '-boost':
+      case '-unboost':
+      case '-status':
+      case '-curestatus':
+      case '-weather':
+      case '-ability':
+      case '-crit':
+      case '-fail':
+      case '-miss':
+      case 'cant':
+        _announce(_humanizeLogLine(line));
         break;
     }
   }
@@ -2064,9 +2080,11 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
   void _showTurnHistoryDialog() {
     if (_turnHistory.isNotEmpty) {
-      // Jump straight to the most recently completed turn instead of
-      // making the person tap through the list every time.
-      _showTurnDetailDialog(_turnHistory.last, showBackToList: true);
+      // The last entry in history is usually the turn currently in
+      // progress (often empty or only partially logged). Default to the
+      // entry before it — the most recently *completed* turn — for review.
+      final targetIndex = _turnHistory.length >= 2 ? _turnHistory.length - 2 : _turnHistory.length - 1;
+      _showTurnDetailDialog(_turnHistory[targetIndex], showBackToList: true);
       return;
     }
     showDialog(
