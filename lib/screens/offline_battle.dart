@@ -2063,28 +2063,20 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   }
 
   void _showTurnHistoryDialog() {
+    if (_turnHistory.isNotEmpty) {
+      // Jump straight to the most recently completed turn instead of
+      // making the person tap through the list every time.
+      _showTurnDetailDialog(_turnHistory.last, showBackToList: true);
+      return;
+    }
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Turn History'),
-        content: SizedBox(
+        content: const SizedBox(
           width: double.maxFinite,
-          height: 400,
-          child: _turnHistory.isEmpty
-              ? const Text('No turns recorded yet.')
-              : ListView.builder(
-                  itemCount: _turnHistory.length,
-                  itemBuilder: (context, index) {
-                    final entry = _turnHistory[index];
-                    return ListTile(
-                      title: Text('Turn ${entry['turn']}'),
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        _showTurnDetailDialog(entry);
-                      },
-                    );
-                  },
-                ),
+          height: 100,
+          child: Text('No turns recorded yet.'),
         ),
         actions: [
           TextButton(
@@ -2096,10 +2088,47 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     );
   }
 
-  void _showTurnDetailDialog(Map<String, dynamic> entry) {
+  void _showTurnListDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Turn History'),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 400,
+          child: ListView.builder(
+            itemCount: _turnHistory.length,
+            itemBuilder: (context, index) {
+              final entry = _turnHistory[index];
+              return ListTile(
+                title: Text('Turn ${entry['turn']}'),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _showTurnDetailDialog(entry, showBackToList: true);
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showTurnDetailDialog(Map<String, dynamic> entry, {bool showBackToList = false}) {
     final rawLines = entry['lines'] as List<String>;
     final humanLinesRaw = rawLines
-        .where((l) => l.isNotEmpty && !l.startsWith('|debug') && !l.startsWith('|request') && !l.startsWith('|t:'))
+        .where((l) =>
+            l.isNotEmpty &&
+            !l.startsWith('|debug') &&
+            !l.startsWith('|request') &&
+            !l.startsWith('|t:') &&
+            !l.startsWith('|error|'))
         .map(_humanizeLogLine)
         .where((l) => l.trim().isNotEmpty)
         .toList();
@@ -2126,6 +2155,14 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           ),
         ),
         actions: [
+          if (showBackToList)
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _showTurnListDialog();
+              },
+              child: const Text('Browse All Turns'),
+            ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Close'),
