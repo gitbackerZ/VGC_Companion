@@ -787,6 +787,32 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
             globalThis.battle = battleInstance;
 
+            // Instrument the battle's own Dex accessor tables (these may be
+            // different object instances than any module-level Dex object,
+            // e.g. battleInstance.dex), so we can see exactly which species/
+            // item/ability ID is being looked up right before any crash.
+            try {
+              var battleDex = battleInstance.dex || battleInstance.gen || null;
+              if (battleDex) {
+                ['species', 'items', 'abilities', 'moves'].forEach(function(tableName) {
+                  var table = battleDex[tableName];
+                  if (table && typeof table.get === 'function' && !table.__instrumented) {
+                    var origGet = table.get.bind(table);
+                    table.get = function(id) {
+                      globalThis.logBuffer.push('|debug-dex-get| table=' + tableName + ' id=' + JSON.stringify(id));
+                      return origGet(id);
+                    };
+                    table.__instrumented = true;
+                  }
+                });
+                globalThis.logBuffer.push('|debug-instrument| wrapped battleInstance.dex tables successfully');
+              } else {
+                globalThis.logBuffer.push('|debug-instrument| battleInstance.dex not found, trying global Dex fallback');
+              }
+            } catch (instrErr) {
+              globalThis.logBuffer.push('|debug-instrument-error| ' + (instrErr && instrErr.message ? instrErr.message : String(instrErr)));
+            }
+
             if (typeof battleInstance.setPlayer === 'function') {
               battleInstance.setPlayer('p1', { name: 'Player 1', team: p1Team });
               battleInstance.setPlayer('p2', { name: 'Computer AI', team: p2Team });
