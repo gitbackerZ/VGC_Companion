@@ -782,7 +782,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             return "SUCCESS";
           } catch (err) {
             const errMsg = (err && err.message) ? err.message : String(err);
+            const errStack = (err && err.stack) ? err.stack : 'no stack available';
             globalThis.logBuffer.push('|error| Engine Crash: ' + errMsg);
+            globalThis.logBuffer.push('|error-stack| ' + errStack.replace(/\n/g, ' | '));
             return "ERROR: " + errMsg;
           }
         };
@@ -1543,7 +1545,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                     child: _buildStageContent(),
                   ),
                 ),
-                _buildLiveTerminal(),
+                _buildLogAccessBar(),
                 _buildStatusBar(),
               ],
             ),
@@ -2433,35 +2435,22 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     );
   }
 
-  Widget _buildLiveTerminal() {
+  Widget _buildLogAccessBar() {
     return Container(
-      height: 100,
       width: double.infinity,
-      margin: const EdgeInsets.all(8),
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(6)),
-      child: Column(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Expanded(
-            child: ListView.builder(
-              itemCount: _rawLogs.length,
-              itemBuilder: (context, index) {
-                return Text(_rawLogs[index], style: const TextStyle(color: Colors.greenAccent, fontFamily: 'monospace', fontSize: 10));
-              },
-            ),
+          TextButton(
+            onPressed: _showTurnHistoryDialog,
+            child: const Text('View Turn History', style: TextStyle(fontSize: 12)),
           ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              TextButton(
-                onPressed: _showTurnHistoryDialog,
-                child: const Text('View Turn History', style: TextStyle(fontSize: 10)),
-              ),
-              TextButton(
-                onPressed: _showFullLogDialog,
-                child: const Text('View Full Log', style: TextStyle(fontSize: 10)),
-              ),
-            ],
+          TextButton(
+            onPressed: _showFullLogDialog,
+            child: const Text('View Full Log', style: TextStyle(fontSize: 12)),
           ),
         ],
       ),
