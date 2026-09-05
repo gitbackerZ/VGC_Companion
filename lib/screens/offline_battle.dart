@@ -503,6 +503,22 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           }
         })();
 
+        (function dumpKingambitAbilities() {
+          try {
+            var abilitiesTable = globalThis.PSStaticData && globalThis.PSStaticData.base ? globalThis.PSStaticData.base.abilities : null;
+            if (!abilitiesTable) {
+              globalThis.logBuffer.push('|debug-abilities-table| MISSING entirely');
+              return;
+            }
+            ['defiant', 'supremeoverlord', 'pressure'].forEach(function(abId) {
+              var entry = abilitiesTable[abId];
+              globalThis.logBuffer.push('|debug-ability-raw| id=' + abId + ' entry=' + (entry ? JSON.stringify(entry) : 'MISSING_FROM_ABILITIES_TABLE'));
+            });
+          } catch (e) {
+            globalThis.logBuffer.push('|debug-ability-dump-error| ' + (e && e.message ? e.message : String(e)));
+          }
+        })();
+
         globalThis.toID = function(text) {
           if (text && text.id) return text.id;
           if (typeof text !== 'string' && typeof text !== 'number') return '';
