@@ -503,21 +503,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           }
         })();
 
-        (function dumpKingambitAbilities() {
-          try {
-            var abilitiesTable = globalThis.PSStaticData && globalThis.PSStaticData.base ? globalThis.PSStaticData.base.abilities : null;
-            if (!abilitiesTable) {
-              globalThis.logBuffer.push('|debug-abilities-table| MISSING entirely');
-              return;
-            }
-            ['defiant', 'supremeoverlord', 'pressure'].forEach(function(abId) {
-              var entry = abilitiesTable[abId];
-              globalThis.logBuffer.push('|debug-ability-raw| id=' + abId + ' entry=' + (entry ? JSON.stringify(entry) : 'MISSING_FROM_ABILITIES_TABLE'));
-            });
-          } catch (e) {
-            globalThis.logBuffer.push('|debug-ability-dump-error| ' + (e && e.message ? e.message : String(e)));
-          }
-        })();
+        
 
         globalThis.toID = function(text) {
           if (text && text.id) return text.id;
@@ -867,6 +853,20 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                   }
                 });
                 globalThis.logBuffer.push('|debug-instrument| wrapped battleInstance.dex tables successfully');
+
+                try {
+                  var abilitiesTable2 = battleDex.abilities;
+                  if (abilitiesTable2 && typeof abilitiesTable2.get === 'function') {
+                    ['defiant', 'supremeoverlord', 'pressure'].forEach(function(abId) {
+                      var abEntry = abilitiesTable2.get(abId);
+                      globalThis.logBuffer.push('|debug-ability-raw| id=' + abId + ' entry=' + (abEntry ? JSON.stringify(abEntry) : 'NULL_OR_UNDEFINED'));
+                    });
+                  } else {
+                    globalThis.logBuffer.push('|debug-abilities-table| battleDex.abilities.get not a function, typeof=' + typeof (abilitiesTable2 && abilitiesTable2.get));
+                  }
+                } catch (abDumpErr) {
+                  globalThis.logBuffer.push('|debug-ability-dump-error| ' + (abDumpErr && abDumpErr.message ? abDumpErr.message : String(abDumpErr)));
+                }
               } else {
                 globalThis.logBuffer.push('|debug-instrument| battleInstance.dex not found, trying global Dex fallback');
               }
