@@ -143,6 +143,12 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   int _s2SwitchChoice = 1;
   bool _s2Mega = false;
 
+  // Remembers the last move index picked per slot across turns, so the
+  // controller can default back to it instead of always resetting to
+  // move 1 on a fresh turn.
+  int? _lastS1MoveChoice;
+  int? _lastS2MoveChoice;
+
   String _statusMessage = 'Enter both team sheets to begin.';
   bool _engineInitialized = false;
   bool _isWaiting = false;
@@ -1132,13 +1138,27 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           _stage = BattleStage.inBattle;
 
           if (isNewTurn) {
-            // Genuine new turn: safe to reset all per-turn selection state.
+            // Genuine new turn: reset switch/mega state, but restore the
+            // last move choice per slot when it's still a valid, usable
+            // option this turn (in range and not disabled) — otherwise
+            // fall back to move 1.
+            final activeCheck = data['active'] as List<dynamic>?;
+
+            int resolveDefaultMove(int? remembered, int slotIndex) {
+              if (remembered == null || activeCheck == null || activeCheck.length <= slotIndex) return 1;
+              final moves = activeCheck[slotIndex]['moves'] as List<dynamic>? ?? [];
+              if (remembered < 1 || remembered > moves.length) return 1;
+              final m = moves[remembered - 1];
+              final disabled = m is Map && (m['disabled'] == true);
+              return disabled ? 1 : remembered;
+            }
+
             _s1IsSwitch = false;
             _s2IsSwitch = false;
             _s1Mega = false;
             _s2Mega = false;
-            _s1MoveChoice = 1;
-            _s2MoveChoice = 1;
+            _s1MoveChoice = resolveDefaultMove(_lastS1MoveChoice, 0);
+            _s2MoveChoice = resolveDefaultMove(_lastS2MoveChoice, 1);
             _lastRequestTurnNumber = effectiveTurn;
             _statusMessage = 'Waiting for player actions...';
             _announce('New turn requested.');
@@ -1153,8 +1173,16 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             _statusMessage = 'Action required mid-turn (self-switch effect)...';
           }
 
-          final activeCheck = data['active'] as List<dynamic>?;
-          _rawLogs.add('|debug-request-applied| engineTurn=$engineTurn isNewTurn=$isNewTurn activeSlots=${activeCheck?.length ?? 'null'} slot1Moves=${activeCheck != null && activeCheck.isNotEmpty ? (activeCheck[0]['moves'] as List<dynamic>?)?.length : 'n/a'}');
+          final activeCheckForDefaults = data['active'] as List<dynamic>?;
+
+            int resolveDefaultMove(int? remembered, int slotIndex) {
+              if (remembered == null || activeCheckForDefaults == null || activeCheckForDefaults.length <= slotIndex) return 1;
+              final moves = activeCheckForDefaults[slotIndex]['moves'] as List<dynamic>? ?? [];
+              if (remembered < 1 || remembered > moves.length) return 1;
+              final m = moves[remembered - 1];
+              final disabled = m is Map && (m['disabled'] == true);
+              return disabled ? 1 : remembered;
+            }
         }
       });
     } catch (e, st) {
@@ -1293,6 +1321,17 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     final moves = activeList[slotIndex]['moves'] as List<dynamic>? ?? [];
     if (moveChoice < 1 || moveChoice > moves.length) return true;
     final moveData = moves[moveChoice - 1];
+
+    // A locked/forced continuation move (e.g. the follow-through turn of
+    // Electro Shot, Solar Beam, Sky Attack, etc.) is presented without pp,
+    // maxpp, or target fields at all — the target was already committed
+    // when the move was originally declared and must NOT be re-specified,
+    // or the engine will reject the choice.
+    final bool isLockedContinuation = moveData is Map &&
+        !moveData.containsKey('pp') &&
+        !moveData.containsKey('target');
+    if (isLockedContinuation) return false;
+
     final target = moveData is Map ? moveData['target']?.toString() : null;
     // Target types that Showdown resolves automatically — no explicit target index needed.
     const noTargetTypes = {
@@ -1339,8 +1378,20 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         slotActions.add(act);
       }
 
+      // Only submit a slot-2 action when the engine actually presented a
+      // second active slot for this request. If only one Pokémon remains
+      // active on p1's side (e.g. the partner fainted with no replacement),
+      // activeList will have length 1 and no second action should be sent —
+      // sending one here would submit a stray/invalid choice for a slot the
+      // engine isn't asking about.
       if (activeList.length > 1) {
-        if (_s2IsSwitch) {
+        final slot2Data = activeList[1] as Map<String, dynamic>?;
+        final slot2Moves = slot2Data?['moves'] as List<dynamic>? ?? [];
+        final slot2Fainted = slot2Moves.isEmpty && !_s2IsSwitch;
+        if (slot2Fainted) {
+          // Defensive: nothing valid to submit for this slot — skip it
+          // rather than sending a malformed choice.
+        } else if (_s2IsSwitch) {
           slotActions.add('switch $_s2SwitchChoice');
         } else {
           String act = 'move $_s2MoveChoice';
@@ -1405,11 +1456,19 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       final moveIdx = usable[_rng.nextInt(usable.length)];
       final moveData = moves[moveIdx - 1];
       final targetType = moveData is Map ? moveData['target']?.toString() : null;
+      // A locked/forced continuation move (e.g. the follow-through turn of
+      // Electro Shot, Solar Beam, Sky Attack, etc.) is presented without pp,
+      // maxpp, or target fields at all — the target was already committed
+      // when the move was originally declared, so it must NOT be
+      // re-specified here or the engine rejects the choice.
+      final bool isLockedContinuation = moveData is Map &&
+          !moveData.containsKey('pp') &&
+          !moveData.containsKey('target');
       const noTargetTypes = {
         'allySide', 'self', 'all', 'allyTeam', 'foeSide', 'allAdjacent', 'allAdjacentFoes',
       };
       String act = 'move $moveIdx';
-      if (!(targetType != null && noTargetTypes.contains(targetType))) {
+      if (!isLockedContinuation && !(targetType != null && noTargetTypes.contains(targetType))) {
         // Random valid target: p1a or p1b (opposing slots), rarely -2 (ally) if relevant.
         final targets = ['1', '2'];
         act += ' ${targets[_rng.nextInt(targets.length)]}';
@@ -1674,44 +1733,56 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                     return Column(
                       children: [
                         if (slot1NeedsSwitch)
-                          _buildSlotActionControl(
-                            slotNumber: 1,
-                            slotTitle: 'Slot 1 (${_activeNames['p1a'] ?? 'Active 1'})',
-                            moves: movesSlot1,
-                            switches: availableSwitches,
-                            isForceSwitch: isForceSwitch,
-                            isSwitch: _s1IsSwitch,
-                            selectedMove: _s1MoveChoice,
-                            selectedTarget: _s1Target,
-                            selectedSwitch: _s1SwitchChoice,
-                            isMega: _s1Mega,
-                            canMega: !_p1HasMegaEvolved && activeList.isNotEmpty && (activeList[0]['canMegaEvo'] == true),
-                            onToggleSwitch: (v) => setState(() => _s1IsSwitch = v),
-                            onMoveChanged: (v) => setState(() => _s1MoveChoice = v ?? 1),
-                            onTargetChanged: (v) => setState(() => _s1Target = v ?? 1),
-                            onSwitchChanged: (v) => setState(() => _s1SwitchChoice = v ?? 1),
-                            onMegaToggled: (v) => setState(() => _s1Mega = v),
-                          ),
+                          _isLockedContinuationSlot(activeList, 0)
+                              ? _buildLockedSlotPanel('Slot 1 (${_activeNames['p1a'] ?? 'Active 1'})', movesSlot1)
+                              : _buildSlotActionControl(
+                                  slotNumber: 1,
+                                  slotTitle: 'Slot 1 (${_activeNames['p1a'] ?? 'Active 1'})',
+                                  moves: movesSlot1,
+                                  switches: availableSwitches,
+                                  isForceSwitch: isForceSwitch,
+                                  isSwitch: _s1IsSwitch,
+                                  selectedMove: _s1MoveChoice,
+                                  selectedTarget: _s1Target,
+                                  selectedSwitch: _s1SwitchChoice,
+                                  isMega: _s1Mega,
+                                  canMega: !_p1HasMegaEvolved && activeList.isNotEmpty && (activeList[0]['canMegaEvo'] == true),
+                                  canSwitchOverride: !(activeList.isNotEmpty && activeList[0]['trapped'] == true),
+                                  onToggleSwitch: (v) => setState(() => _s1IsSwitch = v),
+                                  onMoveChanged: (v) => setState(() {
+                              _s1MoveChoice = v ?? 1;
+                              _lastS1MoveChoice = _s1MoveChoice;
+                            }),
+                                  onTargetChanged: (v) => setState(() => _s1Target = v ?? 1),
+                                  onSwitchChanged: (v) => setState(() => _s1SwitchChoice = v ?? 1),
+                                  onMegaToggled: (v) => setState(() => _s1Mega = v),
+                                ),
                         if (slot2Exists && (!isForceSwitch || slot2NeedsSwitch)) ...[
                           const Divider(height: 16),
-                          _buildSlotActionControl(
-                            slotNumber: 2,
-                            slotTitle: 'Slot 2 (${_activeNames['p1b'] ?? 'Active 2'})',
-                            moves: movesSlot2,
-                            switches: availableSwitches,
-                            isForceSwitch: isForceSwitch,
-                            isSwitch: _s2IsSwitch,
-                            selectedMove: _s2MoveChoice,
-                            selectedTarget: _s2Target,
-                            selectedSwitch: _s2SwitchChoice,
-                            isMega: _s2Mega,
-                            canMega: !_p1HasMegaEvolved && activeList.length > 1 && (activeList[1]['canMegaEvo'] == true),
-                            onToggleSwitch: (v) => setState(() => _s2IsSwitch = v),
-                            onMoveChanged: (v) => setState(() => _s2MoveChoice = v ?? 1),
-                            onTargetChanged: (v) => setState(() => _s2Target = v ?? 1),
-                            onSwitchChanged: (v) => setState(() => _s2SwitchChoice = v ?? 1),
-                            onMegaToggled: (v) => setState(() => _s2Mega = v),
-                          ),
+                          _isLockedContinuationSlot(activeList, 1)
+                              ? _buildLockedSlotPanel('Slot 2 (${_activeNames['p1b'] ?? 'Active 2'})', movesSlot2)
+                              : _buildSlotActionControl(
+                                  slotNumber: 2,
+                                  slotTitle: 'Slot 2 (${_activeNames['p1b'] ?? 'Active 2'})',
+                                  moves: movesSlot2,
+                                  switches: availableSwitches,
+                                  isForceSwitch: isForceSwitch,
+                                  isSwitch: _s2IsSwitch,
+                                  selectedMove: _s2MoveChoice,
+                                  selectedTarget: _s2Target,
+                                  selectedSwitch: _s2SwitchChoice,
+                                  isMega: _s2Mega,
+                                  canMega: !_p1HasMegaEvolved && activeList.length > 1 && (activeList[1]['canMegaEvo'] == true),
+                                  canSwitchOverride: !(activeList.length > 1 && activeList[1]['trapped'] == true),
+                                  onToggleSwitch: (v) => setState(() => _s2IsSwitch = v),
+                                  onMoveChanged: (v) => setState(() {
+                                    _s2MoveChoice = v ?? 1;
+                                    _lastS2MoveChoice = _s2MoveChoice;
+                                  }),
+                                  onTargetChanged: (v) => setState(() => _s2Target = v ?? 1),
+                                  onSwitchChanged: (v) => setState(() => _s2SwitchChoice = v ?? 1),
+                                  onMegaToggled: (v) => setState(() => _s2Mega = v),
+                                ),
                         ],
                       ],
                     );
@@ -1734,6 +1805,41 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     );
   }
 
+  // A slot is a "locked continuation" when the engine presents exactly one
+  // move entry with no pp/maxpp/target fields (e.g. mid-charge Electro
+  // Shot/Solar Beam/Sky Attack). There is nothing to choose — the target
+  // was already committed on the declaring turn — so no interactive
+  // controller should be shown at all.
+  bool _isLockedContinuationSlot(List<dynamic> activeList, int slotIndex) {
+    if (activeList.length <= slotIndex) return false;
+    final moves = activeList[slotIndex]['moves'] as List<dynamic>? ?? [];
+    if (moves.length != 1) return false;
+    final m = moves[0];
+    return m is Map && !m.containsKey('pp') && !m.containsKey('target');
+  }
+
+  Widget _buildLockedSlotPanel(String slotTitle, List<dynamic> moves) {
+    final moveName = moves.isNotEmpty && moves[0] is Map ? (moves[0]['move']?.toString() ?? 'its move') : 'its move';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Semantics(
+        label: '$slotTitle is locked into using $moveName. No action needed.',
+        child: Row(
+          children: [
+            const Icon(Icons.lock, size: 16, color: Colors.grey),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                '$slotTitle is locked into $moveName (no input needed)',
+                style: const TextStyle(fontSize: 12, color: Colors.grey, fontStyle: FontStyle.italic),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildSlotActionControl({
     required String slotTitle,
     required List<dynamic> moves,
@@ -1751,6 +1857,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     required ValueChanged<int?> onSwitchChanged,
     required ValueChanged<bool> onMegaToggled,
     required int slotNumber, // 1 or 2, used to route the target overlay
+    bool canSwitchOverride = true, // false when this slot is `trapped`
   }) {
     if (isForceSwitch) {
       // Forced switches get their own dedicated overlay — see _showForcedSwitchOverlay.
@@ -1799,6 +1906,11 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             onPressed: () => onToggleSwitch(false),
             child: const Text('Use a Move Instead', style: TextStyle(fontSize: 11)),
           ),
+        ] else if (!canSwitchOverride && moves.isEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Text('This Pokémon is trapped and has no usable moves.', style: TextStyle(fontSize: 11, color: Colors.redAccent)),
+          ),
         ] else if (moves.isEmpty) ...[
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 8),
@@ -1811,7 +1923,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             slotNumber: slotNumber,
             canMega: canMega,
             isMega: isMega,
-            canSwitch: switches.isNotEmpty,
+            canSwitch: canSwitchOverride && switches.isNotEmpty,
             switches: switches,
             onMoveChanged: onMoveChanged,
             onTargetChanged: onTargetChanged,
@@ -1985,6 +2097,13 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   }
 
   bool _moveNeedsTargetForOverlay(dynamic moveData) {
+    // Locked/forced continuation move (see _moveNeedsTarget) — no target
+    // prompt should ever be shown for it.
+    final bool isLockedContinuation = moveData is Map &&
+        !moveData.containsKey('pp') &&
+        !moveData.containsKey('target');
+    if (isLockedContinuation) return false;
+
     final target = moveData is Map ? moveData['target']?.toString() : null;
     const noTargetTypes = {
       'allySide', 'self', 'all', 'allyTeam', 'foeSide', 'allAdjacent', 'allAdjacentFoes',
