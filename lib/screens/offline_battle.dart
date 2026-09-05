@@ -800,6 +800,16 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                     var origGet = table.get.bind(table);
                     table.get = function(id) {
                       globalThis.logBuffer.push('|debug-dex-get| table=' + tableName + ' id=' + JSON.stringify(id));
+                      if (tableName === 'species') {
+                        try {
+                          var rawEntry = globalThis.PSStaticData && globalThis.PSStaticData.base && globalThis.PSStaticData.base.pokedex
+                            ? globalThis.PSStaticData.base.pokedex[globalThis.toID(id)]
+                            : undefined;
+                          globalThis.logBuffer.push('|debug-species-raw| id=' + JSON.stringify(id) + ' rawEntryKeys=' + (rawEntry ? JSON.stringify(Object.keys(rawEntry)) : 'MISSING_FROM_POKEDEX'));
+                        } catch (dumpErr) {
+                          globalThis.logBuffer.push('|debug-species-raw-error| ' + (dumpErr && dumpErr.message ? dumpErr.message : String(dumpErr)));
+                        }
+                      }
                       return origGet(id);
                     };
                     table.__instrumented = true;
