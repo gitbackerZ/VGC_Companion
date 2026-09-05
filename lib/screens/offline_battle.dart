@@ -479,6 +479,30 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           Dex.data.Aliases = Dex.data.Aliases || [];
         }
 
+        // Patch known-bad evolution data that crashes this trimmed engine
+        // build. evoType "other" (used for narrative/non-standard evolution
+        // conditions like Kingambit's "defeat 3 Bisharp") has no handler in
+        // this bundle's species-processing code, causing a generic
+        // "not a function" crash during Pokemon construction. Evolution
+        // logic is never needed during battle simulation, so it's safe to
+        // simply strip these fields rather than patch the sim internals.
+        (function patchBadEvolutionData() {
+          try {
+            var pokedex = globalThis.PSStaticData && globalThis.PSStaticData.base ? globalThis.PSStaticData.base.pokedex : null;
+            if (!pokedex) return;
+            for (var speciesId in pokedex) {
+              var entry = pokedex[speciesId];
+              if (entry && entry.evoType === 'other') {
+                delete entry.evoType;
+                delete entry.evoCondition;
+                delete entry.prevo;
+              }
+            }
+          } catch (e) {
+            globalThis.logBuffer.push('|debug-evo-patch-error| ' + (e && e.message ? e.message : String(e)));
+          }
+        })();
+
         globalThis.toID = function(text) {
           if (text && text.id) return text.id;
           if (typeof text !== 'string' && typeof text !== 'number') return '';
