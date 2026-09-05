@@ -806,11 +806,22 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                             ? globalThis.PSStaticData.base.pokedex[globalThis.toID(id)]
                             : undefined;
                           globalThis.logBuffer.push('|debug-species-raw| id=' + JSON.stringify(id) + ' rawEntryKeys=' + (rawEntry ? JSON.stringify(Object.keys(rawEntry)) : 'MISSING_FROM_POKEDEX'));
+                          if (rawEntry && globalThis.toID(id) === 'kingambit') {
+                            globalThis.logBuffer.push('|debug-kingambit-full| ' + JSON.stringify(rawEntry));
+                            globalThis.logBuffer.push('|debug-kingambit-abilities-type| ' + typeof rawEntry.abilities + ' value=' + JSON.stringify(rawEntry.abilities));
+                            globalThis.logBuffer.push('|debug-kingambit-evocond-type| ' + typeof rawEntry.evoCondition + ' value=' + JSON.stringify(rawEntry.evoCondition));
+                            globalThis.logBuffer.push('|debug-kingambit-evotype-type| ' + typeof rawEntry.evoType + ' value=' + JSON.stringify(rawEntry.evoType));
+                          }
                         } catch (dumpErr) {
                           globalThis.logBuffer.push('|debug-species-raw-error| ' + (dumpErr && dumpErr.message ? dumpErr.message : String(dumpErr)));
                         }
                       }
-                      return origGet(id);
+                      try {
+                        return origGet(id);
+                      } catch (getErr) {
+                        globalThis.logBuffer.push('|debug-getter-crash| table=' + tableName + ' id=' + JSON.stringify(id) + ' errMsg=' + (getErr && getErr.message ? getErr.message : String(getErr)) + ' errStack=' + (getErr && getErr.stack ? getErr.stack.replace(/\\n/g, ' | ').substring(0, 500) : 'no-stack'));
+                        throw getErr;
+                      }
                     };
                     table.__instrumented = true;
                   }
