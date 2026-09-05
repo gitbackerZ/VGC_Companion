@@ -482,7 +482,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         globalThis.toID = function(text) {
           if (text && text.id) return text.id;
           if (typeof text !== 'string' && typeof text !== 'number') return '';
-          return ('' + text).toLowerCase().replace(new RegExp('[^a-z0-9]', 'g'), '');
+          return ('' + text).toLowerCase().replace(/[^a-z0-9]/g, '');
         };
 
         globalThis.getLogs = function() {
@@ -645,9 +645,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           if (Array.isArray(teamData)) rawTeam = teamData;
 
           if (rawTeam.length === 0 && typeof teamData === 'string') {
-            const blocks = teamData.split(new RegExp('\\n\\s*\\n'));
+            const blocks = teamData.split(/\n\s*\n/);
             for (let b = 0; b < blocks.length; b++) {
-              const lines = blocks[b].split(new RegExp('\\n')).map(l => l.trim()).filter(Boolean);
+              const lines = blocks[b].split(/\n/).map(l => l.trim()).filter(Boolean);
               if (lines.length === 0) continue;
 
               let species = '';
@@ -673,7 +673,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                 } else if (line.startsWith('Level:')) {
                   level = parseInt(line.replace('Level:', '').trim()) || 50;
                 } else if (line.endsWith('Nature')) {
-                  nature = line.replace(new RegExp('Nature', 'i'), '').trim() || 'Hardy';
+                  nature = line.replace(/Nature/i, '').trim() || 'Hardy';
                 } else if (line.startsWith('-')) {
                   moves.push(line.substring(1).trim());
                 }
@@ -932,7 +932,6 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     _logTimer = Timer.periodic(const Duration(milliseconds: 250), (_) => _fetchLogs());
   }
 
-  String _pendingRequestSide = 'p1';
   Map<String, dynamic>? _lastP2Request;
   final math.Random _rng = math.Random();
   bool _p1HasMegaEvolved = false;
@@ -958,9 +957,11 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               final trimmed = line.trim();
               if (trimmed.isEmpty) continue;
 
-              // Track which side the next |request| line belongs to
+              // Bare 'p1'/'p2' marker lines carry no data on their own —
+              // the actual |request| line that follows is matched by
+              // inspecting its own side.id field instead (see below), so
+              // this marker doesn't need to be tracked.
               if (trimmed == 'p1' || trimmed == 'p2') {
-                _pendingRequestSide = trimmed;
                 continue;
               }
 
@@ -1174,17 +1175,6 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             // so this would just be a redundant, confusing status blurb.
             _statusMessage = 'Action required mid-turn (self-switch effect)...';
           }
-
-          final activeCheckForDefaults = data['active'] as List<dynamic>?;
-
-            int resolveDefaultMove(int? remembered, int slotIndex) {
-              if (remembered == null || activeCheckForDefaults == null || activeCheckForDefaults.length <= slotIndex) return 1;
-              final moves = activeCheckForDefaults[slotIndex]['moves'] as List<dynamic>? ?? [];
-              if (remembered < 1 || remembered > moves.length) return 1;
-              final m = moves[remembered - 1];
-              final disabled = m is Map && (m['disabled'] == true);
-              return disabled ? 1 : remembered;
-            }
         }
       });
     } catch (e, st) {
@@ -2369,69 +2359,6 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             ),
         ],
       ),
-    );
-  }
-
-  Widget _buildActiveSlotRow(String title, List<String> slots, Color color) {
-    return Row(
-      children: [
-        SizedBox(width: 70, child: Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: color))),
-        Expanded(
-          child: Row(
-            children: slots.map((slot) {
-              final name = _activeNames[slot] ?? 'Active Mon';
-              final hp = _activeHp[slot] ?? '100/100';
-              final types = _activeTypes[slot] ?? [];
-              final status = _activeStatus[slot] ?? '';
-              return Expanded(
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 2),
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(color: Colors.grey[850], borderRadius: BorderRadius.circular(6)),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(child: Text(name, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold))),
-                          if (status.isNotEmpty && _statusLabels.containsKey(status))
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                              margin: const EdgeInsets.only(left: 4),
-                              decoration: BoxDecoration(
-                                color: _statusColors[status] ?? Colors.grey,
-                                borderRadius: BorderRadius.circular(3),
-                              ),
-                              child: Text(_statusLabels[status]!, style: const TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold)),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-                      Text('HP: $hp', style: const TextStyle(fontSize: 9, fontFamily: 'monospace')),
-                      if (types.isNotEmpty) ...[
-                        const SizedBox(height: 3),
-                        Wrap(
-                          spacing: 3,
-                          children: types.map((t) {
-                            return Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: _typeColors[t] ?? Colors.grey,
-                                borderRadius: BorderRadius.circular(3),
-                              ),
-                              child: Text(t, style: const TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold)),
-                            );
-                          }).toList(),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-        ),
-      ],
     );
   }
 
