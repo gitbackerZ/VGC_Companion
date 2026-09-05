@@ -645,9 +645,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           if (Array.isArray(teamData)) rawTeam = teamData;
 
           if (rawTeam.length === 0 && typeof teamData === 'string') {
-            const blocks = teamData.split(/\n\s*\n/);
+            const blocks = teamData.split(/\\n\\s*\\n/);
             for (let b = 0; b < blocks.length; b++) {
-              const lines = blocks[b].split(/\n/).map(l => l.trim()).filter(Boolean);
+              const lines = blocks[b].split(/\\n/).map(l => l.trim()).filter(Boolean);
               if (lines.length === 0) continue;
 
               let species = '';
@@ -784,7 +784,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             const errMsg = (err && err.message) ? err.message : String(err);
             const errStack = (err && err.stack) ? err.stack : 'no stack available';
             globalThis.logBuffer.push('|error| Engine Crash: ' + errMsg);
-            globalThis.logBuffer.push('|error-stack| ' + errStack.replace(/\n/g, ' | '));
+            globalThis.logBuffer.push('|error-stack| ' + errStack.replace(/\\n/g, ' | '));
             return "ERROR: " + errMsg;
           }
         };
