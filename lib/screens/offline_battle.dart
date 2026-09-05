@@ -730,6 +730,29 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           return sanitized;
         };
 
+        // Diagnostic: wrap Dex.items.get / Dex.abilities.get / Dex.species.get
+        // to log the exact name being looked up right before any crash, so we
+        // can see which specific ID triggers the "not a function" failure.
+        (function instrumentDexGetters() {
+          try {
+            var _Dex = (globalThis.PSSim && globalThis.PSSim.Dex) ? globalThis.PSSim.Dex : globalThis.Dex;
+            if (!_Dex) return;
+            ['species', 'items', 'abilities', 'moves'].forEach(function(tableName) {
+              var table = _Dex[tableName];
+              if (table && typeof table.get === 'function' && !table.__instrumented) {
+                var origGet = table.get.bind(table);
+                table.get = function(id) {
+                  globalThis.logBuffer.push('|debug-dex-get| table=' + tableName + ' id=' + JSON.stringify(id));
+                  return origGet(id);
+                };
+                table.__instrumented = true;
+              }
+            });
+          } catch (e) {
+            globalThis.logBuffer.push('|debug-instrument-error| ' + (e && e.message ? e.message : String(e)));
+          }
+        })();
+
         globalThis.startVGCBattle = function(formatId, p1TeamData, p2TeamData) {
           globalThis.logBuffer = [];
           try {
