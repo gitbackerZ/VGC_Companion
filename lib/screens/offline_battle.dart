@@ -36,6 +36,83 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   final Map<String, List<String>> _activeTypes = {};
   final Map<String, String> _activeStatus = {};
 
+  int _fieldTurn = 0;
+  String _fieldWeather = '';
+  int? _fieldWeatherTurnsLeft;
+  final Map<String, int?> _p1SideConditions = {};
+  final Map<String, int?> _p2SideConditions = {};
+
+  static const Map<String, String> _sideConditionLabels = {
+    'tailwind': 'Tailwind',
+    'trickroom': 'Trick Room',
+    'reflect': 'Reflect',
+    'lightscreen': 'Light Screen',
+    'auroraveil': 'Aurora Veil',
+    'stealthrock': 'Stealth Rock',
+    'spikes': 'Spikes',
+    'toxicspikes': 'Toxic Spikes',
+    'stickyweb': 'Sticky Web',
+    'safeguard': 'Safeguard',
+    'mist': 'Mist',
+  };
+
+  void _refreshFieldInfo() {
+    if (_jsRuntime == null) return;
+    final result = _jsRuntime!.evaluate("globalThis.getFieldInfo();");
+    if (result.isError) return;
+    try {
+      final data = jsonDecode(result.stringResult);
+      if (data is Map) {
+        _fieldTurn = data['turn'] is int ? data['turn'] as int : _fieldTurn;
+        _fieldWeather = data['weather']?.toString() ?? '';
+        final minDur = data['weatherTurnsLeft'];
+        _fieldWeatherTurnsLeft = minDur is int ? minDur : null;
+        _p1SideConditions
+          ..clear()
+          ..addAll(Map<String, int?>.from((data['p1SideConditions'] as Map?) ?? {}));
+        _p2SideConditions
+          ..clear()
+          ..addAll(Map<String, int?>.from((data['p2SideConditions'] as Map?) ?? {}));
+      }
+    } catch (_) {}
+  }
+
+  String _formatSideConditions(String label, Map<String, int?> conditions) {
+    if (conditions.isEmpty) return '';
+    final parts = conditions.entries.map((e) {
+      final name = _sideConditionLabels[e.key] ?? e.key;
+      return e.value != null ? '$name (${e.value} left)' : name;
+    }).join(', ');
+    return '$label: $parts';
+  }
+
+  Widget _buildFieldConditionPanel() {
+    final p1Text = _formatSideConditions('Your side', _p1SideConditions);
+    final p2Text = _formatSideConditions('Opponent side', _p2SideConditions);
+    final weatherText = _fieldWeather.isNotEmpty
+        ? '$_fieldWeather${_fieldWeatherTurnsLeft != null ? ' ($_fieldWeatherTurnsLeft turns left)' : ''}'
+        : 'Clear';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.grey[900],
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.grey[700]!, width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('Turn $_fieldTurn — Weather: $weatherText', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+          if (p1Text.isNotEmpty) Text(p1Text, style: const TextStyle(fontSize: 10, color: Colors.lightBlueAccent)),
+          if (p2Text.isNotEmpty) Text(p2Text, style: const TextStyle(fontSize: 10, color: Colors.redAccent)),
+        ],
+      ),
+    );
+  }
+
   void _refreshActiveMonInfo() {
     if (_jsRuntime == null) return;
     for (final entry in {'p1a': 'p1,a', 'p1b': 'p1,b', 'p2a': 'p2,a', 'p2b': 'p2,b'}.entries) {
@@ -420,6 +497,36 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             var types = mon.types || (mon.getTypes ? mon.getTypes() : []);
             var status = mon.status || '';
             return JSON.stringify({ types: types, status: status, name: mon.name || '' });
+          } catch (e) {
+            return "{}";
+          }
+        };
+
+        globalThis.getFieldInfo = function() {
+          try {
+            var b = globalThis.battle;
+            if (!b || !b.field) return "{}";
+            var field = b.field;
+            var info = {
+              turn: b.turn || 0,
+              weather: field.weather || '',
+              weatherTurnsLeft: field.weatherState ? field.weatherState.minDuration : null,
+              p1SideConditions: {},
+              p2SideConditions: {}
+            };
+            function collectSide(side) {
+              var out = {};
+              if (side && side.sideConditions) {
+                for (var key in side.sideConditions) {
+                  var sc = side.sideConditions[key];
+                  out[key] = (sc && sc.duration !== undefined) ? sc.duration : null;
+                }
+              }
+              return out;
+            }
+            info.p1SideConditions = collectSide(b.p1);
+            info.p2SideConditions = collectSide(b.p2);
+            return JSON.stringify(info);
           } catch (e) {
             return "{}";
           }
@@ -837,6 +944,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       if (parsed.isNotEmpty) {
         setState(() {
           _refreshActiveMonInfo();
+          _refreshFieldInfo();
           for (var chunk in parsed) {
             for (var line in chunk.toString().split('\n')) {
               final trimmed = line.trim();
@@ -927,6 +1035,8 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     // bookkeeping, duplicate-perspective markers, or internal debug noise.
     const Set<String> silentCommands = {
       'split', 'request', 't:', 'upkeep', '-anim', 'debug',
+      'gametype', 'player', 'gen', 'tier', 'clearpoke', 'teamsize',
+      'start', 'teampreview',
     };
 
     switch (parts[1]) {
@@ -1530,6 +1640,8 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             _buildMonPanel('p1b', 'Player 2', Colors.blueAccent),
           ],
         ),
+        const SizedBox(height: 6),
+        _buildFieldConditionPanel(),
         const SizedBox(height: 8),
         if (_stage == BattleStage.inBattle) ...[
           Card(
@@ -1700,11 +1812,13 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             canMega: canMega,
             isMega: isMega,
             canSwitch: switches.isNotEmpty,
+            switches: switches,
             onMoveChanged: onMoveChanged,
             onTargetChanged: onTargetChanged,
             selectedTarget: selectedTarget,
             onMegaToggled: onMegaToggled,
             onToggleSwitch: onToggleSwitch,
+            onSwitchChanged: onSwitchChanged,
           ),
           if (moves.isNotEmpty && selectedMove > 0 && selectedMove <= moves.length && _moveNeedsTargetForOverlay(moves[selectedMove - 1]))
             Padding(
@@ -1731,11 +1845,13 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     required bool canMega,
     required bool isMega,
     required bool canSwitch,
+    required List<dynamic> switches,
     required ValueChanged<int?> onMoveChanged,
     required ValueChanged<int?> onTargetChanged,
     required int selectedTarget,
     required ValueChanged<bool> onMegaToggled,
     required ValueChanged<bool> onToggleSwitch,
+    required ValueChanged<int?> onSwitchChanged,
   }) {
     Widget buildMoveCell(int idx) {
       if (idx >= moves.length) return const SizedBox.shrink();
@@ -1820,7 +1936,12 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         button: true,
         label: 'Switch Out instead of using a move',
         child: OutlinedButton(
-          onPressed: () => onToggleSwitch(true),
+          onPressed: () => _showSwitchOverlay(
+            slotNumber: slotNumber,
+            switches: switches,
+            onSwitchChanged: onSwitchChanged,
+            onToggleSwitch: onToggleSwitch,
+          ),
           style: OutlinedButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
             minimumSize: const Size(0, 40),
@@ -1906,28 +2027,32 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             children: [
               Text('Choose Target — Slot $slotNumber', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
               const SizedBox(height: 12),
-              ...options.map((opt) {
-                final val = opt['value'] as int;
-                final selected = currentTarget == val;
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Semantics(
+              GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+                childAspectRatio: 2.4,
+                children: options.map((opt) {
+                  final val = opt['value'] as int;
+                  final selected = currentTarget == val;
+                  return Semantics(
                     button: true,
                     label: selected ? '${opt['label']}, currently selected' : opt['label'] as String,
                     child: ElevatedButton(
                       onPressed: () {
                         onTargetChanged(val);
-                        Navigator.of(context).pop();
+                        Navigator.of(context).pop(); // auto-dismiss on selection
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: selected ? Colors.green[700] : Colors.grey[800],
-                        minimumSize: const Size(double.infinity, 44),
                       ),
-                      child: Text(opt['label'] as String),
+                      child: Text(opt['label'] as String, textAlign: TextAlign.center, style: const TextStyle(fontSize: 12)),
                     ),
-                  ),
-                );
-              }),
+                  );
+                }).toList(),
+              ),
             ],
           ),
         );
@@ -1956,22 +2081,28 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               const Text('Your Pokémon fainted or was forced out. Choose a replacement.',
                   style: TextStyle(fontSize: 11, color: Colors.grey)),
               const SizedBox(height: 12),
-              ...switches.map((s) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: ElevatedButton(
-                    onPressed: () {
-                      onSwitchChanged(s['slot'] as int);
-                      Navigator.of(context).pop();
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.grey[800],
-                      minimumSize: const Size(double.infinity, 44),
+              GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+                childAspectRatio: 2.4,
+                children: switches.map((s) {
+                  return Semantics(
+                    button: true,
+                    label: '${s['name']}, ${s['condition']}',
+                    child: ElevatedButton(
+                      onPressed: () {
+                        onSwitchChanged(s['slot'] as int);
+                        Navigator.of(context).pop(); // auto-dismiss on selection
+                      },
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[800]),
+                      child: Text('${s['name']} (${s['condition']})', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12)),
                     ),
-                    child: Text('${s['name']} (${s['condition']})'),
-                  ),
-                );
-              }),
+                  );
+                }).toList(),
+              ),
               const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
@@ -1987,6 +2118,64 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       },
     );
   }
+  void _showSwitchOverlay({
+    required int slotNumber,
+    required List<dynamic> switches,
+    required ValueChanged<int?> onSwitchChanged,
+    required ValueChanged<bool> onToggleSwitch,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey[900],
+      isScrollControlled: true,
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Switch Out — Slot $slotNumber', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const SizedBox(height: 12),
+              GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+                childAspectRatio: 2.4,
+                children: switches.map((s) {
+                  return Semantics(
+                    button: true,
+                    label: '${s['name']}, ${s['condition']}',
+                    child: ElevatedButton(
+                      onPressed: () {
+                        onToggleSwitch(true);
+                        onSwitchChanged(s['slot'] as int);
+                        Navigator.of(context).pop(); // auto-dismiss on selection
+                      },
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[800]),
+                      child: Text('${s['name']} (${s['condition']})', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12)),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.arrow_back),
+                  label: const Text('Cancel'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   static const Map<String, Color> _typeColors = {
     'Normal': Color(0xFFA8A878), 'Fire': Color(0xFFF08030), 'Water': Color(0xFF6890F0),
     'Electric': Color(0xFFF8D030), 'Grass': Color(0xFF78C850), 'Ice': Color(0xFF98D8D8),
