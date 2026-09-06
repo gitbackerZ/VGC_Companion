@@ -871,6 +871,25 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                 } catch (abDumpErr) {
                   globalThis.logBuffer.push('|debug-ability-dump-error| ' + (abDumpErr && abDumpErr.message ? abDumpErr.message : String(abDumpErr)));
                 }
+
+                try {
+                  var learnsetsData = globalThis.PSStaticData && globalThis.PSStaticData.base ? globalThis.PSStaticData.base.learnsets : null;
+                  var kingambitLearnset = learnsetsData ? learnsetsData['kingambit'] : undefined;
+                  globalThis.logBuffer.push('|debug-kingambit-learnset| exists=' + (kingambitLearnset !== undefined) + ' value=' + JSON.stringify(kingambitLearnset).substring(0, 300));
+
+                  var formatsData = globalThis.PSStaticData && globalThis.PSStaticData.base ? globalThis.PSStaticData.base['formats-data'] : null;
+                  var kingambitFormatsEntry = formatsData ? formatsData['kingambit'] : undefined;
+                  globalThis.logBuffer.push('|debug-kingambit-formatsdata| exists=' + (kingambitFormatsEntry !== undefined) + ' value=' + JSON.stringify(kingambitFormatsEntry));
+
+                  if (battleDex.learnsets && typeof battleDex.learnsets.get === 'function') {
+                    var learnsetViaGet = battleDex.learnsets.get('kingambit');
+                    globalThis.logBuffer.push('|debug-kingambit-learnset-viaget| ' + JSON.stringify(learnsetViaGet).substring(0, 300));
+                  } else {
+                    globalThis.logBuffer.push('|debug-learnsets-table| battleDex.learnsets.get not available, typeof=' + typeof (battleDex.learnsets && battleDex.learnsets.get));
+                  }
+                } catch (lsDumpErr) {
+                  globalThis.logBuffer.push('|debug-learnset-dump-error| ' + (lsDumpErr && lsDumpErr.message ? lsDumpErr.message : String(lsDumpErr)));
+                }
               } else {
                 globalThis.logBuffer.push('|debug-instrument| battleInstance.dex not found, trying global Dex fallback');
               }
