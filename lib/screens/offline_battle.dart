@@ -169,13 +169,6 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       final runtime = getJavascriptRuntime();
       final engineCode = await rootBundle.loadString('assets/engine.js');
 
-      String learnsetsJson = '{}';
-      try {
-        learnsetsJson = await rootBundle.loadString('assets/js/learnsets.json');
-      } catch (e) {
-        debugPrint('learnsets.json asset load warning: $e');
-      }
-
       const String polyfillsScript = '''
         globalThis.global = globalThis;
         globalThis.window = globalThis;
@@ -475,7 +468,6 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
         if (typeof Dex !== "undefined") {
           Dex.data = Dex.data || {};
-          Dex.data.Learnsets = $learnsetsJson;
           Dex.data.Aliases = Dex.data.Aliases || [];
         }
 
