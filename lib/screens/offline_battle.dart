@@ -760,28 +760,62 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           return sanitized;
         };
 
-        // Diagnostic: wrap Dex.items.get / Dex.abilities.get / Dex.species.get
-        // to log the exact name being looked up right before any crash, so we
-        // can see which specific ID triggers the "not a function" failure.
-        (function instrumentDexGetters() {
-          try {
-            var _Dex = (globalThis.PSSim && globalThis.PSSim.Dex) ? globalThis.PSSim.Dex : globalThis.Dex;
-            if (!_Dex) return;
-            ['species', 'items', 'abilities', 'moves'].forEach(function(tableName) {
-              var table = _Dex[tableName];
-              if (table && typeof table.get === 'function' && !table.__instrumented) {
-                var origGet = table.get.bind(table);
-                table.get = function(id) {
-                  globalThis.logBuffer.push('|debug-dex-get| table=' + tableName + ' id=' + JSON.stringify(id));
-                  return origGet(id);
-                };
-                table.__instrumented = true;
+        // Pre-flight validator: tests each species in a team against the
+        // real Dex species/abilities/moves tables individually, inside its
+        // own try/catch, so a single bad species can be identified by name
+        // instead of crashing the whole battle init with a generic error.
+        globalThis.validateTeamSpecies = function(team, battleDexRef) {
+          var problems = [];
+          if (!battleDexRef) return problems;
+          for (var i = 0; i < team.length; i++) {
+            var mon = team[i];
+            var speciesId = globalThis.toID(mon.species || mon.name || '');
+            if (!speciesId) continue;
+
+            try {
+              var speciesEntry = battleDexRef.species && typeof battleDexRef.species.get === 'function'
+                ? battleDexRef.species.get(speciesId)
+                : null;
+              if (!speciesEntry || speciesEntry.exists === false) {
+                problems.push(mon.species + ': species not found in Dex');
+                continue;
               }
-            });
-          } catch (e) {
-            globalThis.logBuffer.push('|debug-instrument-error| ' + (e && e.message ? e.message : String(e)));
+            } catch (speciesErr) {
+              problems.push(mon.species + ': species lookup crashed — ' + (speciesErr && speciesErr.message ? speciesErr.message : String(speciesErr)));
+              continue;
+            }
+
+            try {
+              if (mon.ability) {
+                var abilityId = globalThis.toID(mon.ability);
+                var abilityEntry = battleDexRef.abilities && typeof battleDexRef.abilities.get === 'function'
+                  ? battleDexRef.abilities.get(abilityId)
+                  : null;
+                if (!abilityEntry || abilityEntry.exists === false) {
+                  problems.push(mon.species + ': ability "' + mon.ability + '" not found in Dex');
+                }
+              }
+            } catch (abilityErr) {
+              problems.push(mon.species + ': ability lookup crashed — ' + (abilityErr && abilityErr.message ? abilityErr.message : String(abilityErr)));
+            }
+
+            var moveList = Array.isArray(mon.moves) ? mon.moves : [];
+            for (var j = 0; j < moveList.length; j++) {
+              try {
+                var moveId = globalThis.toID(moveList[j]);
+                var moveEntry = battleDexRef.moves && typeof battleDexRef.moves.get === 'function'
+                  ? battleDexRef.moves.get(moveId)
+                  : null;
+                if (!moveEntry || moveEntry.exists === false) {
+                  problems.push(mon.species + ': move "' + moveList[j] + '" not found in Dex');
+                }
+              } catch (moveErr) {
+                problems.push(mon.species + ': move "' + moveList[j] + '" lookup crashed — ' + (moveErr && moveErr.message ? moveErr.message : String(moveErr)));
+              }
+            }
           }
-        })();
+          return problems;
+        };
 
         globalThis.startVGCBattle = function(formatId, p1TeamData, p2TeamData) {
           globalThis.logBuffer = [];
@@ -803,6 +837,42 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               BattleCtor.prototype._patchedStart = true;
             }
 
+            // Pre-flight validation pass: build a throwaway battle instance
+            // purely to get a working Dex, then test every species/ability/
+            // move in both teams individually. This catches a bad species
+            // by name BEFORE the real battle setup runs, instead of letting
+            // it crash addPokemon/Side/setPlayer with a generic error.
+            try {
+              var probeBattle = new BattleCtor({
+                formatid: formatId,
+                gameType: 'doubles',
+                send: function() {}
+              });
+              var probeDex = probeBattle.dex || probeBattle.gen || null;
+              if (probeDex) {
+                var p1Problems = globalThis.validateTeamSpecies(p1Team, probeDex);
+                var p2Problems = globalThis.validateTeamSpecies(p2Team, probeDex);
+                var allProblems = p1Problems.map(function(p) { return 'P1 ' + p; })
+                  .concat(p2Problems.map(function(p) { return 'P2 ' + p; }));
+                if (allProblems.length > 0) {
+                  for (var pi = 0; pi < allProblems.length; pi++) {
+                    globalThis.logBuffer.push('|debug-validation-fail| ' + allProblems[pi]);
+                  }
+                  globalThis.logBuffer.push('|error| Team validation failed: ' + allProblems.join('; '));
+                  return 'ERROR: Team validation failed - ' + allProblems.join('; ');
+                } else {
+                  globalThis.logBuffer.push('|debug-validation| all species/abilities/moves passed pre-flight validation');
+                }
+              } else {
+                globalThis.logBuffer.push('|debug-validation-skipped| probe battle had no accessible dex');
+              }
+            } catch (probeErr) {
+              globalThis.logBuffer.push('|debug-validation-error| pre-flight probe itself crashed: ' + (probeErr && probeErr.message ? probeErr.message : String(probeErr)));
+              // Don't block battle start just because the probe crashed —
+              // fall through and let the real battle attempt proceed, since
+              // the probe crashing is itself informative but not fatal.
+            }
+
             var battleInstance = new BattleCtor({
               formatid: formatId,
               gameType: 'doubles',
@@ -816,86 +886,6 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             });
 
             globalThis.battle = battleInstance;
-
-            // Instrument the battle's own Dex accessor tables (these may be
-            // different object instances than any module-level Dex object,
-            // e.g. battleInstance.dex), so we can see exactly which species/
-            // item/ability ID is being looked up right before any crash.
-            try {
-              var battleDex = battleInstance.dex || battleInstance.gen || null;
-              if (battleDex) {
-                ['species', 'items', 'abilities', 'moves'].forEach(function(tableName) {
-                  var table = battleDex[tableName];
-                  if (table && typeof table.get === 'function' && !table.__instrumented) {
-                    var origGet = table.get.bind(table);
-                    table.get = function(id) {
-                      globalThis.logBuffer.push('|debug-dex-get| table=' + tableName + ' id=' + JSON.stringify(id));
-                      if (tableName === 'species') {
-                        try {
-                          var rawEntry = globalThis.PSStaticData && globalThis.PSStaticData.base && globalThis.PSStaticData.base.pokedex
-                            ? globalThis.PSStaticData.base.pokedex[globalThis.toID(id)]
-                            : undefined;
-                          globalThis.logBuffer.push('|debug-species-raw| id=' + JSON.stringify(id) + ' rawEntryKeys=' + (rawEntry ? JSON.stringify(Object.keys(rawEntry)) : 'MISSING_FROM_POKEDEX'));
-                          if (rawEntry && globalThis.toID(id) === 'kingambit') {
-                            globalThis.logBuffer.push('|debug-kingambit-full| ' + JSON.stringify(rawEntry));
-                            globalThis.logBuffer.push('|debug-kingambit-abilities-type| ' + typeof rawEntry.abilities + ' value=' + JSON.stringify(rawEntry.abilities));
-                            globalThis.logBuffer.push('|debug-kingambit-evocond-type| ' + typeof rawEntry.evoCondition + ' value=' + JSON.stringify(rawEntry.evoCondition));
-                            globalThis.logBuffer.push('|debug-kingambit-evotype-type| ' + typeof rawEntry.evoType + ' value=' + JSON.stringify(rawEntry.evoType));
-                          }
-                        } catch (dumpErr) {
-                          globalThis.logBuffer.push('|debug-species-raw-error| ' + (dumpErr && dumpErr.message ? dumpErr.message : String(dumpErr)));
-                        }
-                      }
-                      try {
-                        return origGet(id);
-                      } catch (getErr) {
-                        globalThis.logBuffer.push('|debug-getter-crash| table=' + tableName + ' id=' + JSON.stringify(id) + ' errMsg=' + (getErr && getErr.message ? getErr.message : String(getErr)) + ' errStack=' + (getErr && getErr.stack ? getErr.stack.replace(/\\n/g, ' | ').substring(0, 500) : 'no-stack'));
-                        throw getErr;
-                      }
-                    };
-                    table.__instrumented = true;
-                  }
-                });
-                globalThis.logBuffer.push('|debug-instrument| wrapped battleInstance.dex tables successfully');
-
-                try {
-                  var abilitiesTable2 = battleDex.abilities;
-                  if (abilitiesTable2 && typeof abilitiesTable2.get === 'function') {
-                    ['defiant', 'supremeoverlord', 'pressure'].forEach(function(abId) {
-                      var abEntry = abilitiesTable2.get(abId);
-                      globalThis.logBuffer.push('|debug-ability-raw| id=' + abId + ' entry=' + (abEntry ? JSON.stringify(abEntry) : 'NULL_OR_UNDEFINED'));
-                    });
-                  } else {
-                    globalThis.logBuffer.push('|debug-abilities-table| battleDex.abilities.get not a function, typeof=' + typeof (abilitiesTable2 && abilitiesTable2.get));
-                  }
-                } catch (abDumpErr) {
-                  globalThis.logBuffer.push('|debug-ability-dump-error| ' + (abDumpErr && abDumpErr.message ? abDumpErr.message : String(abDumpErr)));
-                }
-
-                try {
-                  var learnsetsData = globalThis.PSStaticData && globalThis.PSStaticData.base ? globalThis.PSStaticData.base.learnsets : null;
-                  var kingambitLearnset = learnsetsData ? learnsetsData['kingambit'] : undefined;
-                  globalThis.logBuffer.push('|debug-kingambit-learnset| exists=' + (kingambitLearnset !== undefined) + ' value=' + JSON.stringify(kingambitLearnset).substring(0, 300));
-
-                  var formatsData = globalThis.PSStaticData && globalThis.PSStaticData.base ? globalThis.PSStaticData.base['formats-data'] : null;
-                  var kingambitFormatsEntry = formatsData ? formatsData['kingambit'] : undefined;
-                  globalThis.logBuffer.push('|debug-kingambit-formatsdata| exists=' + (kingambitFormatsEntry !== undefined) + ' value=' + JSON.stringify(kingambitFormatsEntry));
-
-                  if (battleDex.learnsets && typeof battleDex.learnsets.get === 'function') {
-                    var learnsetViaGet = battleDex.learnsets.get('kingambit');
-                    globalThis.logBuffer.push('|debug-kingambit-learnset-viaget| ' + JSON.stringify(learnsetViaGet).substring(0, 300));
-                  } else {
-                    globalThis.logBuffer.push('|debug-learnsets-table| battleDex.learnsets.get not available, typeof=' + typeof (battleDex.learnsets && battleDex.learnsets.get));
-                  }
-                } catch (lsDumpErr) {
-                  globalThis.logBuffer.push('|debug-learnset-dump-error| ' + (lsDumpErr && lsDumpErr.message ? lsDumpErr.message : String(lsDumpErr)));
-                }
-              } else {
-                globalThis.logBuffer.push('|debug-instrument| battleInstance.dex not found, trying global Dex fallback');
-              }
-            } catch (instrErr) {
-              globalThis.logBuffer.push('|debug-instrument-error| ' + (instrErr && instrErr.message ? instrErr.message : String(instrErr)));
-            }
 
             if (typeof battleInstance.setPlayer === 'function') {
               battleInstance.setPlayer('p1', { name: 'Player 1', team: p1Team });
