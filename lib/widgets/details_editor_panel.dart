@@ -151,9 +151,29 @@ class DetailsEditorPanel extends StatelessWidget {
                   isDense: true,
                   border: OutlineInputBorder(),
                 ),
-                items: allNatures
-                    .map((n) => DropdownMenuItem(value: n.name, child: Text(n.name)))
-                    .toList(),
+                selectedItemBuilder: (context) {
+                  return allNatures.map((n) {
+                    return Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        n.name,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    );
+                  }).toList();
+                },
+                items: allNatures.map((n) {
+                  final String boostText = (n.boosted != null && n.lowered != null)
+                      ? ' (+${n.boosted}, -${n.lowered})'
+                      : ' (neutral)';
+                  return DropdownMenuItem(
+                    value: n.name,
+                    child: Text(
+                      '${n.name}$boostText',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  );
+                }).toList(),
                 onChanged: (val) {
                   if (val != null) onChanged(nature: val);
                 },
