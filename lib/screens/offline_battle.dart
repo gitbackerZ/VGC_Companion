@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_js/flutter_js.dart';
+import '../services/js_engine_service.dart';
 
 enum BattleStage { setup, teamPreview, inBattle, ended }
 
@@ -16,7 +17,8 @@ class OfflineBattleScreen extends StatefulWidget {
 }
 
 class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
-  JavascriptRuntime? _jsRuntime;
+  final JsEngineService _engineService = JsEngineService();
+  JavascriptRuntime? get _jsRuntime => _engineService.runtime;
   Timer? _logTimer;
   bool _isLoading = false;
   BattleStage _stage = BattleStage.setup;
@@ -166,241 +168,11 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
   Future<void> _initEngine() async {
     try {
-      final runtime = getJavascriptRuntime();
-      final engineCode = await rootBundle.loadString('assets/engine.js');
-
-      const String polyfillsScript = '''
-        globalThis.global = globalThis;
-        globalThis.window = globalThis;
-        globalThis.self = globalThis;
-        globalThis.root = globalThis;
-        globalThis.navigator = { userAgent: 'Node.js' };
-
-        if (typeof globalThis.setImmediate === 'undefined') {
-          globalThis.setImmediate = function(fn) {
-            var args = Array.prototype.slice.call(arguments, 1);
-            return setTimeout(function() { fn.apply(null, args); }, 0);
-          };
-        }
-
-        if (typeof globalThis.clearImmediate === 'undefined') {
-          globalThis.clearImmediate = function(id) { clearTimeout(id); };
-        }
-
-        if (typeof globalThis.queueMicrotask === 'undefined') {
-          globalThis.queueMicrotask = function(cb) {
-            Promise.resolve().then(cb).catch(function(e) {
-              setTimeout(function() { throw e; }, 0);
-            });
-          };
-        }
-
-        if (!globalThis.process) {
-          globalThis.process = {
-            env: { NODE_ENV: 'production' },
-            argv: [],
-            nextTick: function(cb) { globalThis.setImmediate(cb); },
-            cwd: function() { return ''; }
-          };
-        }
-
-        if (!globalThis.performance) {
-          globalThis.performance = { now: function() { return Date.now(); } };
-        }
-
-        if (!globalThis.crypto) {
-          globalThis.crypto = {
-            getRandomValues: function(buffer) {
-              for (var i = 0; i < buffer.length; i++) {
-                buffer[i] = Math.floor(Math.random() * 256);
-              }
-              return buffer;
-            }
-          };
-        }
-
-        if (typeof globalThis.TextEncoder === 'undefined') {
-          globalThis.TextEncoder = function TextEncoder() {};
-          globalThis.TextEncoder.prototype.encode = function(s) {
-            var arr = new Uint8Array(s.length);
-            for (var i = 0; i < s.length; i++) arr[i] = s.charCodeAt(i);
-            return arr;
-          };
-        }
-
-        if (typeof globalThis.TextDecoder === 'undefined') {
-          globalThis.TextDecoder = function TextDecoder() {};
-          globalThis.TextDecoder.prototype.decode = function(arr) {
-            return String.fromCharCode.apply(null, arr);
-          };
-        }
-
-        (function patchObjectEntries() {
-          var origEntries = Object.entries;
-          Object.entries = function(obj) {
-            if (obj === undefined || obj === null) return [];
-            return origEntries(obj);
-          };
-          var origKeys = Object.keys;
-          Object.keys = function(obj) {
-            if (obj === undefined || obj === null) return [];
-            return origKeys(obj);
-          };
-          var origValues = Object.values;
-          Object.values = function(obj) {
-            if (obj === undefined || obj === null) return [];
-            return origValues(obj);
-          };
-        })();
-
-        var exp = {};
-        globalThis.exports = exp;
-        globalThis.module = { exports: exp };
-
-        var fsStub = {
-          readFileSync: function() { return ''; },
-          existsSync: function(filePath) {
-            if (typeof filePath === 'string' && (filePath.includes('champions') || filePath.includes('championsregma'))) {
-              return true; 
-            }
-            return false;
-          },
-          readdirSync: function(dirPath, options) {
-            if (typeof dirPath === 'string' && (dirPath.includes('mods') || dirPath.endsWith('mods'))) {
-              return ['champions', 'championsregma'];
-            }
-            return [];
-          },
-          statSync: function() { return { isDirectory: function() { return true; }, isFile: function() { return false; } }; }
-        };
-
-        var dummyModules = {
-          fs: fsStub,
-          'node:fs': fsStub,
-          path: { resolve: function() { return ''; }, join: function() { return ''; }, dirname: function() { return ''; }, basename: function() { return ''; }, extname: function() { return ''; } },
-          'node:path': { resolve: function() { return ''; }, join: function() { return ''; }, dirname: function() { return ''; }, basename: function() { return ''; }, extname: function() { return ''; } },
-          util: { inspect: function(o) { return String(o); }, inherits: function() {} },
-          'node:util': { inspect: function(o) { return String(o); }, inherits: function() {} },
-          os: { platform: function() { return 'browser'; }, homedir: function() { return ''; } },
-          'node:os': { platform: function() { return 'browser'; }, homedir: function() { return ''; } },
-          events: function EventEmitter() {},
-          crypto: globalThis.crypto || {},
-          buffer: { Buffer: { isBuffer: function() { return false; }, from: function() { return []; } } }
-        };
-
-        globalThis.fs2 = fsStub;
-
-        if (!globalThis.require) {
-          globalThis.require = function(id) {
-            if (dummyModules[id]) return dummyModules[id];
-            if (globalThis[id]) return globalThis[id];
-
-            if (globalThis.PSStaticData) {
-              var dataKeyMap = {
-                abilities: 'Abilities',
-                rulesets: 'Rulesets',
-                'formats-data': 'FormatsData',
-                items: 'Items',
-                learnsets: 'Learnsets',
-                moves: 'Moves',
-                natures: 'Natures',
-                pokedex: 'Pokedex',
-                scripts: 'Scripts',
-                conditions: 'Conditions',
-                typechart: 'TypeChart',
-                aliases: 'Aliases',
-              };
-              var safetyArrays = ['Formats', 'Aliases', 'CompoundWordNames'];
-              var safetyObjects = ['Scripts', 'FormatsData', 'Learnsets', 'Pokedex', 'Moves', 'Abilities', 'Items', 'Natures', 'TypeChart', 'Conditions', 'PokemonGoData', 'Rulesets'];
-
-              function withSafetyDefaults(result) {
-                for (var a = 0; a < safetyArrays.length; a++) {
-                  if (typeof result[safetyArrays[a]] === 'undefined') {
-                    result[safetyArrays[a]] = [];
-                  }
-                }
-                for (var o = 0; o < safetyObjects.length; o++) {
-                  if (typeof result[safetyObjects[o]] === 'undefined') {
-                    result[safetyObjects[o]] = {};
-                  }
-                }
-                if (result.Scripts && typeof result.Scripts.gen === 'undefined') {
-                  result.Scripts.gen = 9;
-                }
-                return result;
-              }
-
-              var lowerId = String(id).toLowerCase();
-              for (var fileKey in dataKeyMap) {
-                if (lowerId.indexOf(fileKey) !== -1 && lowerId.indexOf('mods/champions') === -1 && lowerId.indexOf('mods/championsregma') === -1) {
-                  var exportName = dataKeyMap[fileKey];
-                  var result = {};
-                  result[exportName] = globalThis.PSStaticData.base[fileKey] || {};
-                  return withSafetyDefaults(result);
-                }
-              }
-              if (lowerId.indexOf('championsregma') !== -1) {
-                for (var fileKey2 in dataKeyMap) {
-                  if (lowerId.indexOf(fileKey2) !== -1) {
-                    var exportName2 = dataKeyMap[fileKey2];
-                    var result2 = {};
-                    result2[exportName2] = (globalThis.PSStaticData.mods.championsregma && globalThis.PSStaticData.mods.championsregma[fileKey2]) || {};
-                    return withSafetyDefaults(result2);
-                  }
-                }
-              }
-              if (lowerId.indexOf('champions') !== -1) {
-                for (var fileKey3 in dataKeyMap) {
-                  if (lowerId.indexOf(fileKey3) !== -1) {
-                    var exportName3 = dataKeyMap[fileKey3];
-                    var result3 = {};
-                    result3[exportName3] = (globalThis.PSStaticData.mods.champions && globalThis.PSStaticData.mods.champions[fileKey3]) || {};
-                    return withSafetyDefaults(result3);
-                  }
-                }
-              }
-
-              if (lowerId.indexOf('custom-formats') !== -1) {
-                return { Formats: [] };
-              }
-              if (lowerId.indexOf('config/formats') !== -1) {
-                return { Formats: globalThis.PSStaticData.configFormats || [] };
-              }
-            }
-
-            var fallback = globalThis.module.exports || globalThis.exports || {};
-            var knownArrays = ['Formats', 'Aliases', 'CompoundWordNames'];
-            var knownObjects = ['Scripts', 'FormatsData', 'Learnsets', 'Aliases', 'Pokedex', 'Movedex', 'Moves', 'Abilities', 'Items', 'Natures', 'TypeChart', 'Conditions', 'PokemonGoData', 'Rulesets', 'Species', 'TextData', 'Text'];
-
-            for (var i = 0; i < knownArrays.length; i++) {
-              if (typeof fallback[knownArrays[i]] === 'undefined') {
-                fallback[knownArrays[i]] = [];
-              }
-            }
-            for (var i = 0; i < knownObjects.length; i++) {
-              if (typeof fallback[knownObjects[i]] === 'undefined') {
-                fallback[knownObjects[i]] = {};
-              }
-            }
-            if (fallback.Scripts && typeof fallback.Scripts.gen === 'undefined') {
-              fallback.Scripts.gen = 9;
-            }
-            return fallback;
-          };
-        }
-
-        globalThis.__dirname = '';
-        globalThis.__filename = 'engine.js';
-
-        globalThis.logBuffer = [];
-      ''';
-
-      runtime.evaluate(polyfillsScript);
-
-      final engineEval = runtime.evaluate(engineCode);
-      if (engineEval.isError) {
-        throw Exception('engine.js execution error: ${engineEval.stringResult}');
+      await _engineService.init();
+      if (!_engineService.isReady || _jsRuntime == null) {
+        throw Exception('Shared JS engine failed to initialize.');
       }
+      final runtime = _jsRuntime!;
 
       final String helperScript = '''
         (function resolveBattleConstructor() {
@@ -911,7 +683,6 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       }
 
       setState(() {
-        _jsRuntime = runtime;
         _isLoading = false;
         _statusMessage = 'Engine ready. Format active.';
       });
@@ -1620,7 +1391,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   void dispose() {
     _logTimer?.cancel();
     _announceDrainTimer?.cancel();
-    _jsRuntime?.dispose();
+    _engineService.release();
     _p1TeamController.dispose();
     _p2TeamController.dispose();
     super.dispose();

@@ -11,7 +11,20 @@ class JsEngineService {
   JavascriptRuntime? _jsRuntime;
   bool _isInitialized = false;
 
+  // Reference-counted lifecycle: multiple screens (Team Builder, Offline
+  // Battle) share this one runtime. init() is idempotent and increments
+  // the count; release() decrements it and only tears down the runtime
+  // once nobody else is holding a reference.
+  int _refCount = 0;
+
+  /// Exposes the raw runtime for callers (e.g. OfflineBattleScreen) that
+  /// need to evaluate battle-flow-specific scripts (starting a battle,
+  /// sending actions, polling logs) not covered by this service's own
+  /// higher-level Dex-lookup methods.
+  JavascriptRuntime? get runtime => _jsRuntime;
+
   Future<void> init() async {
+    _refCount++;
     if (_isInitialized) return;
 
     _jsRuntime = getJavascriptRuntime();
@@ -19,24 +32,49 @@ class JsEngineService {
     try {
       final engineJs = await rootBundle.loadString('assets/engine.js');
 
-      // engine.js is a bundled esbuild IIFE (Node-target) that still expects
-      // a minimal Node-like environment for the handful of externals left
-      // un-bundled (e.g. node-oom-heapdump, better-sqlite3) and for globals
-      // like process/crypto used internally by the sim. This mirrors the
-      // polyfill scaffolding used by the offline battle screen.
+      // Full polyfill set — merged from the offline battle screen's
+      // requirements (setImmediate/queueMicrotask/TextEncoder/TextDecoder/
+      // full dummyModules map for path/util/os/events/buffer) plus the
+      // original lighter Team-Builder-oriented set. engine.js is shared by
+      // both screens now, so it needs to satisfy whichever caller has the
+      // heavier requirements (the battle simulator).
       const String polyfills = '''
         globalThis.global = globalThis;
         globalThis.window = globalThis;
         globalThis.self = globalThis;
+        globalThis.root = globalThis;
         globalThis.navigator = { userAgent: 'Node.js' };
+
+        if (typeof globalThis.setImmediate === 'undefined') {
+          globalThis.setImmediate = function(fn) {
+            var args = Array.prototype.slice.call(arguments, 1);
+            return setTimeout(function() { fn.apply(null, args); }, 0);
+          };
+        }
+
+        if (typeof globalThis.clearImmediate === 'undefined') {
+          globalThis.clearImmediate = function(id) { clearTimeout(id); };
+        }
+
+        if (typeof globalThis.queueMicrotask === 'undefined') {
+          globalThis.queueMicrotask = function(cb) {
+            Promise.resolve().then(cb).catch(function(e) {
+              setTimeout(function() { throw e; }, 0);
+            });
+          };
+        }
 
         if (!globalThis.process) {
           globalThis.process = {
             env: { NODE_ENV: 'production' },
             argv: [],
-            nextTick: function(cb) { setTimeout(cb, 0); },
+            nextTick: function(cb) { globalThis.setImmediate(cb); },
             cwd: function() { return ''; }
           };
+        }
+
+        if (!globalThis.performance) {
+          globalThis.performance = { now: function() { return Date.now(); } };
         }
 
         if (!globalThis.crypto) {
@@ -50,16 +88,180 @@ class JsEngineService {
           };
         }
 
+        if (typeof globalThis.TextEncoder === 'undefined') {
+          globalThis.TextEncoder = function TextEncoder() {};
+          globalThis.TextEncoder.prototype.encode = function(s) {
+            var arr = new Uint8Array(s.length);
+            for (var i = 0; i < s.length; i++) arr[i] = s.charCodeAt(i);
+            return arr;
+          };
+        }
+
+        if (typeof globalThis.TextDecoder === 'undefined') {
+          globalThis.TextDecoder = function TextDecoder() {};
+          globalThis.TextDecoder.prototype.decode = function(arr) {
+            return String.fromCharCode.apply(null, arr);
+          };
+        }
+
+        (function patchObjectEntries() {
+          var origEntries = Object.entries;
+          Object.entries = function(obj) {
+            if (obj === undefined || obj === null) return [];
+            return origEntries(obj);
+          };
+          var origKeys = Object.keys;
+          Object.keys = function(obj) {
+            if (obj === undefined || obj === null) return [];
+            return origKeys(obj);
+          };
+          var origValues = Object.values;
+          Object.values = function(obj) {
+            if (obj === undefined || obj === null) return [];
+            return origValues(obj);
+          };
+        })();
+
+        var exp = {};
+        globalThis.exports = exp;
+        globalThis.module = { exports: exp };
+
+        var fsStub = {
+          readFileSync: function() { return ''; },
+          existsSync: function(filePath) {
+            if (typeof filePath === 'string' && (filePath.includes('champions') || filePath.includes('championsregma'))) {
+              return true;
+            }
+            return false;
+          },
+          readdirSync: function(dirPath, options) {
+            if (typeof dirPath === 'string' && (dirPath.includes('mods') || dirPath.endsWith('mods'))) {
+              return ['champions', 'championsregma'];
+            }
+            return [];
+          },
+          statSync: function() { return { isDirectory: function() { return true; }, isFile: function() { return false; } }; }
+        };
+
+        var dummyModules = {
+          fs: fsStub,
+          'node:fs': fsStub,
+          path: { resolve: function() { return ''; }, join: function() { return ''; }, dirname: function() { return ''; }, basename: function() { return ''; }, extname: function() { return ''; } },
+          'node:path': { resolve: function() { return ''; }, join: function() { return ''; }, dirname: function() { return ''; }, basename: function() { return ''; }, extname: function() { return ''; } },
+          util: { inspect: function(o) { return String(o); }, inherits: function() {} },
+          'node:util': { inspect: function(o) { return String(o); }, inherits: function() {} },
+          os: { platform: function() { return 'browser'; }, homedir: function() { return ''; } },
+          'node:os': { platform: function() { return 'browser'; }, homedir: function() { return ''; } },
+          events: function EventEmitter() {},
+          crypto: globalThis.crypto || {},
+          buffer: { Buffer: { isBuffer: function() { return false; }, from: function() { return []; } } }
+        };
+
+        globalThis.fs2 = fsStub;
+
         if (!globalThis.require) {
           globalThis.require = function(id) {
-            // Only externals left un-bundled by esbuild should hit this —
-            // stub them out since neither is needed for Dex lookups.
-            return {};
+            if (dummyModules[id]) return dummyModules[id];
+            if (globalThis[id]) return globalThis[id];
+
+            if (globalThis.PSStaticData) {
+              var dataKeyMap = {
+                abilities: 'Abilities',
+                rulesets: 'Rulesets',
+                'formats-data': 'FormatsData',
+                items: 'Items',
+                learnsets: 'Learnsets',
+                moves: 'Moves',
+                natures: 'Natures',
+                pokedex: 'Pokedex',
+                scripts: 'Scripts',
+                conditions: 'Conditions',
+                typechart: 'TypeChart',
+                aliases: 'Aliases',
+              };
+              var safetyArrays = ['Formats', 'Aliases', 'CompoundWordNames'];
+              var safetyObjects = ['Scripts', 'FormatsData', 'Learnsets', 'Pokedex', 'Moves', 'Abilities', 'Items', 'Natures', 'TypeChart', 'Conditions', 'PokemonGoData', 'Rulesets'];
+
+              function withSafetyDefaults(result) {
+                for (var a = 0; a < safetyArrays.length; a++) {
+                  if (typeof result[safetyArrays[a]] === 'undefined') {
+                    result[safetyArrays[a]] = [];
+                  }
+                }
+                for (var o = 0; o < safetyObjects.length; o++) {
+                  if (typeof result[safetyObjects[o]] === 'undefined') {
+                    result[safetyObjects[o]] = {};
+                  }
+                }
+                if (result.Scripts && typeof result.Scripts.gen === 'undefined') {
+                  result.Scripts.gen = 9;
+                }
+                return result;
+              }
+
+              var lowerId = String(id).toLowerCase();
+              for (var fileKey in dataKeyMap) {
+                if (lowerId.indexOf(fileKey) !== -1 && lowerId.indexOf('mods/champions') === -1 && lowerId.indexOf('mods/championsregma') === -1) {
+                  var exportName = dataKeyMap[fileKey];
+                  var result = {};
+                  result[exportName] = globalThis.PSStaticData.base[fileKey] || {};
+                  return withSafetyDefaults(result);
+                }
+              }
+              if (lowerId.indexOf('championsregma') !== -1) {
+                for (var fileKey2 in dataKeyMap) {
+                  if (lowerId.indexOf(fileKey2) !== -1) {
+                    var exportName2 = dataKeyMap[fileKey2];
+                    var result2 = {};
+                    result2[exportName2] = (globalThis.PSStaticData.mods.championsregma && globalThis.PSStaticData.mods.championsregma[fileKey2]) || {};
+                    return withSafetyDefaults(result2);
+                  }
+                }
+              }
+              if (lowerId.indexOf('champions') !== -1) {
+                for (var fileKey3 in dataKeyMap) {
+                  if (lowerId.indexOf(fileKey3) !== -1) {
+                    var exportName3 = dataKeyMap[fileKey3];
+                    var result3 = {};
+                    result3[exportName3] = (globalThis.PSStaticData.mods.champions && globalThis.PSStaticData.mods.champions[fileKey3]) || {};
+                    return withSafetyDefaults(result3);
+                  }
+                }
+              }
+
+              if (lowerId.indexOf('custom-formats') !== -1) {
+                return { Formats: [] };
+              }
+              if (lowerId.indexOf('config/formats') !== -1) {
+                return { Formats: globalThis.PSStaticData.configFormats || [] };
+              }
+            }
+
+            var fallback = globalThis.module.exports || globalThis.exports || {};
+            var knownArrays = ['Formats', 'Aliases', 'CompoundWordNames'];
+            var knownObjects = ['Scripts', 'FormatsData', 'Learnsets', 'Aliases', 'Pokedex', 'Movedex', 'Moves', 'Abilities', 'Items', 'Natures', 'TypeChart', 'Conditions', 'PokemonGoData', 'Rulesets', 'Species', 'TextData', 'Text'];
+
+            for (var i = 0; i < knownArrays.length; i++) {
+              if (typeof fallback[knownArrays[i]] === 'undefined') {
+                fallback[knownArrays[i]] = [];
+              }
+            }
+            for (var i = 0; i < knownObjects.length; i++) {
+              if (typeof fallback[knownObjects[i]] === 'undefined') {
+                fallback[knownObjects[i]] = {};
+              }
+            }
+            if (fallback.Scripts && typeof fallback.Scripts.gen === 'undefined') {
+              fallback.Scripts.gen = 9;
+            }
+            return fallback;
           };
         }
 
         globalThis.__dirname = '';
         globalThis.__filename = 'engine.js';
+
+        globalThis.logBuffer = [];
       ''';
 
       _jsRuntime!.evaluate(polyfills);
@@ -98,13 +300,21 @@ class JsEngineService {
 
   String _toId(String text) => text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
 
-  void dispose() {
-    if (_jsRuntime != null) {
+  /// Call this instead of holding onto the runtime forever. Decrements the
+  /// reference count and only actually tears down the JS runtime once no
+  /// screen is using it anymore.
+  void release() {
+    if (_refCount > 0) _refCount--;
+    if (_refCount == 0 && _jsRuntime != null) {
       _jsRuntime!.dispose();
       _jsRuntime = null;
       _isInitialized = false;
     }
   }
+
+  /// Deprecated alias — kept so existing call sites (dispose()) don't need
+  /// an immediate rename; forwards to release().
+  void dispose() => release();
 
   /// Direct Showdown lookup to find Mega or Primal form matching a held item
   Future<String?> getMegaFormForHeldItem(String speciesName, String heldItem) async {
