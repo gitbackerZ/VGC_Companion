@@ -363,12 +363,16 @@ class JsEngineService {
     final script = '''
       (function() {
         if (!Dex || !Dex.items) return JSON.stringify([]);
-        var items = Dex.items.all();
+
+        var itemKeys = (globalThis.PSStaticData && globalThis.PSStaticData.base && globalThis.PSStaticData.base.items)
+          ? Object.keys(globalThis.PSStaticData.base.items)
+          : [];
+
         var result = [];
-        for (var i = 0; i < items.length; i++) {
-          var item = items[i];
+        for (var i = 0; i < itemKeys.length; i++) {
+          var item = Dex.items.get(itemKeys[i]);
           if (!item || !item.exists) continue;
-          
+
           var isPastGen = item.isNonstandard === 'Past';
           var isMegaStone = !!item.megaStone || !!item.megaEvolves;
           var isStandard = !item.isNonstandard;
@@ -391,14 +395,23 @@ class JsEngineService {
     final script = '''
       (function() {
         if (!Dex || !Dex.species) return JSON.stringify([]);
-        var speciesList = Dex.species.all();
+
+        // Dex.species.all() depends on the real sim's internal data-loading
+        // path, which may not be fully populated outside a running Battle.
+        // Enumerate directly from the known-good static Pokedex snapshot
+        // instead, resolving each entry through Dex.species.get() to get
+        // the fully processed object (otherFormes, baseStats, etc.).
+        var pokedexKeys = (globalThis.PSStaticData && globalThis.PSStaticData.base && globalThis.PSStaticData.base.pokedex)
+          ? Object.keys(globalThis.PSStaticData.base.pokedex)
+          : [];
+
         var results = [];
         var seenNum = {};
 
-        for (var i = 0; i < speciesList.length; i++) {
-          var spec = speciesList[i];
+        for (var i = 0; i < pokedexKeys.length; i++) {
+          var spec = Dex.species.get(pokedexKeys[i]);
           if (!spec || !spec.exists || spec.num <= 0) continue;
-          
+
           var isMega = spec.forme && spec.forme.indexOf('Mega') !== -1;
           var isGmax = spec.forme && spec.forme.indexOf('Gmax') !== -1;
           if (isMega || isGmax) continue;
