@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'screens/damage_calculator.dart';
 import 'screens/team_builder.dart';
 import 'screens/offline_battle.dart';
 
@@ -67,18 +66,6 @@ class HomeScreen extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Semantics(
-              button: true,
-              label: 'Open Damage Calculator',
-              child: ElevatedButton(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const DamageCalculatorScreen()),
-                ),
-                child: const Text('Damage Calculator'),
-              ),
-            ),
-            const SizedBox(height: 20),
             Semantics(
               button: true,
               label: 'Open Team Builder',
