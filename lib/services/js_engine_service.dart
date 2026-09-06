@@ -17,13 +17,77 @@ class JsEngineService {
     _jsRuntime = getJavascriptRuntime();
 
     try {
-      final dexJs = await rootBundle.loadString('assets/js/dex.js');
-      _jsRuntime!.evaluate(dexJs);
+      final engineJs = await rootBundle.loadString('assets/engine.js');
 
-      final learnsetsJsonText = await rootBundle.loadString('assets/js/learnsets.json');
-      final escapedJson = jsonEncode(learnsetsJsonText);
-      _jsRuntime!.evaluate('Dex.data.Learnsets = JSON.parse($escapedJson);');
-      
+      // engine.js is a bundled esbuild IIFE (Node-target) that still expects
+      // a minimal Node-like environment for the handful of externals left
+      // un-bundled (e.g. node-oom-heapdump, better-sqlite3) and for globals
+      // like process/crypto used internally by the sim. This mirrors the
+      // polyfill scaffolding used by the offline battle screen.
+      const String polyfills = '''
+        globalThis.global = globalThis;
+        globalThis.window = globalThis;
+        globalThis.self = globalThis;
+        globalThis.navigator = { userAgent: 'Node.js' };
+
+        if (!globalThis.process) {
+          globalThis.process = {
+            env: { NODE_ENV: 'production' },
+            argv: [],
+            nextTick: function(cb) { setTimeout(cb, 0); },
+            cwd: function() { return ''; }
+          };
+        }
+
+        if (!globalThis.crypto) {
+          globalThis.crypto = {
+            getRandomValues: function(buffer) {
+              for (var i = 0; i < buffer.length; i++) {
+                buffer[i] = Math.floor(Math.random() * 256);
+              }
+              return buffer;
+            }
+          };
+        }
+
+        if (!globalThis.require) {
+          globalThis.require = function(id) {
+            // Only externals left un-bundled by esbuild should hit this —
+            // stub them out since neither is needed for Dex lookups.
+            return {};
+          };
+        }
+
+        globalThis.__dirname = '';
+        globalThis.__filename = 'engine.js';
+      ''';
+
+      _jsRuntime!.evaluate(polyfills);
+
+      final engineEval = _jsRuntime!.evaluate(engineJs);
+      if (engineEval.isError) {
+        throw Exception('engine.js execution error: ${engineEval.stringResult}');
+      }
+
+      // engine.js exposes globalThis.PSSim = { Battle, Dex, Teams, PRNG } —
+      // not a bare global `Dex`. Bridge it so every script below (which
+      // references a bare `Dex`) keeps working unmodified.
+      final bridgeEval = _jsRuntime!.evaluate('''
+        if (globalThis.PSSim && globalThis.PSSim.Dex && !globalThis.Dex) {
+          globalThis.Dex = globalThis.PSSim.Dex;
+        }
+        if (globalThis.Dex && globalThis.PSStaticData && globalThis.PSStaticData.base) {
+          globalThis.Dex.data = globalThis.Dex.data || {};
+          if (!globalThis.Dex.data.Learnsets) {
+            globalThis.Dex.data.Learnsets = globalThis.PSStaticData.base.learnsets || {};
+          }
+        }
+        Boolean(globalThis.Dex);
+      ''');
+      if (bridgeEval.isError || bridgeEval.stringResult != 'true') {
+        throw Exception('Failed to bridge PSSim.Dex to global Dex: ${bridgeEval.stringResult}');
+      }
+
       _isInitialized = true;
     } catch (e, stack) {
       debugPrint('Error initializing JS Engine: $e\n$stack');
