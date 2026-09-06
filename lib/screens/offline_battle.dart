@@ -495,7 +495,11 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               if (entry && entry.evoType === 'other') {
                 delete entry.evoType;
                 delete entry.evoCondition;
-                delete entry.prevo;
+                // Keep prevo intact — some sim internals assume every
+                // species has *some* evolutionary chain data, even a
+                // single 'prevo' link, when determining ability/data
+                // inheritance. Only the "other" evoType/evoCondition were
+                // the original suspects.
               }
             }
           } catch (e) {
