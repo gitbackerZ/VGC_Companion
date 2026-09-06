@@ -24,5 +24,3 @@ flutter:
   assets:
     - lib/data/
     - assets/engine.js
-    - assets/js/dex.js
-    - assets/js/learnsets.json
