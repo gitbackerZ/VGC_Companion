@@ -288,16 +288,53 @@ class JsEngineService {
         if (globalThis.PSSim && globalThis.PSSim.Dex && !globalThis.Dex) {
           globalThis.Dex = globalThis.PSSim.Dex;
         }
+        if (globalThis.PSSim && globalThis.PSSim.Battle && !globalThis.Battle) {
+          globalThis.Battle = globalThis.PSSim.Battle;
+        }
+
+        // Register the champions/championsregma mods on the Dex BEFORE
+        // anything (including the sim's own lazy format-loading getter)
+        // tries to resolve a format that declares mod: 'champions'.
+        // Without this, Dex's internal `get data` getter throws
+        // "requires nonexistent mod" the first time any format-scanning
+        // code runs (e.g. iterating configFormats).
+        try {
+          var _Dex = globalThis.Dex;
+          if (_Dex) {
+            if (!_Dex.dexes) _Dex.dexes = Object.create(null);
+            if (!_Dex.dexes.base) _Dex.dexes.base = _Dex;
+
+            var ModdedDexCtor = _Dex.ModdedDex || _Dex.constructor;
+            if (!_Dex.dexes.champions) {
+              _Dex.dexes.champions = new ModdedDexCtor('champions');
+            }
+            if (!_Dex.dexes.championsregma) {
+              _Dex.dexes.championsregma = new ModdedDexCtor('championsregma');
+            }
+
+            _Dex.modsLoaded = true;
+            if (_Dex.dexes.base) _Dex.dexes.base.modsLoaded = true;
+          }
+        } catch (modErr) {
+          globalThis.__modRegistrationError = modErr && modErr.message ? modErr.message : String(modErr);
+        }
+
         if (globalThis.Dex && globalThis.PSStaticData && globalThis.PSStaticData.base) {
           globalThis.Dex.data = globalThis.Dex.data || {};
           if (!globalThis.Dex.data.Learnsets) {
             globalThis.Dex.data.Learnsets = globalThis.PSStaticData.base.learnsets || {};
           }
         }
+        globalThis.toID = globalThis.toID || function(text) {
+          if (text && text.id) return text.id;
+          if (typeof text !== 'string' && typeof text !== 'number') return '';
+          return ('' + text).toLowerCase().replace(/[^a-z0-9]/g, '');
+        };
         Boolean(globalThis.Dex);
       ''');
       if (bridgeEval.isError || bridgeEval.stringResult != 'true') {
-        throw Exception('Failed to bridge PSSim.Dex to global Dex: ${bridgeEval.stringResult}');
+        final modErrCheck = _jsRuntime!.evaluate('globalThis.__modRegistrationError || "none"');
+        throw Exception('Failed to bridge PSSim.Dex to global Dex: ${bridgeEval.stringResult} | modRegistrationError: ${modErrCheck.stringResult}');
       }
 
       _isInitialized = true;
