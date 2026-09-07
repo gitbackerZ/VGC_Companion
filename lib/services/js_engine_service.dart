@@ -16,6 +16,11 @@ class JsEngineService {
   /// attached debug console to read debugPrint from).
   String? lastDiagnostics;
 
+  /// Captures init()'s own failure reason, since debugPrint alone isn't
+  /// visible when testing a standalone on-device build with no attached
+  /// debug console.
+  String? lastInitError;
+
   // Reference-counted lifecycle: multiple screens (Team Builder, Offline
   // Battle) share this one runtime. init() is idempotent and increments
   // the count; release() decrements it and only tears down the runtime
@@ -296,7 +301,9 @@ class JsEngineService {
       }
 
       _isInitialized = true;
+      lastInitError = null;
     } catch (e, stack) {
+      lastInitError = 'INIT FAILED: $e\nSTACK: $stack';
       debugPrint('Error initializing JS Engine: $e\n$stack');
     }
   }
@@ -397,7 +404,7 @@ class JsEngineService {
 
   Future<List<Map<String, dynamic>>> getBaseSpeciesList() async {
     if (!isReady) {
-      lastDiagnostics = 'NOT READY: isInitialized=$_isInitialized, jsRuntime=${_jsRuntime != null}';
+      lastDiagnostics = 'NOT READY. initError=${lastInitError ?? "(none captured — init() may not have been awaited/called yet)"}';
       return [];
     }
     final script = '''
