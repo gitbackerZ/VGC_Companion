@@ -213,6 +213,9 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         for (final member in _team) {
           _collapsedCards.add(member);
         }
+        if (baseList.isEmpty) {
+          _statusMessage = 'DIAG: ${_service.lastDiagnostics ?? "no diagnostics captured"}';
+        }
       });
 
       if (_activePreset == TeamPreset.championsVgc) {
@@ -911,19 +914,40 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                     ),
             ),
             if (_statusMessage.isNotEmpty)
-              Container(
-                width: double.infinity,
-                color: Theme.of(context).brightness == Brightness.dark ? Colors.black26 : Colors.grey[200],
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                child: Text(
-                  _statusMessage,
-                  style: TextStyle(
-                    color: Theme.of(context).brightness == Brightness.dark ? Colors.grey[400] : Colors.grey[700],
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
+              GestureDetector(
+                onTap: () {
+                  if (_statusMessage.startsWith('DIAG:')) {
+                    showDialog(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('Diagnostics'),
+                        content: SizedBox(
+                          width: double.maxFinite,
+                          child: SingleChildScrollView(
+                            child: SelectableText(_statusMessage, style: const TextStyle(fontSize: 12, fontFamily: 'monospace')),
+                          ),
+                        ),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+                        ],
+                      ),
+                    );
+                  }
+                },
+                child: Container(
+                  width: double.infinity,
+                  color: Theme.of(context).brightness == Brightness.dark ? Colors.black26 : Colors.grey[200],
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  child: Text(
+                    _statusMessage,
+                    style: TextStyle(
+                      color: Theme.of(context).brightness == Brightness.dark ? Colors.grey[400] : Colors.grey[700],
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
                 ),
               ),
           ],

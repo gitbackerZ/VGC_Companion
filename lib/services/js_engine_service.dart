@@ -11,6 +11,11 @@ class JsEngineService {
   JavascriptRuntime? _jsRuntime;
   bool _isInitialized = false;
 
+  /// Holds the most recent diagnostic info from getBaseSpeciesList(), so it
+  /// can be surfaced on-screen when testing directly on-device (no
+  /// attached debug console to read debugPrint from).
+  String? lastDiagnostics;
+
   // Reference-counted lifecycle: multiple screens (Team Builder, Offline
   // Battle) share this one runtime. init() is idempotent and increments
   // the count; release() decrements it and only tears down the runtime
@@ -467,19 +472,18 @@ class JsEngineService {
     try {
       final decoded = json.decode(result.stringResult);
       if (decoded is Map) {
-        debugPrint('getBaseSpeciesList diagnostics: ${decoded['diag']}');
+        lastDiagnostics = decoded['diag']?.toString() ?? 'no diag';
         if (decoded['error'] != null) {
-          debugPrint('getBaseSpeciesList error: ${decoded['error']}');
+          lastDiagnostics = 'ERROR: ${decoded['error']} | diag: $lastDiagnostics';
           return [];
         }
         final List<dynamic> list = decoded['results'] as List<dynamic>? ?? [];
         return list.cast<Map<String, dynamic>>();
       }
-      // Fallback in case shape is an unexpected bare list (shouldn't happen now).
       final List<dynamic> list = decoded as List<dynamic>;
       return list.cast<Map<String, dynamic>>();
     } catch (e) {
-      debugPrint('getBaseSpeciesList parse error: $e, raw: ${result.stringResult}');
+      lastDiagnostics = 'PARSE ERROR: $e | raw: ${result.stringResult}';
       return [];
     }
   }
