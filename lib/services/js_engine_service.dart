@@ -396,7 +396,10 @@ class JsEngineService {
   }
 
   Future<List<Map<String, dynamic>>> getBaseSpeciesList() async {
-    if (!isReady) return [];
+    if (!isReady) {
+      lastDiagnostics = 'NOT READY: isInitialized=$_isInitialized, jsRuntime=${_jsRuntime != null}';
+      return [];
+    }
     final script = '''
       (function() {
         var diag = {};
@@ -465,7 +468,7 @@ class JsEngineService {
     ''';
     final result = _jsRuntime!.evaluate(script);
     if (result.isError) {
-      debugPrint('getBaseSpeciesList JS eval error: ${result.stringResult}');
+      lastDiagnostics = 'JS EVAL ERROR: ${result.stringResult}';
       return [];
     }
 
