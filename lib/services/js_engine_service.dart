@@ -394,22 +394,49 @@ class JsEngineService {
     if (!isReady) return [];
     final script = '''
       (function() {
-        if (!Dex || !Dex.species) return JSON.stringify([]);
+        var diag = {};
+        diag.dexExists = !!Dex;
+        diag.dexSpeciesExists = !!(Dex && Dex.species);
+        diag.psStaticDataExists = !!globalThis.PSStaticData;
+        diag.baseExists = !!(globalThis.PSStaticData && globalThis.PSStaticData.base);
+        diag.pokedexExists = !!(globalThis.PSStaticData && globalThis.PSStaticData.base && globalThis.PSStaticData.base.pokedex);
 
-        // Dex.species.all() depends on the real sim's internal data-loading
-        // path, which may not be fully populated outside a running Battle.
-        // Enumerate directly from the known-good static Pokedex snapshot
-        // instead, resolving each entry through Dex.species.get() to get
-        // the fully processed object (otherFormes, baseStats, etc.).
+        if (!Dex || !Dex.species) return JSON.stringify({error: 'no-dex', diag: diag});
+
         var pokedexKeys = (globalThis.PSStaticData && globalThis.PSStaticData.base && globalThis.PSStaticData.base.pokedex)
           ? Object.keys(globalThis.PSStaticData.base.pokedex)
           : [];
+        diag.pokedexKeyCount = pokedexKeys.length;
+        diag.firstFewKeys = pokedexKeys.slice(0, 5);
+
+        if (pokedexKeys.length === 0) {
+          return JSON.stringify({error: 'no-keys', diag: diag});
+        }
+
+        // Try resolving the very first key and capture what happens.
+        var testKey = pokedexKeys[0];
+        var testSpec = null;
+        var testError = null;
+        try {
+          testSpec = Dex.species.get(testKey);
+        } catch (e) {
+          testError = e && e.message ? e.message : String(e);
+        }
+        diag.testKey = testKey;
+        diag.testSpecExists = !!(testSpec && testSpec.exists);
+        diag.testSpecName = testSpec ? testSpec.name : null;
+        diag.testError = testError;
 
         var results = [];
         var seenNum = {};
 
         for (var i = 0; i < pokedexKeys.length; i++) {
-          var spec = Dex.species.get(pokedexKeys[i]);
+          var spec;
+          try {
+            spec = Dex.species.get(pokedexKeys[i]);
+          } catch (e) {
+            continue;
+          }
           if (!spec || !spec.exists || spec.num <= 0) continue;
 
           var isMega = spec.forme && spec.forme.indexOf('Mega') !== -1;
@@ -426,13 +453,35 @@ class JsEngineService {
             });
           }
         }
-        return JSON.stringify(results);
+
+        diag.resultCount = results.length;
+        return JSON.stringify({results: results, diag: diag});
       })()
     ''';
     final result = _jsRuntime!.evaluate(script);
-    if (result.isError) return [];
-    final List<dynamic> list = json.decode(result.stringResult);
-    return list.cast<Map<String, dynamic>>();
+    if (result.isError) {
+      debugPrint('getBaseSpeciesList JS eval error: ${result.stringResult}');
+      return [];
+    }
+
+    try {
+      final decoded = json.decode(result.stringResult);
+      if (decoded is Map) {
+        debugPrint('getBaseSpeciesList diagnostics: ${decoded['diag']}');
+        if (decoded['error'] != null) {
+          debugPrint('getBaseSpeciesList error: ${decoded['error']}');
+          return [];
+        }
+        final List<dynamic> list = decoded['results'] as List<dynamic>? ?? [];
+        return list.cast<Map<String, dynamic>>();
+      }
+      // Fallback in case shape is an unexpected bare list (shouldn't happen now).
+      final List<dynamic> list = decoded as List<dynamic>;
+      return list.cast<Map<String, dynamic>>();
+    } catch (e) {
+      debugPrint('getBaseSpeciesList parse error: $e, raw: ${result.stringResult}');
+      return [];
+    }
   }
 
   Future<List<Map<String, dynamic>>> getFormesForSpecies(String baseName) async {
