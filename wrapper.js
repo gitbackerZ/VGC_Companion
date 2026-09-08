@@ -3,7 +3,7 @@ import { BattleStreams, Dex } from '@pkmn/sim';
 let stream = null;
 let logQueue = [];
 
-// --- Safe Dex Lookup Patch (Applies to base and modded Dex environments) ---
+// --- Safe Dex Lookup Patch ---
 function patchDexInstance(targetDex) {
   try {
     if (targetDex && targetDex.species) {
@@ -84,17 +84,18 @@ globalThis.getLogs = function() {
   return JSON.stringify(logs);
 };
 
-// --- Champions Mod Data API Helpers ---
+// --- Champions Mod Data API Helpers for Flutter ---
 
-// Get all species filtered through the champions mod data and rule set
-globalThis.getSpeciesList = function(format = 'gen9championsdoublescustomgame') {
+// Get base species list filtered through champions mod
+globalThis.getBaseSpeciesList = globalThis.getSpeciesList = function(format = 'gen9championsdoublescustomgame') {
   const activeDex = Dex.forFormat(format);
   patchDexInstance(activeDex);
   const list = activeDex.species.all()
-    .filter(s => s.num > 0 && (!s.isNonstandard || s.isNonstandard === 'Past' || s.id.includes('antique') || s.id.includes('masterpiece')))
+    .filter(s => s.num > 0 && !s.forme && (!s.isNonstandard || s.isNonstandard === 'Past' || s.id.includes('antique') || s.id.includes('masterpiece')))
     .map(s => ({
       name: s.name,
       id: s.id,
+      num: s.num,
       types: s.types,
       baseStats: s.baseStats,
       abilities: Object.values(s.abilities || {})
@@ -102,9 +103,69 @@ globalThis.getSpeciesList = function(format = 'gen9championsdoublescustomgame') 
   return JSON.stringify(list);
 };
 
-// Get all competitive moves filtered through the champions mod data and rule set
-globalThis.getMoveList = function(format = 'gen9championsdoublescustomgame') {
+// Get individual Pokémon details
+globalThis.getPokemon = function(name, format = 'gen9championsdoublescustomgame') {
   const activeDex = Dex.forFormat(format);
+  patchDexInstance(activeDex);
+  const s = activeDex.species.get(name);
+  return JSON.stringify({
+    name: s.name,
+    id: s.id,
+    num: s.num,
+    types: s.types,
+    baseStats: s.baseStats,
+    baseSpecies: s.baseSpecies,
+    genderRatio: s.genderRatio,
+    abilities: s.abilities
+  });
+};
+
+// Get abilities available for a specific Pokémon
+globalThis.getAbilitiesForPokemon = function(name, format = 'gen9championsdoublescustomgame') {
+  const activeDex = Dex.forFormat(format);
+  patchDexInstance(activeDex);
+  const s = activeDex.species.get(name);
+  const abilities = [];
+  if (s.abilities) {
+    for (const key in s.abilities) {
+      const abilName = s.abilities[key];
+      if (abilName) {
+        abilities.push({ slot: key, name: abilName });
+      }
+    }
+  }
+  return JSON.stringify(abilities);
+};
+
+// Get alternative forms/formes for a species
+globalThis.getFormesForSpecies = function(baseName, format = 'gen9championsdoublescustomgame') {
+  const activeDex = Dex.forFormat(format);
+  patchDexInstance(activeDex);
+  const baseSpecies = activeDex.species.get(baseName);
+  const formes = [{
+    name: baseSpecies.name,
+    types: baseSpecies.types,
+    num: baseSpecies.num
+  }];
+  if (baseSpecies.otherFormes) {
+    for (const fName of baseSpecies.otherFormes) {
+      const f = activeDex.species.get(fName);
+      if (f && f.exists) {
+        formes.push({
+          name: f.name,
+          types: f.types,
+          num: f.num
+        });
+      }
+    }
+  }
+  return JSON.stringify(formes);
+};
+
+// Get legal moves for species under champions mod
+globalThis.getMovesForSpecies = function(name, format = 'gen9championsdoublescustomgame') {
+  const activeDex = Dex.forFormat(format);
+  patchDexInstance(activeDex);
   const list = activeDex.moves.all()
     .filter(m => !m.isNonstandard && m.num > 0)
     .map(m => ({
@@ -112,16 +173,46 @@ globalThis.getMoveList = function(format = 'gen9championsdoublescustomgame') {
       id: m.id,
       type: m.type,
       category: m.category,
-      basePower: m.basePower,
-      accuracy: m.accuracy,
-      pp: m.pp
+      basePower: m.basePower
     }));
   return JSON.stringify(list);
 };
 
-// Get items filtered through the champions mod data and rule set
+// Get gender rate for a species
+globalThis.getGenderRate = function(name, format = 'gen9championsdoublescustomgame') {
+  const activeDex = Dex.forFormat(format);
+  patchDexInstance(activeDex);
+  const s = activeDex.species.get(name);
+  if (s.genderRatio) {
+    if (s.genderRatio.M === 0 && s.genderRatio.F === 0) return JSON.stringify(-1);
+    if (s.genderRatio.F === 1) return JSON.stringify(8);
+    return JSON.stringify(4);
+  }
+  return JSON.stringify(4);
+};
+
+// Get Mega or special form associated with a held item
+globalThis.getMegaFormForHeldItem = function(name, item, format = 'gen9championsdoublescustomgame') {
+  const activeDex = Dex.forFormat(format);
+  patchDexInstance(activeDex);
+  const s = activeDex.species.get(name);
+  let megaForm = null;
+  if (s.otherFormes) {
+    for (const fName of s.otherFormes) {
+      const f = activeDex.species.get(fName);
+      if (f && f.requiredItem && f.requiredItem.toLowerCase() === item.toLowerCase()) {
+        megaForm = f.name;
+        break;
+      }
+    }
+  }
+  return JSON.stringify(megaForm);
+};
+
+// Get item list filtered through champions mod
 globalThis.getItemList = function(format = 'gen9championsdoublescustomgame') {
   const activeDex = Dex.forFormat(format);
+  patchDexInstance(activeDex);
   const list = activeDex.items.all()
     .filter(i => !i.isNonstandard && i.num > 0)
     .map(i => ({
