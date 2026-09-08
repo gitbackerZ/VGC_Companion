@@ -271,6 +271,15 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           }
         })();
 
+        // ── INSERT YOUR NEW SNIPPET HERE ──
+        (function myCustomSnippet() {
+          try {
+            // Your JavaScript logic goes here
+          } catch (e) {
+            globalThis.logBuffer.push('|debug-custom-error| ' + (e && e.message ? e.message : String(e)));
+          }
+        })();
+
         
 
         globalThis.toID = function(text) {
