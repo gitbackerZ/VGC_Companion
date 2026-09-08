@@ -8,8 +8,12 @@ globalThis.startVGCBattle = function(format, p1Team, p2Team) {
   logQueue = [];
 
   (async () => {
-    for await (const chunk of stream) {
-      logQueue.push(chunk);
+    try {
+      for await (const chunk of stream) {
+        logQueue.push(chunk);
+      }
+    } catch (err) {
+      logQueue.push(`|error|[Engine Initialization Error] ${err.message}`);
     }
   })();
 
@@ -30,10 +34,10 @@ globalThis.getLogs = function() {
 
 // --- Pokédex Data API Helpers ---
 
-// Get all legal standard species (Name, Types, Base Stats, Abilities)
+// Get all legal standard species, including permitted alternate aesthetic and past-gen forms
 globalThis.getSpeciesList = function() {
   const list = Dex.species.all()
-    .filter(s => s.num > 0 && !s.isNonstandard)
+    .filter(s => s.num > 0 && (!s.isNonstandard || s.isNonstandard === 'Past' || s.id.includes('antique') || s.id.includes('masterpiece')))
     .map(s => ({
       name: s.name,
       id: s.id,
