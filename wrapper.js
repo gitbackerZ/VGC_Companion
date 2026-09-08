@@ -3,59 +3,7 @@ import { BattleStreams, Dex } from '@pkmn/sim';
 let stream = null;
 let logQueue = [];
 
-// --- Safe Dex Lookup Patch ---
-function patchDexInstance(targetDex) {
-  try {
-    if (targetDex && targetDex.species) {
-      if (!targetDex.species._isPatched) {
-        const origGet = targetDex.species.get;
-        if (typeof origGet === 'function') {
-          targetDex.species.get = function(name) {
-            const res = origGet.call(this, name);
-            if (res && res.exists !== false) return res;
-            return { 
-              exists: true, 
-              name: typeof name === 'string' ? name : 'Unknown', 
-              num: 0, 
-              types: ['Normal'], 
-              baseStats: {hp: 100, atk: 100, def: 100, spa: 100, spd: 100, spe: 100}, 
-              abilities: {0: 'Pressure'} 
-            };
-          };
-        }
-        
-        const origGetByID = targetDex.species.getByID;
-        if (typeof origGetByID === 'function') {
-          targetDex.species.getByID = function(id) {
-            const res = origGetByID.call(this, id);
-            if (res && res.exists !== false) return res;
-            return { 
-              exists: true, 
-              name: typeof id === 'string' ? id : 'Unknown', 
-              num: 0, 
-              types: ['Normal'], 
-              baseStats: {hp: 100, atk: 100, def: 100, spa: 100, spd: 100, spe: 100}, 
-              abilities: {0: 'Pressure'} 
-            };
-          };
-        }
-        targetDex.species._isPatched = true;
-      }
-    }
-  } catch (e) {
-    // Silent catch for safety
-  }
-}
-
-// Patch root Dex immediately upon load
-patchDexInstance(Dex);
-
 globalThis.startVGCBattle = function(format, p1Team, p2Team) {
-  try {
-    const activeDex = Dex.forFormat(format);
-    patchDexInstance(activeDex);
-  } catch (e) {}
-
   stream = new BattleStreams.BattleStream();
   logQueue = [];
 
@@ -86,10 +34,23 @@ globalThis.getLogs = function() {
 
 // --- Champions Mod Data API Helpers for Flutter ---
 
-// Get base species list filtered through champions mod
+function safeGetSpecies(dex, name) {
+  try {
+    const s = dex.species.get(name);
+    if (s && s.exists !== false) return s;
+  } catch (e) {}
+  return {
+    name: typeof name === 'string' ? name : 'Unknown',
+    id: '',
+    num: 0,
+    types: ['Normal'],
+    baseStats: { hp: 100, atk: 100, def: 100, spa: 100, spd: 100, spe: 100 },
+    abilities: { 0: 'Pressure' }
+  };
+}
+
 globalThis.getBaseSpeciesList = globalThis.getSpeciesList = function(format = 'gen9championsdoublescustomgame') {
   const activeDex = Dex.forFormat(format);
-  patchDexInstance(activeDex);
   const list = activeDex.species.all()
     .filter(s => s.num > 0 && !s.forme && (!s.isNonstandard || s.isNonstandard === 'Past' || s.id.includes('antique') || s.id.includes('masterpiece')))
     .map(s => ({
@@ -103,11 +64,9 @@ globalThis.getBaseSpeciesList = globalThis.getSpeciesList = function(format = 'g
   return JSON.stringify(list);
 };
 
-// Get individual Pokémon details
 globalThis.getPokemon = function(name, format = 'gen9championsdoublescustomgame') {
   const activeDex = Dex.forFormat(format);
-  patchDexInstance(activeDex);
-  const s = activeDex.species.get(name);
+  const s = safeGetSpecies(activeDex, name);
   return JSON.stringify({
     name: s.name,
     id: s.id,
@@ -120,11 +79,9 @@ globalThis.getPokemon = function(name, format = 'gen9championsdoublescustomgame'
   });
 };
 
-// Get abilities available for a specific Pokémon
 globalThis.getAbilitiesForPokemon = function(name, format = 'gen9championsdoublescustomgame') {
   const activeDex = Dex.forFormat(format);
-  patchDexInstance(activeDex);
-  const s = activeDex.species.get(name);
+  const s = safeGetSpecies(activeDex, name);
   const abilities = [];
   if (s.abilities) {
     for (const key in s.abilities) {
@@ -137,11 +94,9 @@ globalThis.getAbilitiesForPokemon = function(name, format = 'gen9championsdouble
   return JSON.stringify(abilities);
 };
 
-// Get alternative forms/formes for a species
 globalThis.getFormesForSpecies = function(baseName, format = 'gen9championsdoublescustomgame') {
   const activeDex = Dex.forFormat(format);
-  patchDexInstance(activeDex);
-  const baseSpecies = activeDex.species.get(baseName);
+  const baseSpecies = safeGetSpecies(activeDex, baseName);
   const formes = [{
     name: baseSpecies.name,
     types: baseSpecies.types,
@@ -149,8 +104,8 @@ globalThis.getFormesForSpecies = function(baseName, format = 'gen9championsdoubl
   }];
   if (baseSpecies.otherFormes) {
     for (const fName of baseSpecies.otherFormes) {
-      const f = activeDex.species.get(fName);
-      if (f && f.exists) {
+      const f = safeGetSpecies(activeDex, fName);
+      if (f && f.name) {
         formes.push({
           name: f.name,
           types: f.types,
@@ -162,10 +117,8 @@ globalThis.getFormesForSpecies = function(baseName, format = 'gen9championsdoubl
   return JSON.stringify(formes);
 };
 
-// Get legal moves for species under champions mod
 globalThis.getMovesForSpecies = function(name, format = 'gen9championsdoublescustomgame') {
   const activeDex = Dex.forFormat(format);
-  patchDexInstance(activeDex);
   const list = activeDex.moves.all()
     .filter(m => !m.isNonstandard && m.num > 0)
     .map(m => ({
@@ -178,11 +131,9 @@ globalThis.getMovesForSpecies = function(name, format = 'gen9championsdoublescus
   return JSON.stringify(list);
 };
 
-// Get gender rate for a species
 globalThis.getGenderRate = function(name, format = 'gen9championsdoublescustomgame') {
   const activeDex = Dex.forFormat(format);
-  patchDexInstance(activeDex);
-  const s = activeDex.species.get(name);
+  const s = safeGetSpecies(activeDex, name);
   if (s.genderRatio) {
     if (s.genderRatio.M === 0 && s.genderRatio.F === 0) return JSON.stringify(-1);
     if (s.genderRatio.F === 1) return JSON.stringify(8);
@@ -191,15 +142,13 @@ globalThis.getGenderRate = function(name, format = 'gen9championsdoublescustomga
   return JSON.stringify(4);
 };
 
-// Get Mega or special form associated with a held item
 globalThis.getMegaFormForHeldItem = function(name, item, format = 'gen9championsdoublescustomgame') {
   const activeDex = Dex.forFormat(format);
-  patchDexInstance(activeDex);
-  const s = activeDex.species.get(name);
+  const s = safeGetSpecies(activeDex, name);
   let megaForm = null;
   if (s.otherFormes) {
     for (const fName of s.otherFormes) {
-      const f = activeDex.species.get(fName);
+      const f = safeGetSpecies(activeDex, fName);
       if (f && f.requiredItem && f.requiredItem.toLowerCase() === item.toLowerCase()) {
         megaForm = f.name;
         break;
@@ -209,10 +158,8 @@ globalThis.getMegaFormForHeldItem = function(name, item, format = 'gen9champions
   return JSON.stringify(megaForm);
 };
 
-// Get item list filtered through champions mod
 globalThis.getItemList = function(format = 'gen9championsdoublescustomgame') {
   const activeDex = Dex.forFormat(format);
-  patchDexInstance(activeDex);
   const list = activeDex.items.all()
     .filter(i => !i.isNonstandard && i.num > 0)
     .map(i => ({
