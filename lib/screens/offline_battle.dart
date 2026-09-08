@@ -628,20 +628,23 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               entry.learnsetError = e && e.message ? e.message : String(e);
             }
 
-            // Attempt the actual failure point: construct a throwaway
-            // 1v1 battle with this species as the sole Pokemon on p1.
+            // Attempt the actual failure point under the REAL conditions
+            // that crashed originally: champions mod, doubles, real ability.
             try {
+              var abilitiesObj = entry.rawPokedex && entry.rawPokedex.abilities ? entry.rawPokedex.abilities : {};
+              var realAbility = abilitiesObj['0'] || 'Pressure';
+
               var probeBattle = new BattleCtor({
-                formatid: 'gen9customgame',
-                gameType: 'singles',
+                formatid: 'gen9championsdoublescustomgame',
+                gameType: 'doubles',
                 send: function() {}
               });
               var minimalTeam = [{
                 name: name,
                 species: name,
                 item: '',
-                ability: 'Pressure',
-                moves: ['tackle'],
+                ability: realAbility,
+                moves: ['tackle', 'protect'],
                 nature: 'Hardy',
                 evs: { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
                 ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
@@ -651,12 +654,14 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                 species: 'Pikachu',
                 item: '',
                 ability: 'Static',
-                moves: ['tackle'],
+                moves: ['tackle', 'protect'],
                 nature: 'Hardy',
                 evs: { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
                 ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
                 level: 50
               }];
+
+              entry.abilityUsedInProbe = realAbility;
 
               if (typeof probeBattle.setPlayer === 'function') {
                 probeBattle.setPlayer('p1', { name: 'Probe', team: minimalTeam });
