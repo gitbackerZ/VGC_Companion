@@ -581,6 +581,116 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           return problems;
         };
 
+        // Batch diagnostic: for a given list of species names, attempts
+        // to construct each one as a real Pokemon inside a throwaway
+        // battle (the actual failure point — a standalone Dex.species.get()
+        // call can succeed even when Pokemon() construction still crashes,
+        // as proven with Kingambit). Also dumps each species' full raw
+        // Pokedex/abilities/learnset/formats-data entries so problem
+        // species can be diffed against working ones in one pass.
+        globalThis.batchDiagnoseSpecies = function(speciesNames) {
+          var report = [];
+          var BattleCtor = globalThis.Battle;
+          if (typeof BattleCtor !== 'function') {
+            return [{ species: '(all)', error: 'Battle constructor not available' }];
+          }
+
+          for (var i = 0; i < speciesNames.length; i++) {
+            var name = speciesNames[i];
+            var id = globalThis.toID(name);
+            var entry = { species: name, id: id };
+
+            try {
+              var rawPokedex = globalThis.PSStaticData && globalThis.PSStaticData.base && globalThis.PSStaticData.base.pokedex
+                ? globalThis.PSStaticData.base.pokedex[id]
+                : undefined;
+              entry.rawPokedexKeys = rawPokedex ? Object.keys(rawPokedex) : 'MISSING';
+              entry.rawPokedex = rawPokedex || null;
+            } catch (e) {
+              entry.rawPokedexError = e && e.message ? e.message : String(e);
+            }
+
+            try {
+              var rawFormatsData = globalThis.PSStaticData && globalThis.PSStaticData.base && globalThis.PSStaticData.base['formats-data']
+                ? globalThis.PSStaticData.base['formats-data'][id]
+                : undefined;
+              entry.rawFormatsData = rawFormatsData || null;
+            } catch (e) {
+              entry.rawFormatsDataError = e && e.message ? e.message : String(e);
+            }
+
+            try {
+              var rawLearnset = globalThis.PSStaticData && globalThis.PSStaticData.base && globalThis.PSStaticData.base.learnsets
+                ? globalThis.PSStaticData.base.learnsets[id]
+                : undefined;
+              entry.hasLearnset = !!rawLearnset;
+            } catch (e) {
+              entry.learnsetError = e && e.message ? e.message : String(e);
+            }
+
+            // Attempt the actual failure point: construct a throwaway
+            // 1v1 battle with this species as the sole Pokemon on p1.
+            try {
+              var probeBattle = new BattleCtor({
+                formatid: 'gen9customgame',
+                gameType: 'singles',
+                send: function() {}
+              });
+              var minimalTeam = [{
+                name: name,
+                species: name,
+                item: '',
+                ability: 'Pressure',
+                moves: ['tackle'],
+                nature: 'Hardy',
+                evs: { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
+                ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
+                level: 50
+              }, {
+                name: 'Pikachu',
+                species: 'Pikachu',
+                item: '',
+                ability: 'Static',
+                moves: ['tackle'],
+                nature: 'Hardy',
+                evs: { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
+                ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
+                level: 50
+              }];
+
+              if (typeof probeBattle.setPlayer === 'function') {
+                probeBattle.setPlayer('p1', { name: 'Probe', team: minimalTeam });
+                probeBattle.setPlayer('p2', { name: 'ProbeOpp', team: minimalTeam });
+              } else if (typeof probeBattle.join === 'function') {
+                probeBattle.join('p1', 'Probe', 1, minimalTeam);
+                probeBattle.join('p2', 'ProbeOpp', 1, minimalTeam);
+              }
+
+              entry.constructionSucceeded = true;
+            } catch (constructErr) {
+              entry.constructionSucceeded = false;
+              entry.constructionError = constructErr && constructErr.message ? constructErr.message : String(constructErr);
+              entry.constructionStack = constructErr && constructErr.stack
+                ? constructErr.stack.replace(/\\n/g, ' | ').substring(0, 400)
+                : 'no-stack';
+            }
+
+            report.push(entry);
+          }
+
+          return report;
+        };
+
+        globalThis.runBatchDiagnostic = function(namesCsv) {
+          try {
+            var names = namesCsv.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+            var report = globalThis.batchDiagnoseSpecies(names);
+            return JSON.stringify(report);
+          } catch (e) {
+            return JSON.stringify([{ species: '(batch)', error: e && e.message ? e.message : String(e) }]);
+          }
+        };
+
         globalThis.startVGCBattle = function(formatId, p1TeamData, p2TeamData) {
           globalThis.logBuffer = [];
           try {
@@ -694,6 +804,33 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         _statusMessage = 'Error initializing engine: $e';
       });
     }
+  }
+
+  Future<void> _runBatchSpeciesDiagnostic() async {
+    if (_jsRuntime == null) {
+      setState(() => _statusMessage = 'Engine not initialized — start a battle once first, then use this.');
+      return;
+    }
+    const speciesList = [
+      'Clefable', 'Arcanine-Hisui', 'Dragonite', 'Slowking', 'Azumarill',
+      'Slowking-Galar', 'Skarmory', 'Tyranitar', 'Hippowdon', 'Weavile',
+      'Mamoswine', 'Samurott-Hisui', 'Conkeldurr', 'Greninja', 'Talonflame',
+      'Primarina', 'Corviknight', 'Polteageist', 'Polteageist-Antique',
+      'Hatterene', 'Dragapult', 'Skeledirge', 'Tinkaton', 'Ceruledge',
+      'Palafin', 'Metagross', 'Sinistcha-Masterpiece', 'Hydrapple',
+    ];
+    final csv = speciesList.join(',');
+    final result = _jsRuntime!.evaluate("globalThis.runBatchDiagnostic('$csv');");
+    if (result.isError) {
+      setState(() => _statusMessage = 'Batch diagnostic eval error: ${result.stringResult}');
+      return;
+    }
+    setState(() {
+      _rawLogs.add('|batch-diagnostic-start|');
+      _rawLogs.add(result.stringResult);
+      _rawLogs.add('|batch-diagnostic-end|');
+      _statusMessage = 'Batch diagnostic complete — check Full Log.';
+    });
   }
 
   String _humanizeLogLine(String line) {
@@ -1483,6 +1620,27 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
             icon: const Icon(Icons.play_arrow, color: Colors.white),
             label: const Text('Start PvC Battle', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          height: 40,
+          child: OutlinedButton.icon(
+            onPressed: () async {
+              if (!_engineInitialized) {
+                setState(() {
+                  _isLoading = true;
+                  _statusMessage = 'Loading engine for diagnostic...';
+                });
+                await _initEngine();
+                _engineInitialized = true;
+                setState(() => _isLoading = false);
+              }
+              await _runBatchSpeciesDiagnostic();
+            },
+            icon: const Icon(Icons.bug_report),
+            label: const Text('Run Batch Species Diagnostic'),
           ),
         ),
       ],
