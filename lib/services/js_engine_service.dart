@@ -44,10 +44,14 @@ class JsEngineService {
 
       // Full polyfill set — merged from the offline battle screen's
       // requirements (setImmediate/queueMicrotask/TextEncoder/TextDecoder/
-      // full dummyModules map for path/util/os/events/buffer) plus the
+      // full dummyModules map for path/os/events/buffer) plus the
       // original lighter Team-Builder-oriented set. engine.js is shared by
       // both screens now, so it needs to satisfy whichever caller has the
       // heavier requirements (the battle simulator).
+      //
+      // Note: 'util' is intentionally NOT stubbed here anymore — build.js
+      // now provides a real isDeepStrictEqual-capable shim at bundle time,
+      // so require('util') never reaches this runtime require() at all.
       const String polyfills = '''
         globalThis.global = globalThis;
         globalThis.window = globalThis;
@@ -158,16 +162,12 @@ class JsEngineService {
           'node:fs': fsStub,
           path: { resolve: function() { return ''; }, join: function() { return ''; }, dirname: function() { return ''; }, basename: function() { return ''; }, extname: function() { return ''; } },
           'node:path': { resolve: function() { return ''; }, join: function() { return ''; }, dirname: function() { return ''; }, basename: function() { return ''; }, extname: function() { return ''; } },
-          util: { inspect: function(o) { return String(o); }, inherits: function() {} },
-          'node:util': { inspect: function(o) { return String(o); }, inherits: function() {} },
           os: { platform: function() { return 'browser'; }, homedir: function() { return ''; } },
           'node:os': { platform: function() { return 'browser'; }, homedir: function() { return ''; } },
           events: function EventEmitter() {},
           crypto: globalThis.crypto || {},
           buffer: { Buffer: { isBuffer: function() { return false; }, from: function() { return []; } } }
         };
-
-        globalThis.fs2 = fsStub;
 
         if (!globalThis.require) {
           globalThis.require = function(id) {
