@@ -219,37 +219,18 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           }
         })();
 
-        try {
-          var _Dex = (globalThis.PSSim && globalThis.PSSim.Dex) ? globalThis.PSSim.Dex : globalThis.Dex;
-          if (_Dex) {
-            if (!_Dex.dexes) _Dex.dexes = Object.create(null);
-            if (!_Dex.dexes.base) _Dex.dexes.base = _Dex;
-
-            var ModdedDexCtor = _Dex.ModdedDex || _Dex.constructor;
-            if (!_Dex.dexes.champions) {
-              _Dex.dexes.champions = new ModdedDexCtor('champions');
-            }
-            if (!_Dex.dexes.championsregma) {
-              _Dex.dexes.championsregma = new ModdedDexCtor('championsregma');
-            }
-
-            _Dex.modsLoaded = true;
-            if (_Dex.dexes.base) _Dex.dexes.base.modsLoaded = true;
-          }
-        } catch (e) {}
-
         if (typeof Dex !== "undefined") {
           Dex.data = Dex.data || {};
           Dex.data.Aliases = Dex.data.Aliases || [];
         }
 
-        // Patch known-bad evolution data that crashes this trimmed engine
-        // build. evoType "other" (used for narrative/non-standard evolution
-        // conditions like Kingambit's "defeat 3 Bisharp") has no handler in
-        // this bundle's species-processing code, causing a generic
-        // "not a function" crash during Pokemon construction. Evolution
-        // logic is never needed during battle simulation, so it's safe to
-        // simply strip these fields rather than patch the sim internals.
+        // TEST: patchBadEvolutionData disabled — the util.isDeepStrictEqual
+        // fix in build.js may have already resolved the same "not a function"
+        // crash this patch was working around (both surfaced as construction
+        // failures at the same call site). If Kingambit or other evoType:
+        // "other" species crash again, restore this block from version
+        // control instead of retyping it.
+        /*
         (function patchBadEvolutionData() {
           try {
             var pokedex = globalThis.PSStaticData && globalThis.PSStaticData.base ? globalThis.PSStaticData.base.pokedex : null;
@@ -259,19 +240,15 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               if (entry && entry.evoType === 'other') {
                 delete entry.evoType;
                 delete entry.evoCondition;
-                // Keep prevo intact — some sim internals assume every
-                // species has *some* evolutionary chain data, even a
-                // single 'prevo' link, when determining ability/data
-                // inheritance. Only the "other" evoType/evoCondition were
-                // the original suspects.
               }
             }
           } catch (e) {
             globalThis.logBuffer.push('|debug-evo-patch-error| ' + (e && e.message ? e.message : String(e)));
           }
         })();
+        */
 
-        globalThis.toID = function(text) {
+        globalThis.toID = globalThis.toID || function(text) {
           if (text && text.id) return text.id;
           if (typeof text !== 'string' && typeof text !== 'number') return '';
           return ('' + text).toLowerCase().replace(/[^a-z0-9]/g, '');
