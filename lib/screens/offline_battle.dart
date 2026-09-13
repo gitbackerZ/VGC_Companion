@@ -1141,6 +1141,16 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
     _fetchLogs();
 
+    if (_currentRequest != null) {
+      // _fetchLogs() above already parsed the turn-1 request from the log
+      // buffer — re-parsing it via getDirectRequest() would double-process
+      // the same request and incorrectly trigger the "mid-turn" branch
+      // (since _lastRequestTurnNumber would already match). Only fall back
+      // to getDirectRequest() if nothing came through the log poll at all.
+      if (_stage == BattleStage.setup) {
+        _stage = BattleStage.inBattle;
+      }
+    } else {
     final directReqRes = _jsRuntime!.evaluate("globalThis.getDirectRequest();");
     if (!directReqRes.isError && directReqRes.stringResult.isNotEmpty) {
       _parseRequest(directReqRes.stringResult);
@@ -1212,6 +1222,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           }
         });
       }
+    }
     }
   }
 
