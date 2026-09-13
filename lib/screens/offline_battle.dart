@@ -31,7 +31,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
   List<dynamic> _p1TeamList = [];
   List<dynamic> _p2TeamList = [];
-  String _p2TeamSheetText = '';
+  List<Map<String, dynamic>> _p1CardData = [];
+  List<Map<String, dynamic>> _p2CardData = [];
+  int _maxPickTeamSize = 6;
   final List<int> _selectedPreviewSlots = [];
 
   final Map<String, String> _activeHp = {};
@@ -80,13 +82,30 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     } catch (_) {}
   }
 
-  void _fetchP2TeamSheet() {
+  void _fetchTeamPreviewCards() {
     if (_jsRuntime == null) return;
-    final result = _jsRuntime!.evaluate("globalThis.getP2TeamSheetText();");
-    if (result.isError) return;
-    setState(() {
-      _p2TeamSheetText = result.stringResult;
-    });
+    final p1Result = _jsRuntime!.evaluate("globalThis.getTeamPreviewCards('p1');");
+    if (!p1Result.isError) {
+      try {
+        final decoded = jsonDecode(p1Result.stringResult);
+        if (decoded is List) {
+          setState(() {
+            _p1CardData = decoded.cast<Map<String, dynamic>>();
+          });
+        }
+      } catch (_) {}
+    }
+    final p2Result = _jsRuntime!.evaluate("globalThis.getTeamPreviewCards('p2');");
+    if (!p2Result.isError) {
+      try {
+        final decoded = jsonDecode(p2Result.stringResult);
+        if (decoded is List) {
+          setState(() {
+            _p2CardData = decoded.cast<Map<String, dynamic>>();
+          });
+        }
+      } catch (_) {}
+    }
   }
 
   String _formatSideConditions(String label, Map<String, int?> conditions) {
@@ -625,6 +644,76 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           }
         };
 
+        // Returns structured team-preview data (species, types, item, moves)
+        // for either side, read from the live battle's real Pokemon objects
+        // so displayed names/items/moves are the resolved Dex names, not
+        // raw internal IDs.
+        globalThis.getTeamPreviewCards = function(side) {
+          try {
+            var b = globalThis.battle;
+            if (!b) return "[]";
+            var sideObj = side === 'p1' ? b.p1 : b.p2;
+            if (!sideObj || !sideObj.pokemon) return "[]";
+            var result = [];
+            for (var i = 0; i < sideObj.pokemon.length; i++) {
+              var mon = sideObj.pokemon[i];
+              var speciesName = (mon.species && mon.species.name) || mon.name || 'Unknown';
+              var types = (mon.species && mon.species.types) || mon.types || [];
+              var itemName = '';
+              if (mon.item) {
+                var itemEntry = (Dex && Dex.items && typeof Dex.items.get === 'function') ? Dex.items.get(mon.item) : null;
+                itemName = itemEntry && itemEntry.exists ? itemEntry.name : mon.item;
+              }
+              var moveNames = [];
+              var moveSlots = mon.moveSlots || mon.baseMoveSlots || [];
+              for (var j = 0; j < moveSlots.length; j++) {
+                var slot = moveSlots[j];
+                var mv = slot && slot.move ? slot.move : (typeof slot === 'string' ? slot : '');
+                if (mv) moveNames.push(mv);
+              }
+              result.push({ name: speciesName, types: types, item: itemName, moves: moveNames });
+            }
+            return JSON.stringify(result);
+          } catch (e) {
+            return "[]";
+          }
+        };
+
+        // Returns structured team-preview data (species, types, item, moves)
+        // for either side, read from the live battle's real Pokemon objects
+        // so displayed names/items/moves are the resolved Dex names, not
+        // raw internal IDs.
+        globalThis.getTeamPreviewCards = function(side) {
+          try {
+            var b = globalThis.battle;
+            if (!b) return "[]";
+            var sideObj = side === 'p1' ? b.p1 : b.p2;
+            if (!sideObj || !sideObj.pokemon) return "[]";
+            var result = [];
+            for (var i = 0; i < sideObj.pokemon.length; i++) {
+              var mon = sideObj.pokemon[i];
+              var speciesName = (mon.species && mon.species.name) || mon.name || 'Unknown';
+              var types = (mon.species && mon.species.types) || mon.types || [];
+              var itemName = '';
+              if (mon.item) {
+                var itemEntry = (Dex && Dex.items && typeof Dex.items.get === 'function') ? Dex.items.get(mon.item) : null;
+                itemName = itemEntry && itemEntry.exists ? itemEntry.name : mon.item;
+              }
+              var moveNames = [];
+              var moveSlots = mon.moveSlots || mon.baseMoveSlots || [];
+              for (var j = 0; j < moveSlots.length; j++) {
+                var slot = moveSlots[j];
+                var mv = slot && slot.move ? slot.move : (typeof slot === 'string' ? slot : '');
+                if (mv) moveNames.push(mv);
+              }
+              result.push({ name: speciesName, types: types, item: itemName, moves: moveNames });
+            }
+            return JSON.stringify(result);
+          } catch (e) {
+            return "[]";
+          }
+        };
+
         globalThis.generateRandomTeamText = function(formatId) {
           try {
             var team = globalThis.generateRandomTeam(formatId);
@@ -1088,9 +1177,15 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           _stage = BattleStage.teamPreview;
           _p1TeamList = data['side']?['pokemon'] ?? [];
           _selectedPreviewSlots.clear();
-          _statusMessage = 'Team preview active. Choose Pokémon.';
-          _announce('Team preview started.');
-          _fetchP2TeamSheet();
+          final rawMax = data['maxTeamSize'];
+          _maxPickTeamSize = rawMax is int ? rawMax : _p1TeamList.length;
+          _statusMessage = _maxPickTeamSize < _p1TeamList.length
+              ? 'Team preview active. Choose $_maxPickTeamSize of ${_p1TeamList.length} Pokémon.'
+              : 'Team preview active. Choose Pokémon.';
+          _announce(_maxPickTeamSize < _p1TeamList.length
+              ? 'Team preview started. Choose $_maxPickTeamSize Pokémon to bring.'
+              : 'Team preview started.');
+          _fetchTeamPreviewCards();
         } else if (data.containsKey('wait') && data['wait'] == true) {
           // Genuinely don't touch _currentRequest here — keep whatever move/active
           // data we already had, so the UI doesn't go blank while waiting.
@@ -1204,7 +1299,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     setState(() {
       _rawLogs.clear();
       _p2TeamList.clear();
-      _p2TeamSheetText = '';
+      _p1CardData = [];
+      _p2CardData = [];
+      _maxPickTeamSize = 6;
       _activeHp.clear();
       _activeNames.clear();
       _statusMessage = 'Starting Battle...';
@@ -1304,12 +1401,14 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   }
 
   void _confirmTeamPreviewSelection() {
-    if (_selectedPreviewSlots.length < 2 || _jsRuntime == null) return;
+    if (_selectedPreviewSlots.length != _maxPickTeamSize || _jsRuntime == null) return;
 
     List<int> fullOrder = List.from(_selectedPreviewSlots);
-    for (int i = 1; i <= _p1TeamList.length; i++) {
-      if (!fullOrder.contains(i)) {
-        fullOrder.add(i);
+    if (_maxPickTeamSize >= _p1TeamList.length) {
+      for (int i = 1; i <= _p1TeamList.length; i++) {
+        if (!fullOrder.contains(i)) {
+          fullOrder.add(i);
+        }
       }
     }
     final p1Order = fullOrder.join('');
@@ -1622,12 +1721,12 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         const SizedBox(height: 12),
         Semantics(
           label: _useBring4Format
-              ? 'VGC Bring 4 format selected: bring 6, choose 4 at team preview'
-              : 'Standard format selected: full team, no team preview cap',
+              ? 'VGC Toggle on: show full 6 and bring 4 to battle'
+              : 'VGC Toggle off',
           child: SwitchListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text('VGC Bring 4 (bring 6, choose 4)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-            subtitle: const Text('Team preview lets you pick 4 of 6 revealed Pokémon', style: TextStyle(fontSize: 11, color: Colors.grey)),
+            title: const Text('VGC Toggle', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+            subtitle: const Text('Show full 6 and bring 4 to battle.', style: TextStyle(fontSize: 11, color: Colors.grey)),
             value: _useBring4Format,
             onChanged: (v) => setState(() => _useBring4Format = v),
           ),
@@ -1717,46 +1816,44 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           header: true,
           child: const Text('Team Preview (Choose Lineup)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         ),
+        const SizedBox(height: 4),
+        Text(
+          _maxPickTeamSize < _p1TeamList.length
+              ? 'Your team — choose $_maxPickTeamSize of ${_p1TeamList.length}'
+              : 'Your team',
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blueAccent),
+        ),
         const SizedBox(height: 8),
         GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 2.8, crossAxisSpacing: 8, mainAxisSpacing: 8),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 1.3, crossAxisSpacing: 8, mainAxisSpacing: 8),
           itemCount: _p1TeamList.length,
           itemBuilder: (context, index) {
             final slotIndex = index + 1;
-            final monData = _p1TeamList[index];
-            final monName = monData is Map ? (monData['details']?.toString().split(',')[0] ?? 'Pokémon $slotIndex') : 'Pokémon $slotIndex';
             final selectedPos = _selectedPreviewSlots.indexOf(slotIndex);
-            final String posText = selectedPos == -1
-                ? 'Not selected'
-                : (selectedPos < 2 ? 'Lead Position ${selectedPos + 1}' : 'Back Position ${selectedPos - 1}');
+            final selected = selectedPos != -1;
+            final String posText = !selected
+                ? ''
+                : (selectedPos < 2 ? 'Lead ${selectedPos + 1}' : 'Back ${selectedPos - 1}');
+            final cardData = index < _p1CardData.length ? _p1CardData[index] : null;
 
-            return InkWell(
+            return _buildPreviewCard(
+              data: cardData,
+              fallbackName: _p1TeamList[index] is Map
+                  ? (_p1TeamList[index]['details']?.toString().split(',')[0] ?? 'Pokémon $slotIndex')
+                  : 'Pokémon $slotIndex',
+              selected: selected,
+              badgeText: posText,
               onTap: () {
                 setState(() {
-                  if (selectedPos != -1) {
+                  if (selected) {
                     _selectedPreviewSlots.removeAt(selectedPos);
-                  } else if (_selectedPreviewSlots.length < _p1TeamList.length) {
+                  } else if (_selectedPreviewSlots.length < _maxPickTeamSize) {
                     _selectedPreviewSlots.add(slotIndex);
                   }
                 });
               },
-              child: Container(
-                decoration: BoxDecoration(
-                  color: selectedPos != -1 ? Colors.blue.withOpacity(0.3) : Colors.grey[850],
-                  border: Border.all(color: selectedPos != -1 ? Colors.blue : Colors.grey),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                padding: const EdgeInsets.all(6),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(monName, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                    if (selectedPos != -1) Text(posText, style: const TextStyle(fontSize: 10, color: Colors.amberAccent)),
-                  ],
-                ),
-              ),
             );
           },
         ),
@@ -1765,38 +1862,144 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           width: double.infinity,
           height: 44,
           child: ElevatedButton(
-            onPressed: _selectedPreviewSlots.length >= 2 ? _confirmTeamPreviewSelection : null,
+            onPressed: _selectedPreviewSlots.length == _maxPickTeamSize ? _confirmTeamPreviewSelection : null,
             style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700]),
-            child: Text('Confirm Selection (${_selectedPreviewSlots.length}/${_p1TeamList.length})'),
+            child: Text('Confirm Selection (${_selectedPreviewSlots.length}/$_maxPickTeamSize)'),
           ),
         ),
-        if (_p2TeamSheetText.isNotEmpty) ...[
+        if (_p2CardData.isNotEmpty) ...[
           const SizedBox(height: 20),
           const Divider(),
           const SizedBox(height: 8),
           Semantics(
             header: true,
             child: const Text(
-              'Opponent Team Sheet (VGC-style reveal)',
+              'Opponent Team (VGC-style reveal)',
               style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.redAccent),
             ),
           ),
           const SizedBox(height: 8),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: Colors.grey[900],
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: Colors.grey[700]!, width: 1),
-            ),
-            child: SelectableText(
-              _p2TeamSheetText,
-              style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
-            ),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 1.3, crossAxisSpacing: 8, mainAxisSpacing: 8),
+            itemCount: _p2CardData.length,
+            itemBuilder: (context, index) {
+              return _buildPreviewCard(
+                data: _p2CardData[index],
+                fallbackName: 'Pokémon ${index + 1}',
+                selected: false,
+                badgeText: '',
+                onTap: null,
+              );
+            },
           ),
         ],
       ],
+    );
+  }
+
+  Widget _buildPreviewCard({
+    required Map<String, dynamic>? data,
+    required String fallbackName,
+    required bool selected,
+    required String badgeText,
+    required VoidCallback? onTap,
+  }) {
+    final name = (data?['name'] as String?) ?? fallbackName;
+    final types = (data?['types'] as List<dynamic>?)?.map((t) => t.toString()).toList() ?? [];
+    final item = (data?['item'] as String?) ?? '';
+    final moves = (data?['moves'] as List<dynamic>?)?.map((m) => m.toString()).toList() ?? [];
+
+    final card = Container(
+      decoration: BoxDecoration(
+        color: selected ? Colors.blue.withOpacity(0.3) : Colors.grey[850],
+        border: Border.all(color: selected ? Colors.blue : Colors.grey[700]!),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      padding: const EdgeInsets.all(6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  name,
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (badgeText.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: Colors.amber[700],
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: Text(badgeText, style: const TextStyle(fontSize: 8, color: Colors.black, fontWeight: FontWeight.bold)),
+                ),
+            ],
+          ),
+          if (types.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Wrap(
+                spacing: 2,
+                runSpacing: 2,
+                children: types.map((t) {
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: _typeColors[t] ?? Colors.grey,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    child: Text(t, style: const TextStyle(fontSize: 7, color: Colors.white, fontWeight: FontWeight.bold)),
+                  );
+                }).toList(),
+              ),
+            ),
+          if (item.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                '@ $item',
+                style: const TextStyle(fontSize: 9, color: Colors.amberAccent),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          if (moves.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                moves.join(' • '),
+                style: const TextStyle(fontSize: 9, color: Colors.grey),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+        ],
+      ),
+    );
+
+    final semanticsLabel = [
+      name,
+      if (types.isNotEmpty) 'Type: ${types.join(', ')}',
+      if (item.isNotEmpty) 'Holding $item',
+      if (moves.isNotEmpty) 'Moves: ${moves.join(', ')}',
+      if (badgeText.isNotEmpty) badgeText,
+    ].join('. ');
+
+    if (onTap == null) {
+      return Semantics(label: semanticsLabel, child: card);
+    }
+
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: semanticsLabel,
+      child: InkWell(onTap: onTap, child: card),
     );
   }
 
