@@ -556,11 +556,29 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           return problems;
         };
 
+        globalThis.generateRandomTeam = function(formatId) {
+          try {
+            var team = new globalThis.__ChampionsRandomTeams(formatId, null).getTeam();
+            return team;
+          } catch (e) {
+            globalThis.logBuffer.push('|debug-random-team-error| ' + (e && e.message ? e.message : String(e)));
+            return null;
+          }
+        };
+
         globalThis.startVGCBattle = function(formatId, p1TeamData, p2TeamData) {
           globalThis.logBuffer = [];
           try {
-            const p1Team = globalThis.parseTeam(p1TeamData);
-            const p2Team = globalThis.parseTeam(p2TeamData);
+            const p1Team = (p1TeamData === '__RANDOM__')
+              ? globalThis.generateRandomTeam(formatId)
+              : globalThis.parseTeam(p1TeamData);
+            const p2Team = (p2TeamData === '__RANDOM__')
+              ? globalThis.generateRandomTeam(formatId)
+              : globalThis.parseTeam(p2TeamData);
+
+            if (!p1Team || !p2Team) {
+              throw new Error('Random team generation failed — check debug-random-team-error in logs.');
+            }
 
             let BattleCtor = globalThis.Battle;
             if (typeof BattleCtor !== 'function') {
@@ -1139,6 +1157,64 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     }
   }
 
+  Future<void> _handleRandomTeamSubmission() async {
+    if (!_engineInitialized) {
+      setState(() {
+        _isLoading = true;
+        _statusMessage = 'Loading engine...';
+      });
+      await _initEngine();
+      _engineInitialized = true;
+    }
+    _startRandomMatch();
+  }
+
+  void _startRandomMatch() {
+    if (_jsRuntime == null) return;
+    setState(() {
+      _rawLogs.clear();
+      _p2TeamList.clear();
+      _activeHp.clear();
+      _activeNames.clear();
+      _statusMessage = 'Generating random teams...';
+      _p1HasMegaEvolved = false;
+      _p2HasMegaEvolved = false;
+      _turnHistory.clear();
+      _currentTurnNumber = 0;
+      _isWaiting = false;
+    });
+    _announce('Generating random teams.');
+
+    final JsEvalResult result = _jsRuntime!.evaluate(
+      "globalThis.startVGCBattle('gen9championsrandomdoublesbattle', '__RANDOM__', '__RANDOM__');"
+    );
+
+    if (result.isError || result.stringResult.startsWith('ERROR')) {
+      setState(() {
+        _statusMessage = 'Random battle failed: ${result.stringResult}';
+      });
+      _announce('Failed to start random battle.');
+      return;
+    }
+
+    _fetchLogs();
+
+    final directReqRes = _jsRuntime!.evaluate("globalThis.getDirectRequest();");
+    if (!directReqRes.isError && directReqRes.stringResult.isNotEmpty) {
+      _parseRequest(directReqRes.stringResult);
+    } else {
+      final checkBattle = _jsRuntime!.evaluate("Boolean(globalThis.battle);");
+      if (checkBattle.stringResult == 'true') {
+        setState(() {
+          if (_stage == BattleStage.setup) {
+            _stage = BattleStage.inBattle;
+            _statusMessage = 'Battle started. Select actions below.';
+          }
+        });
+      }
+    }
+  }
+
   void _confirmTeamPreviewSelection() {
     if (_selectedPreviewSlots.length < 2 || _jsRuntime == null) return;
 
@@ -1489,7 +1565,25 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             onPressed: _handleTeamSubmission,
             style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
             icon: const Icon(Icons.play_arrow, color: Colors.white),
-            label: const Text('Start PvC Battle', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            label: const Text('Start Custom Teams Battle', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ),
+        const SizedBox(height: 10),
+        const Divider(),
+        const SizedBox(height: 6),
+        const Text(
+          'Or skip team entry entirely:',
+          style: TextStyle(fontSize: 12, color: Colors.grey),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: ElevatedButton.icon(
+            onPressed: _handleRandomTeamSubmission,
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal[700]),
+            icon: const Icon(Icons.casino, color: Colors.white),
+            label: const Text('Start Random Teams Battle', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         ),
       ],

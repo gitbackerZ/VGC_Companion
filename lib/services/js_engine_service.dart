@@ -243,6 +243,10 @@ class JsEngineService {
                 }
               }
 
+              if (lowerId.indexOf('random-battles') !== -1 && lowerId.indexOf('champions') !== -1) {
+                return { default: globalThis.__ChampionsRandomTeams };
+              }
+
               if (lowerId.indexOf('custom-formats') !== -1) {
                 return { Formats: [] };
               }
