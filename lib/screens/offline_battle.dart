@@ -1372,34 +1372,66 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Gen 9 PvC Double Battle'),
+  Future<bool> _confirmExitBattle() async {
+    if (_stage == BattleStage.setup) return true; // nothing to lose yet
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Leave Battle?'),
+        content: const Text('Your current battle progress will be lost if you exit now.'),
         actions: [
-          if (_stage != BattleStage.setup)
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              tooltip: 'New Battle Setup',
-              onPressed: () => setState(() => _stage = BattleStage.setup),
-            ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Exit'),
+          ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(12),
-                    child: _buildStageContent(),
+    );
+    return result ?? false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final shouldPop = await _confirmExitBattle();
+        if (shouldPop && context.mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Gen 9 PvC Double Battle'),
+          actions: [
+            if (_stage != BattleStage.setup)
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                tooltip: 'New Battle Setup',
+                onPressed: () => setState(() => _stage = BattleStage.setup),
+              ),
+          ],
+        ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : Column(
+                children: [
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(12),
+                      child: _buildStageContent(),
+                    ),
                   ),
-                ),
-                _buildLogAccessBar(),
-                _buildStatusBar(),
-              ],
-            ),
+                  _buildLogAccessBar(),
+                  _buildStatusBar(),
+                ],
+              ),
+      ),
     );
   }
 

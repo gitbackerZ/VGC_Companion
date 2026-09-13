@@ -10,6 +10,7 @@ class JsEngineService {
 
   JavascriptRuntime? _jsRuntime;
   bool _isInitialized = false;
+  Future<void>? _initFuture;
 
   /// Holds the most recent diagnostic info from getBaseSpeciesList(), so it
   /// can be surfaced on-screen when testing directly on-device (no
@@ -33,10 +34,13 @@ class JsEngineService {
   /// higher-level Dex-lookup methods.
   JavascriptRuntime? get runtime => _jsRuntime;
 
-  Future<void> init() async {
+  Future<void> init() {
     _refCount++;
-    if (_isInitialized) return;
+    _initFuture ??= _doInit();
+    return _initFuture!;
+  }
 
+  Future<void> _doInit() async {
     _jsRuntime = getJavascriptRuntime();
 
     try {
@@ -358,6 +362,7 @@ class JsEngineService {
       _jsRuntime!.dispose();
       _jsRuntime = null;
       _isInitialized = false;
+      _initFuture = null;
     }
   }
 
