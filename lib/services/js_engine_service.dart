@@ -356,14 +356,27 @@ class JsEngineService {
   /// Call this instead of holding onto the runtime forever. Decrements the
   /// reference count and only actually tears down the JS runtime once no
   /// screen is using it anymore.
+  // Intentionally does NOT dispose the JS runtime. The engine is expensive
+  // to (re)initialize (parses/evaluates engine.js and rebuilds the Dex),
+  // so it's kept alive for the lifetime of the app once primed, shared
+  // across screens, rather than being torn down whenever a screen using
+  // it happens to be the last one on-screen. _refCount is retained purely
+  // for diagnostics/future use — it no longer gates teardown.
   void release() {
     if (_refCount > 0) _refCount--;
-    if (_refCount == 0 && _jsRuntime != null) {
+  }
+
+  /// Explicit, opt-in teardown — call this only if you actually want to
+  /// free the engine (e.g. a memory-pressure callback, or a debug "reset
+  /// engine" action). Screen dispose() should NOT call this.
+  void forceDispose() {
+    if (_jsRuntime != null) {
       _jsRuntime!.dispose();
       _jsRuntime = null;
-      _isInitialized = false;
-      _initFuture = null;
     }
+    _isInitialized = false;
+    _initFuture = null;
+    _refCount = 0;
   }
 
   /// Deprecated alias — kept so existing call sites (dispose()) don't need
