@@ -31,6 +31,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
   List<dynamic> _p1TeamList = [];
   List<dynamic> _p2TeamList = [];
+  String _p2TeamSheetText = '';
   final List<int> _selectedPreviewSlots = [];
 
   final Map<String, String> _activeHp = {};
@@ -77,6 +78,15 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           ..addAll(Map<String, int?>.from((data['p2SideConditions'] as Map?) ?? {}));
       }
     } catch (_) {}
+  }
+
+  void _fetchP2TeamSheet() {
+    if (_jsRuntime == null) return;
+    final result = _jsRuntime!.evaluate("globalThis.getP2TeamSheetText();");
+    if (result.isError) return;
+    setState(() {
+      _p2TeamSheetText = result.stringResult;
+    });
   }
 
   String _formatSideConditions(String label, Map<String, int?> conditions) {
@@ -154,6 +164,16 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   String _statusMessage = 'Enter both team sheets to begin.';
   bool _engineInitialized = false;
   bool _isWaiting = false;
+
+  bool _useBring4Format = false;
+
+  String get _customGameFormatId => _useBring4Format
+      ? 'gen9championsvgcbring4customgame'
+      : 'gen9championsdoublescustomgame';
+
+  String get _randomBattleFormatId => _useBring4Format
+      ? 'gen9championsrandomdoublesvgcbring4'
+      : 'gen9championsrandomdoublesbattle';
 
   final List<String> _announceQueue = [];
   Timer? _announceDrainTimer;
@@ -563,6 +583,76 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           } catch (e) {
             globalThis.logBuffer.push('|debug-random-team-error| ' + (e && e.message ? e.message : String(e)));
             return null;
+          }
+        };
+
+        // Converts a generated PokemonSet[] into the plain-text sheet format
+        // your TextField/parseTeam already understands, so a randomized team
+        // can populate the same controller a person would otherwise type into.
+        // Reads the opponent's (p2) actual team from the live battle object
+        // and formats it as a readable sheet — used to show a VGC-style
+        // "team sheet reveal" during team preview, since this is a solo
+        // PvE battle against a bot with no secrecy concern.
+        globalThis.getP2TeamSheetText = function() {
+          try {
+            var b = globalThis.battle;
+            if (!b || !b.p2 || !b.p2.pokemon) return "";
+            var lines = [];
+            for (var i = 0; i < b.p2.pokemon.length; i++) {
+              var mon = b.p2.pokemon[i];
+              var header = (mon.species && mon.species.name) || mon.name || 'Unknown';
+              if (mon.item) {
+                var itemEntry = (Dex && Dex.items && typeof Dex.items.get === 'function') ? Dex.items.get(mon.item) : null;
+                header += ' @ ' + (itemEntry && itemEntry.exists ? itemEntry.name : mon.item);
+              }
+              var monLines = [header];
+              if (mon.ability) {
+                var abilityEntry = (Dex && Dex.abilities && typeof Dex.abilities.get === 'function') ? Dex.abilities.get(mon.ability) : null;
+                monLines.push('Ability: ' + (abilityEntry && abilityEntry.exists ? abilityEntry.name : mon.ability));
+              }
+              monLines.push('Level: ' + (mon.level || 50));
+              var moveSlots = mon.moveSlots || mon.baseMoveSlots || [];
+              for (var j = 0; j < moveSlots.length; j++) {
+                var slot = moveSlots[j];
+                var moveName = slot && slot.move ? slot.move : (typeof slot === 'string' ? slot : '');
+                if (moveName) monLines.push('- ' + moveName);
+              }
+              lines.push(monLines.join('\\n'));
+            }
+            return lines.join('\\n\\n');
+          } catch (e) {
+            return "";
+          }
+        };
+
+        globalThis.generateRandomTeamText = function(formatId) {
+          try {
+            var team = globalThis.generateRandomTeam(formatId);
+            if (!team) return "";
+
+            var blocks = team.map(function(mon) {
+              var lines = [];
+              var header = mon.species || mon.name || 'Pikachu';
+              if (mon.item) header += ' @ ' + mon.item;
+              lines.push(header);
+              if (mon.ability) lines.push('Ability: ' + mon.ability);
+              lines.push('Level: ' + (mon.level || 50));
+              if (mon.nature) lines.push(mon.nature + ' Nature');
+              var moves = Array.isArray(mon.moves) ? mon.moves : [];
+              for (var i = 0; i < moves.length; i++) {
+                var moveName = moves[i];
+                var moveEntry = (globalThis.Dex && Dex.moves && typeof Dex.moves.get === 'function')
+                  ? Dex.moves.get(moveName)
+                  : null;
+                lines.push('- ' + (moveEntry && moveEntry.exists ? moveEntry.name : moveName));
+              }
+              return lines.join('\\n');
+            });
+
+            return blocks.join('\\n\\n');
+          } catch (e) {
+            globalThis.logBuffer.push('|debug-random-team-text-error| ' + (e && e.message ? e.message : String(e)));
+            return "";
           }
         };
 
@@ -1000,6 +1090,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           _selectedPreviewSlots.clear();
           _statusMessage = 'Team preview active. Choose Pokémon.';
           _announce('Team preview started.');
+          _fetchP2TeamSheet();
         } else if (data.containsKey('wait') && data['wait'] == true) {
           // Genuinely don't touch _currentRequest here — keep whatever move/active
           // data we already had, so the UI doesn't go blank while waiting.
@@ -1113,6 +1204,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     setState(() {
       _rawLogs.clear();
       _p2TeamList.clear();
+      _p2TeamSheetText = '';
       _activeHp.clear();
       _activeNames.clear();
       _statusMessage = 'Starting Battle...';
@@ -1128,7 +1220,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     final p2Data = jsonEncode(_p2TeamController.text);
 
     final JsEvalResult result = _jsRuntime!.evaluate(
-      "globalThis.startVGCBattle('gen9championsdoublescustomgame', $p1Data, $p2Data);"
+      "globalThis.startVGCBattle('$_customGameFormatId', $p1Data, $p2Data);"
     );
 
     if (result.isError) {
@@ -1157,7 +1249,10 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     }
   }
 
-  Future<void> _handleRandomTeamSubmission() async {
+  bool _isGeneratingP1Random = false;
+  bool _isGeneratingP2Random = false;
+
+  Future<void> _randomizeTeamField(TextEditingController controller, {required bool isP1}) async {
     if (!_engineInitialized) {
       setState(() {
         _isLoading = true;
@@ -1165,62 +1260,47 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       });
       await _initEngine();
       _engineInitialized = true;
+      setState(() => _isLoading = false);
     }
-    _startRandomMatch();
-  }
-
-  void _startRandomMatch() {
     if (_jsRuntime == null) return;
-    setState(() {
-      _rawLogs.clear();
-      _p2TeamList.clear();
-      _activeHp.clear();
-      _activeNames.clear();
-      _statusMessage = 'Generating random teams...';
-      _p1HasMegaEvolved = false;
-      _p2HasMegaEvolved = false;
-      _turnHistory.clear();
-      _currentTurnNumber = 0;
-      _isWaiting = false;
-    });
-    _announce('Generating random teams.');
 
-    final JsEvalResult result = _jsRuntime!.evaluate(
-      "globalThis.startVGCBattle('gen9championsrandomdoublesbattle', '__RANDOM__', '__RANDOM__');"
+    setState(() {
+      if (isP1) {
+        _isGeneratingP1Random = true;
+      } else {
+        _isGeneratingP2Random = true;
+      }
+    });
+
+    final result = _jsRuntime!.evaluate(
+      "globalThis.generateRandomTeamText('$_randomBattleFormatId');",
     );
 
-    if (result.isError || result.stringResult.startsWith('ERROR')) {
+    setState(() {
+      if (isP1) {
+        _isGeneratingP1Random = false;
+      } else {
+        _isGeneratingP2Random = false;
+      }
+    });
+
+    if (result.isError || result.stringResult.trim().isEmpty) {
       setState(() {
-        _statusMessage = 'Random battle failed: ${result.stringResult}';
+        _statusMessage = 'Failed to generate a random team. Try again.';
       });
-      _announce('Failed to start random battle.');
+      _announce('Failed to generate a random team.');
       return;
     }
 
-    _fetchLogs();
-
-    if (_currentRequest != null) {
-      if (_stage == BattleStage.setup) {
-        setState(() {
-          _stage = BattleStage.inBattle;
-        });
-      }
-    } else {
-      final directReqRes = _jsRuntime!.evaluate("globalThis.getDirectRequest();");
-      if (!directReqRes.isError && directReqRes.stringResult.isNotEmpty) {
-        _parseRequest(directReqRes.stringResult);
-      } else {
-        final checkBattle = _jsRuntime!.evaluate("Boolean(globalThis.battle);");
-        if (checkBattle.stringResult == 'true') {
-          setState(() {
-            if (_stage == BattleStage.setup) {
-              _stage = BattleStage.inBattle;
-              _statusMessage = 'Battle started. Select actions below.';
-            }
-          });
-        }
-      }
-    }
+    // stringResult from JS evaluate comes back as a JS string, but flutter_js
+    // returns it already unquoted for plain string results here.
+    controller.text = result.stringResult;
+    setState(() {
+      _statusMessage = isP1
+          ? 'Random team generated for Player 1. Edit if you like, then start the battle.'
+          : 'Random team generated for the Computer. Edit if you like, then start the battle.';
+    });
+    _announce(isP1 ? 'Random team generated for Player 1.' : 'Random team generated for the Computer.');
   }
 
   void _confirmTeamPreviewSelection() {
@@ -1540,7 +1620,38 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           child: const Text('Setup PvC Gen 9 Teams', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         ),
         const SizedBox(height: 12),
-        const Text('Player 1 Team (Human)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blueAccent)),
+        Semantics(
+          label: _useBring4Format
+              ? 'VGC Bring 4 format selected: bring 6, choose 4 at team preview'
+              : 'Standard format selected: full team, no team preview cap',
+          child: SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('VGC Bring 4 (bring 6, choose 4)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+            subtitle: const Text('Team preview lets you pick 4 of 6 revealed Pokémon', style: TextStyle(fontSize: 11, color: Colors.grey)),
+            value: _useBring4Format,
+            onChanged: (v) => setState(() => _useBring4Format = v),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Player 1 Team (Human)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blueAccent)),
+            Semantics(
+              button: true,
+              label: _isGeneratingP1Random
+                  ? 'Generating random team for Player 1'
+                  : 'Randomize Player 1 team',
+              child: TextButton.icon(
+                onPressed: _isGeneratingP1Random ? null : () => _randomizeTeamField(_p1TeamController, isP1: true),
+                icon: _isGeneratingP1Random
+                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.casino, size: 16),
+                label: const Text('Randomize', style: TextStyle(fontSize: 11)),
+              ),
+            ),
+          ],
+        ),
         const SizedBox(height: 4),
         TextField(
           controller: _p1TeamController,
@@ -1553,7 +1664,25 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           ),
         ),
         const SizedBox(height: 16),
-        const Text('Player 2 Team (Computer AI)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.redAccent)),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Player 2 Team (Computer AI)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.redAccent)),
+            Semantics(
+              button: true,
+              label: _isGeneratingP2Random
+                  ? 'Generating random team for the Computer'
+                  : 'Randomize Computer team',
+              child: TextButton.icon(
+                onPressed: _isGeneratingP2Random ? null : () => _randomizeTeamField(_p2TeamController, isP1: false),
+                icon: _isGeneratingP2Random
+                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.casino, size: 16),
+                label: const Text('Randomize', style: TextStyle(fontSize: 11)),
+              ),
+            ),
+          ],
+        ),
         const SizedBox(height: 4),
         TextField(
           controller: _p2TeamController,
@@ -1576,25 +1705,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             label: const Text('Start Custom Teams Battle', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         ),
-        const SizedBox(height: 10),
-        const Divider(),
-        const SizedBox(height: 6),
-        const Text(
-          'Or skip team entry entirely:',
-          style: TextStyle(fontSize: 12, color: Colors.grey),
-        ),
-        const SizedBox(height: 8),
-        SizedBox(
-          width: double.infinity,
-          height: 48,
-          child: ElevatedButton.icon(
-            onPressed: _handleRandomTeamSubmission,
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal[700]),
-            icon: const Icon(Icons.casino, color: Colors.white),
-            label: const Text('Start Random Teams Battle', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ),
-      ],
+        ],
     );
   }
 
@@ -1659,6 +1770,32 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             child: Text('Confirm Selection (${_selectedPreviewSlots.length}/${_p1TeamList.length})'),
           ),
         ),
+        if (_p2TeamSheetText.isNotEmpty) ...[
+          const SizedBox(height: 20),
+          const Divider(),
+          const SizedBox(height: 8),
+          Semantics(
+            header: true,
+            child: const Text(
+              'Opponent Team Sheet (VGC-style reveal)',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.redAccent),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.grey[900],
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: Colors.grey[700]!, width: 1),
+            ),
+            child: SelectableText(
+              _p2TeamSheetText,
+              style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+            ),
+          ),
+        ],
       ],
     );
   }
