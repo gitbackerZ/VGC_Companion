@@ -1199,65 +1199,6 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
     _fetchLogs();
 
-    final directReqRes = _jsRuntime!.evaluate("globalThis.getDirectRequest();");
-    if (!directReqRes.isError && directReqRes.stringResult.isNotEmpty) {
-      _parseRequest(directReqRes.stringResult);
-    } else {
-      final checkBattle = _jsRuntime!.evaluate("Boolean(globalThis.battle);");
-      if (checkBattle.stringResult == 'true') {
-        setState(() {
-          if (_stage == BattleStage.setup) {
-            _stage = BattleStage.inBattle;
-            _statusMessage = 'Battle started. Select actions below.';
-          }
-        });
-      }
-    }
-    }
-  }
-
-Future<void> _handleRandomTeamSubmission() async {
-    if (!_engineInitialized) {
-      setState(() {
-        _isLoading = true;
-        _statusMessage = 'Loading engine...';
-      });
-      await _initEngine();
-      _engineInitialized = true;
-    }
-    _startRandomMatch();
-  }
-
-  void _startRandomMatch() {
-    if (_jsRuntime == null) return;
-    setState(() {
-      _rawLogs.clear();
-      _p2TeamList.clear();
-      _activeHp.clear();
-      _activeNames.clear();
-      _statusMessage = 'Generating random teams...';
-      _p1HasMegaEvolved = false;
-      _p2HasMegaEvolved = false;
-      _turnHistory.clear();
-      _currentTurnNumber = 0;
-      _isWaiting = false;
-    });
-    _announce('Generating random teams.');
-
-    final JsEvalResult result = _jsRuntime!.evaluate(
-      "globalThis.startVGCBattle('gen9championsrandomdoublesbattle', '__RANDOM__', '__RANDOM__');"
-    );
-
-    if (result.isError || result.stringResult.startsWith('ERROR')) {
-      setState(() {
-        _statusMessage = 'Random battle failed: ${result.stringResult}';
-      });
-      _announce('Failed to start random battle.');
-      return;
-    }
-
-    _fetchLogs();
-
     if (_currentRequest != null) {
       if (_stage == BattleStage.setup) {
         setState(() {
