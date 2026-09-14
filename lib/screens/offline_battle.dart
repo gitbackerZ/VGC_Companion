@@ -683,34 +683,6 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           }
         };
 
-        // Returns structured team-preview data (species, types, item, moves)
-        // for either side, read from the live battle's real Pokemon objects
-        // so displayed names/items/moves are the resolved Dex names, not
-        // raw internal IDs.
-        globalThis.getTeamPreviewCards = function(side) {
-          try {
-            var b = globalThis.battle;
-            if (!b) return "[]";
-            var sideObj = side === 'p1' ? b.p1 : b.p2;
-            if (!sideObj || !sideObj.pokemon) return "[]";
-            var result = [];
-            for (var i = 0; i < sideObj.pokemon.length; i++) {
-              var mon = sideObj.pokemon[i];
-              var speciesName = (mon.species && mon.species.name) || mon.name || 'Unknown';
-              var types = (mon.species && mon.species.types) || mon.types || [];
-              var itemName = '';
-              if (mon.item) {
-                var itemEntry = (Dex && Dex.items && typeof Dex.items.get === 'function') ? Dex.items.get(mon.item) : null;
-                itemName = itemEntry && itemEntry.exists ? itemEntry.name : mon.item;
-              }
-              
-            }
-            return JSON.stringify(result);
-          } catch (e) {
-            return "[]";
-          }
-        };
-
         globalThis.generateRandomTeamText = function(formatId) {
           try {
             var team = globalThis.generateRandomTeam(formatId);
