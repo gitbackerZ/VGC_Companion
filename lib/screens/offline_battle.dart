@@ -671,8 +671,12 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                 var mv = slot && slot.move ? slot.move : (typeof slot === 'string' ? slot : '');
                 if (mv) moveNames.push(mv);
               }
-              result.push({ name: speciesName, types: types, item: itemName, moves: moveNames });
-            }
+              var abilityName = '';
+              if (mon.ability) {
+                var abilityEntry = (Dex && Dex.abilities && typeof Dex.abilities.get === 'function') ? Dex.abilities.get(mon.ability) : null;
+                abilityName = abilityEntry && abilityEntry.exists ? abilityEntry.name : mon.ability;
+              }
+              result.push({ name: speciesName, types: types, item: itemName, moves: moveNames, ability: abilityName });            }
             return JSON.stringify(result);
           } catch (e) {
             return "[]";
@@ -699,14 +703,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                 var itemEntry = (Dex && Dex.items && typeof Dex.items.get === 'function') ? Dex.items.get(mon.item) : null;
                 itemName = itemEntry && itemEntry.exists ? itemEntry.name : mon.item;
               }
-              var moveNames = [];
-              var moveSlots = mon.moveSlots || mon.baseMoveSlots || [];
-              for (var j = 0; j < moveSlots.length; j++) {
-                var slot = moveSlots[j];
-                var mv = slot && slot.move ? slot.move : (typeof slot === 'string' ? slot : '');
-                if (mv) moveNames.push(mv);
-              }
-              result.push({ name: speciesName, types: types, item: itemName, moves: moveNames });
+              
             }
             return JSON.stringify(result);
           } catch (e) {
@@ -1909,6 +1906,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     final name = (data?['name'] as String?) ?? fallbackName;
     final types = (data?['types'] as List<dynamic>?)?.map((t) => t.toString()).toList() ?? [];
     final item = (data?['item'] as String?) ?? '';
+    final ability = (data?['ability'] as String?) ?? '';
     final moves = (data?['moves'] as List<dynamic>?)?.map((m) => m.toString()).toList() ?? [];
 
     final card = Container(
@@ -1969,6 +1967,15 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
+          if (ability.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                ability,
+                style: const TextStyle(fontSize: 9, color: Colors.lightBlueAccent),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           if (moves.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 3),
@@ -1986,19 +1993,21 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     final semanticsLabel = [
       name,
       if (types.isNotEmpty) 'Type: ${types.join(', ')}',
+      if (ability.isNotEmpty) 'Ability: $ability',
       if (item.isNotEmpty) 'Holding $item',
       if (moves.isNotEmpty) 'Moves: ${moves.join(', ')}',
       if (badgeText.isNotEmpty) badgeText,
     ].join('. ');
 
     if (onTap == null) {
-      return Semantics(label: semanticsLabel, child: card);
+      return Semantics(label: semanticsLabel, excludeSemantics: true, child: card);
     }
 
     return Semantics(
       button: true,
       selected: selected,
       label: semanticsLabel,
+      excludeSemantics: true,
       child: InkWell(onTap: onTap, child: card),
     );
   }
