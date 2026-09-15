@@ -46,10 +46,12 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   int? _fieldWeatherTurnsLeft;
   final Map<String, int?> _p1SideConditions = {};
   final Map<String, int?> _p2SideConditions = {};
+  String _fieldTerrain = '';
+  int? _fieldTerrainTurnsLeft;
+  final Map<String, int?> _fieldPseudoWeather = {};
 
   static const Map<String, String> _sideConditionLabels = {
     'tailwind': 'Tailwind',
-    'trickroom': 'Trick Room',
     'reflect': 'Reflect',
     'lightscreen': 'Light Screen',
     'auroraveil': 'Aurora Veil',
@@ -59,6 +61,20 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     'stickyweb': 'Sticky Web',
     'safeguard': 'Safeguard',
     'mist': 'Mist',
+  };
+
+  static const Map<String, String> _terrainLabels = {
+    'electricterrain': 'Electric Terrain',
+    'grassyterrain': 'Grassy Terrain',
+    'mistyterrain': 'Misty Terrain',
+    'psychicterrain': 'Psychic Terrain',
+  };
+
+  static const Map<String, String> _pseudoWeatherLabels = {
+    'trickroom': 'Trick Room',
+    'wonderroom': 'Wonder Room',
+    'magicroom': 'Magic Room',
+    'gravity': 'Gravity',
   };
 
   void _refreshFieldInfo() {
@@ -72,6 +88,12 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         _fieldWeather = data['weather']?.toString() ?? '';
         final minDur = data['weatherTurnsLeft'];
         _fieldWeatherTurnsLeft = minDur is int ? minDur : null;
+        _fieldTerrain = data['terrain']?.toString() ?? '';
+        final terrainDur = data['terrainTurnsLeft'];
+        _fieldTerrainTurnsLeft = terrainDur is int ? terrainDur : null;
+        _fieldPseudoWeather
+          ..clear()
+          ..addAll(Map<String, int?>.from((data['pseudoWeather'] as Map?) ?? {}));
         _p1SideConditions
           ..clear()
           ..addAll(Map<String, int?>.from((data['p1SideConditions'] as Map?) ?? {}));
@@ -117,12 +139,25 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     return '$label: $parts';
   }
 
+  String _formatPseudoWeather(Map<String, int?> pseudoWeather) {
+    if (pseudoWeather.isEmpty) return '';
+    final parts = pseudoWeather.entries.map((e) {
+      final name = _pseudoWeatherLabels[e.key] ?? e.key;
+      return e.value != null ? '$name (${e.value} left)' : name;
+    }).join(', ');
+    return 'Field: $parts';
+  }
+
   Widget _buildFieldConditionPanel() {
     final p1Text = _formatSideConditions('Your side', _p1SideConditions);
     final p2Text = _formatSideConditions('Opponent side', _p2SideConditions);
+    final pseudoWeatherText = _formatPseudoWeather(_fieldPseudoWeather);
     final weatherText = _fieldWeather.isNotEmpty
         ? '$_fieldWeather${_fieldWeatherTurnsLeft != null ? ' ($_fieldWeatherTurnsLeft turns left)' : ''}'
         : 'Clear';
+    final terrainText = _fieldTerrain.isNotEmpty
+        ? '${_terrainLabels[_fieldTerrain] ?? _fieldTerrain}${_fieldTerrainTurnsLeft != null ? ' ($_fieldTerrainTurnsLeft turns left)' : ''}'
+        : 'None';
 
     return Container(
       width: double.infinity,
@@ -137,6 +172,8 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text('Turn $_fieldTurn — Weather: $weatherText', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+          Text('Terrain: $terrainText', style: const TextStyle(fontSize: 10, color: Colors.greenAccent)),
+          if (pseudoWeatherText.isNotEmpty) Text(pseudoWeatherText, style: const TextStyle(fontSize: 10, color: Colors.orangeAccent)),
           if (p1Text.isNotEmpty) Text(p1Text, style: const TextStyle(fontSize: 10, color: Colors.lightBlueAccent)),
           if (p2Text.isNotEmpty) Text(p2Text, style: const TextStyle(fontSize: 10, color: Colors.redAccent)),
         ],
@@ -325,9 +362,18 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               turn: b.turn || 0,
               weather: field.weather || '',
               weatherTurnsLeft: field.weatherState ? field.weatherState.minDuration : null,
+              terrain: field.terrain || '',
+              terrainTurnsLeft: field.terrainState ? field.terrainState.minDuration : null,
+              pseudoWeather: {},
               p1SideConditions: {},
               p2SideConditions: {}
             };
+            if (field.pseudoWeather) {
+              for (var pwKey in field.pseudoWeather) {
+                var pw = field.pseudoWeather[pwKey];
+                info.pseudoWeather[pwKey] = (pw && pw.duration !== undefined) ? pw.duration : null;
+              }
+            }
             function collectSide(side) {
               var out = {};
               if (side && side.sideConditions) {
@@ -919,6 +965,72 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       case '-mega':
         if (parts.length < 4) return line;
         return '${nameOf(parts[2])} Mega Evolved into ${parts[3]}!';
+      case '-enditem':
+        if (parts.length < 4) return line;
+        return '${nameOf(parts[2])}\'s ${parts[3]} was consumed.';
+      case '-activate':
+        if (parts.length < 3) return line;
+        final activateEffect = parts.length > 3 ? parts[3].replaceAll('move: ', '').replaceAll('item: ', '').replaceAll('ability: ', '') : 'an effect';
+        return '${nameOf(parts[2])}\'s $activateEffect activated.';
+      case '-sideend':
+        if (parts.length < 4) return line;
+        return '${parts[3].replaceAll('move: ', '')} ended for ${parts[2]}';
+      case '-fieldend':
+        if (parts.length < 3) return line;
+        return '${parts[2].replaceAll('move: ', '')} ended on the field';
+      case 'swap':
+        if (parts.length < 3) return line;
+        return '${nameOf(parts[2])} swapped positions.';
+      case '-mustrecharge':
+        if (parts.length < 3) return line;
+        return '${nameOf(parts[2])} must recharge!';
+      case '-hitcount':
+        if (parts.length < 4) return line;
+        return 'Hit ${parts[3]} time${parts[3] == '1' ? '' : 's'}!';
+      case '-notarget':
+        return 'There was no target!';
+      case '-block':
+        if (parts.length < 3) return line;
+        final blockEffect = parts.length > 3 ? parts[3].replaceAll('move: ', '') : 'an effect';
+        return '${nameOf(parts[2])} blocked the move with $blockEffect!';
+      case '-clearallboost':
+        return 'All stat changes were removed.';
+      case '-clearboost':
+        if (parts.length < 3) return line;
+        return '${nameOf(parts[2])}\'s stat changes were removed.';
+      case '-clearpositiveboost':
+        if (parts.length < 3) return line;
+        return '${nameOf(parts[2])}\'s positive stat changes were removed.';
+      case '-clearnegativeboost':
+        if (parts.length < 3) return line;
+        return '${nameOf(parts[2])}\'s negative stat changes were removed.';
+      case '-swapboost':
+        if (parts.length < 3) return line;
+        return '${nameOf(parts[2])} swapped stat changes.';
+      case '-copyboost':
+        if (parts.length < 4) return line;
+        return '${nameOf(parts[2])} copied ${nameOf(parts[3])}\'s stat changes.';
+      case '-invertboost':
+        if (parts.length < 3) return line;
+        return '${nameOf(parts[2])}\'s stat changes were inverted.';
+      case '-setboost':
+        if (parts.length < 3) return line;
+        return '${nameOf(parts[2])}\'s stat changes were set.';
+      case '-singleturn':
+        if (parts.length < 4) return line;
+        return '${nameOf(parts[2])} is protected by ${parts[3].replaceAll('move: ', '')} this turn.';
+      case '-singlemove':
+        if (parts.length < 4) return line;
+        return '${nameOf(parts[2])} is affected by ${parts[3].replaceAll('move: ', '')} this move.';
+      case 'replace':
+        if (parts.length < 3) return line;
+        return '${nameOf(parts[2])} was revealed!';
+      case '-transform':
+        if (parts.length < 4) return line;
+        return '${nameOf(parts[2])} transformed into ${nameOf(parts[3])}!';
+      case '-formechange':
+        if (parts.length < 4) return line;
+        return '${nameOf(parts[2])} changed form to ${parts[3]}!';
       case '-fieldstart':
         if (parts.length < 3) return line;
         return '${parts[3.clamp(0, parts.length - 1)]}'.contains('ability:')
@@ -1943,7 +2055,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     final semanticsLabel = [
       if (badgeText.isNotEmpty) badgeText,
       name,
-      if (typeText.isNotEmpty) 'Type: $typeText',
+      if (types.isNotEmpty) 'Type: ${types.join(', ')}',
       if (ability.isNotEmpty) 'Ability: $ability',
       if (item.isNotEmpty) 'Holding $item',
       if (moves.isNotEmpty) 'Moves: ${moves.join(', ')}',
