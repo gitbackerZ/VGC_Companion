@@ -1793,10 +1793,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blueAccent),
         ),
         const SizedBox(height: 8),
-        GridView.builder(
+        ListView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 1.3, crossAxisSpacing: 8, mainAxisSpacing: 8),
           itemCount: _p1TeamList.length,
           itemBuilder: (context, index) {
             final slotIndex = index + 1;
@@ -1807,22 +1806,25 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                 : (selectedPos < 2 ? 'Lead ${selectedPos + 1}' : 'Back ${selectedPos - 1}');
             final cardData = index < _p1CardData.length ? _p1CardData[index] : null;
 
-            return _buildPreviewCard(
-              data: cardData,
-              fallbackName: _p1TeamList[index] is Map
-                  ? (_p1TeamList[index]['details']?.toString().split(',')[0] ?? 'Pokémon $slotIndex')
-                  : 'Pokémon $slotIndex',
-              selected: selected,
-              badgeText: posText,
-              onTap: () {
-                setState(() {
-                  if (selected) {
-                    _selectedPreviewSlots.removeAt(selectedPos);
-                  } else if (_selectedPreviewSlots.length < _maxPickTeamSize) {
-                    _selectedPreviewSlots.add(slotIndex);
-                  }
-                });
-              },
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _buildPreviewStrip(
+                data: cardData,
+                fallbackName: _p1TeamList[index] is Map
+                    ? (_p1TeamList[index]['details']?.toString().split(',')[0] ?? 'Pokémon $slotIndex')
+                    : 'Pokémon $slotIndex',
+                selected: selected,
+                badgeText: posText,
+                onTap: () {
+                  setState(() {
+                    if (selected) {
+                      _selectedPreviewSlots.removeAt(selectedPos);
+                    } else if (_selectedPreviewSlots.length < _maxPickTeamSize) {
+                      _selectedPreviewSlots.add(slotIndex);
+                    }
+                  });
+                },
+              ),
             );
           },
         ),
@@ -1848,18 +1850,20 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          GridView.builder(
+          ListView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 1.3, crossAxisSpacing: 8, mainAxisSpacing: 8),
             itemCount: _p2CardData.length,
             itemBuilder: (context, index) {
-              return _buildPreviewCard(
-                data: _p2CardData[index],
-                fallbackName: 'Pokémon ${index + 1}',
-                selected: false,
-                badgeText: '',
-                onTap: null,
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _buildPreviewStrip(
+                  data: _p2CardData[index],
+                  fallbackName: 'Pokémon ${index + 1}',
+                  selected: false,
+                  badgeText: '',
+                  onTap: null,
+                ),
               );
             },
           ),
@@ -1868,7 +1872,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     );
   }
 
-  Widget _buildPreviewCard({
+  Widget _buildPreviewStrip({
     required Map<String, dynamic>? data,
     required String fallbackName,
     required bool selected,
@@ -1881,98 +1885,72 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     final ability = (data?['ability'] as String?) ?? '';
     final moves = (data?['moves'] as List<dynamic>?)?.map((m) => m.toString()).toList() ?? [];
 
-    final card = Container(
+    final typeText = types.map((t) => _typeShorthand[t] ?? t.toUpperCase()).join('/');
+
+    final headerParts = <String>[
+      name,
+      if (typeText.isNotEmpty) typeText,
+      if (ability.isNotEmpty) ability,
+    ];
+    final headerLine = headerParts.join('  ') + (item.isNotEmpty ? '  @$item' : '');
+    final movesLine = moves.join('  ');
+
+    final strip = Container(
+      width: double.infinity,
       decoration: BoxDecoration(
         color: selected ? Colors.blue.withOpacity(0.3) : Colors.grey[850],
         border: Border.all(color: selected ? Colors.blue : Colors.grey[700]!),
         borderRadius: BorderRadius.circular(6),
       ),
-      padding: const EdgeInsets.all(6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  name,
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (badgeText.isNotEmpty)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: Colors.amber[700],
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                  child: Text(badgeText, style: const TextStyle(fontSize: 8, color: Colors.black, fontWeight: FontWeight.bold)),
-                ),
-            ],
-          ),
-          if (types.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 3),
-              child: Wrap(
-                spacing: 2,
-                runSpacing: 2,
-                children: types.map((t) {
-                  return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (badgeText.isNotEmpty)
+                  Container(
+                    margin: const EdgeInsets.only(right: 6),
                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                     decoration: BoxDecoration(
-                      color: _typeColors[t] ?? Colors.grey,
+                      color: Colors.amber[700],
                       borderRadius: BorderRadius.circular(3),
                     ),
-                    child: Text(t, style: const TextStyle(fontSize: 7, color: Colors.white, fontWeight: FontWeight.bold)),
-                  );
-                }).toList(),
-              ),
+                    child: Text(badgeText, style: const TextStyle(fontSize: 8, color: Colors.black, fontWeight: FontWeight.bold)),
+                  ),
+                Text(
+                  headerLine,
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+              ],
             ),
-          if (item.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 3),
-              child: Text(
-                '@ $item',
-                style: const TextStyle(fontSize: 9, color: Colors.amberAccent),
-                overflow: TextOverflow.ellipsis,
-              ),
+            const SizedBox(height: 3),
+            Text(
+              movesLine,
+              style: const TextStyle(fontSize: 10, color: Colors.grey),
             ),
-          if (ability.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Text(
-                ability,
-                style: const TextStyle(fontSize: 9, color: Colors.lightBlueAccent),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          if (moves.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 3),
-              child: Text(
-                moves.join(' • '),
-                style: const TextStyle(fontSize: 9, color: Colors.grey),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
 
+    // Order indicator goes first in the semantics label so a screen reader
+    // announces it before the Pokémon's own details.
     final semanticsLabel = [
+      if (badgeText.isNotEmpty) badgeText,
       name,
-      if (types.isNotEmpty) 'Type: ${types.join(', ')}',
+      if (typeText.isNotEmpty) 'Type: $typeText',
       if (ability.isNotEmpty) 'Ability: $ability',
       if (item.isNotEmpty) 'Holding $item',
       if (moves.isNotEmpty) 'Moves: ${moves.join(', ')}',
-      if (badgeText.isNotEmpty) badgeText,
     ].join('. ');
 
     if (onTap == null) {
-      return Semantics(label: semanticsLabel, excludeSemantics: true, child: card);
+      return Semantics(label: semanticsLabel, excludeSemantics: true, child: strip);
     }
 
     return Semantics(
@@ -1980,7 +1958,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       selected: selected,
       label: semanticsLabel,
       excludeSemantics: true,
-      child: InkWell(onTap: onTap, child: card),
+      child: InkWell(onTap: onTap, child: strip),
     );
   }
 
@@ -1993,6 +1971,8 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
     return Column(
       children: [
+        _buildFieldConditionPanel(),
+        const SizedBox(height: 6),
         GridView.count(
           crossAxisCount: 2,
           shrinkWrap: true,
@@ -2007,8 +1987,6 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             _buildMonPanel('p1b', 'Player 2', Colors.blueAccent),
           ],
         ),
-        const SizedBox(height: 6),
-        _buildFieldConditionPanel(),
         const SizedBox(height: 8),
         if (_stage == BattleStage.inBattle) ...[
           Card(
@@ -2602,6 +2580,14 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       },
     );
   }
+
+  static const Map<String, String> _typeShorthand = {
+    'Normal': 'NRM', 'Fire': 'FIR', 'Water': 'WTR', 'Electric': 'ELC',
+    'Grass': 'GRS', 'Ice': 'ICE', 'Fighting': 'FTG', 'Poison': 'PSN',
+    'Ground': 'GRD', 'Flying': 'FLY', 'Psychic': 'PSY', 'Bug': 'BUG',
+    'Rock': 'RCK', 'Ghost': 'GHO', 'Dragon': 'DRG', 'Dark': 'DRK',
+    'Steel': 'STL', 'Fairy': 'FAY',
+  };
 
   static const Map<String, Color> _typeColors = {
     'Normal': Color(0xFFA8A878), 'Fire': Color(0xFFF08030), 'Water': Color(0xFF6890F0),
