@@ -433,7 +433,8 @@ class JsEngineService {
     if (!isReady) return [];
     final script = '''
       (function() {
-        if (!Dex || !Dex.items) return JSON.stringify([]);
+        var champDex = (globalThis.Dex && globalThis.Dex.dexes) ? globalThis.Dex.dexes.champions : null;
+        if (!champDex || !champDex.items) return JSON.stringify([]);
 
         var itemKeys = (globalThis.PSStaticData && globalThis.PSStaticData.base && globalThis.PSStaticData.base.items)
           ? Object.keys(globalThis.PSStaticData.base.items)
@@ -441,7 +442,7 @@ class JsEngineService {
 
         var result = [];
         for (var i = 0; i < itemKeys.length; i++) {
-          var item = Dex.items.get(itemKeys[i]);
+          var item = champDex.items.get(itemKeys[i]);
           if (!item || !item.exists) continue;
 
           var isPastGen = item.isNonstandard === 'Past';
@@ -469,13 +470,14 @@ class JsEngineService {
     final script = '''
       (function() {
         var diag = {};
-        diag.dexExists = !!Dex;
-        diag.dexSpeciesExists = !!(Dex && Dex.species);
+        var champDex = (globalThis.Dex && globalThis.Dex.dexes) ? globalThis.Dex.dexes.champions : null;
+        diag.champDexExists = !!champDex;
+        diag.champDexSpeciesExists = !!(champDex && champDex.species);
         diag.psStaticDataExists = !!globalThis.PSStaticData;
         diag.baseExists = !!(globalThis.PSStaticData && globalThis.PSStaticData.base);
         diag.pokedexExists = !!(globalThis.PSStaticData && globalThis.PSStaticData.base && globalThis.PSStaticData.base.pokedex);
 
-        if (!Dex || !Dex.species) return JSON.stringify({error: 'no-dex', diag: diag});
+        if (!champDex || !champDex.species) return JSON.stringify({error: 'no-champ-dex', diag: diag});
 
         var pokedexKeys = (globalThis.PSStaticData && globalThis.PSStaticData.base && globalThis.PSStaticData.base.pokedex)
           ? Object.keys(globalThis.PSStaticData.base.pokedex)
@@ -487,12 +489,12 @@ class JsEngineService {
           return JSON.stringify({error: 'no-keys', diag: diag});
         }
 
-        // Try resolving the very first key and capture what happens.
+        // Try resolving the very first key through the Champions dex and capture what happens.
         var testKey = pokedexKeys[0];
         var testSpec = null;
         var testError = null;
         try {
-          testSpec = Dex.species.get(testKey);
+          testSpec = champDex.species.get(testKey);
         } catch (e) {
           testError = e && e.message ? e.message : String(e);
         }
@@ -507,11 +509,16 @@ class JsEngineService {
         for (var i = 0; i < pokedexKeys.length; i++) {
           var spec;
           try {
-            spec = Dex.species.get(pokedexKeys[i]);
+            spec = champDex.species.get(pokedexKeys[i]);
           } catch (e) {
             continue;
           }
           if (!spec || !spec.exists || spec.num <= 0) continue;
+
+          // Exclude anything not standard for the Champions mod (e.g. CAP,
+          // past-gen-only, or explicitly delisted entries) so the roster
+          // only shows what the Champions mod actually supports.
+          if (spec.isNonstandard && spec.isNonstandard !== 'Unobtainable') continue;
 
           var isMega = spec.forme && spec.forme.indexOf('Mega') !== -1;
           var isGmax = spec.forme && spec.forme.indexOf('Gmax') !== -1;
@@ -628,7 +635,9 @@ class JsEngineService {
   Future<Map<String, dynamic>> getPokemon(String name) async {
     if (!isReady) throw Exception('JsEngineService is not initialized');
     final sanitized = _toId(name);
-    final result = _jsRuntime!.evaluate('JSON.stringify(Dex.species.get("$sanitized"))');
+    final result = _jsRuntime!.evaluate(
+      'JSON.stringify((globalThis.Dex.dexes.champions || globalThis.Dex).species.get("$sanitized"))',
+    );
     if (result.isError) throw Exception('Failed to get species data for $name');
     return json.decode(result.stringResult) as Map<String, dynamic>;
   }
@@ -640,7 +649,8 @@ class JsEngineService {
       final script = '''
         (function() {
           try {
-            var species = Dex.species.get("$sanitized");
+            var champDex = (globalThis.Dex && globalThis.Dex.dexes) ? globalThis.Dex.dexes.champions : globalThis.Dex;
+            var species = champDex.species.get("$sanitized");
             if (!species || !species.exists) return JSON.stringify([]);
 
             var moveIdSet = {};
@@ -660,9 +670,9 @@ class JsEngineService {
               }
 
               if (current.prevo) {
-                current = Dex.species.get(current.prevo);
+                current = champDex.species.get(current.prevo);
               } else if (current.baseSpecies && current.baseSpecies !== current.name) {
-                current = Dex.species.get(current.baseSpecies);
+                current = champDex.species.get(current.baseSpecies);
               } else {
                 current = null;
               }
@@ -670,7 +680,7 @@ class JsEngineService {
 
             var moveIds = Object.keys(moveIdSet);
             var moves = moveIds
-              .map(function(mid) { return Dex.moves.get(mid); })
+              .map(function(mid) { return champDex.moves.get(mid); })
               .filter(function(m) { return m && m.exists && !m.isNonstandard; });
 
             return JSON.stringify(moves);

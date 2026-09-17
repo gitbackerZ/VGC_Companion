@@ -12,14 +12,12 @@ import '../services/js_engine_service.dart';
 import '../services/team_text_codec.dart';
 import '../widgets/details_editor_panel.dart';
 import '../widgets/ev_editor_panel.dart';
-import '../widgets/iv_editor_panel.dart';
+
 import '../widgets/move_editor_panel.dart';
 import '../widgets/stats_dialog.dart';
 
-enum TeamPreset { championsVgc, freeform }
-
 class TeamBuilderScreen extends StatefulWidget {
-  const TeamBuilderScreen({super.key});
+  const TeamBulderScreen({super.key});
 
   @override
   State<TeamBuilderScreen> createState() => _TeamBuilderScreenState();
@@ -33,8 +31,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   final _teamScrollController = ScrollController();
   static const _storageKey = 'saved_team';
 
-  TeamPreset _activePreset = TeamPreset.championsVgc;
-
   List<Map<String, dynamic>> _baseSpeciesList = [];
   List<Map<String, dynamic>> _filtered = [];
   List<String> _itemList = [];
@@ -46,7 +42,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   final Set<TeamMember> _collapsedCards = {};
 
   final Map<TeamMember, Map<String, int>> _initialEvs = {};
-  final Map<TeamMember, Map<String, int>> _initialIvs = {};
 
   bool _loading = true;
   String _statusMessage = '';
@@ -98,14 +93,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         _initialEvs.remove(member);
       }
 
-      final initialIv = _initialIvs[member];
-      if (initialIv != null) {
-        if (!_mapsEqual(initialIv, member.ivs)) {
-          _announce('${member.name} iv values updated');
-        }
-        _initialIvs.remove(member);
       }
-    }
   }
 
   bool _mapsEqual(Map<String, int> m1, Map<String, int> m2) {
@@ -218,9 +206,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         }
       });
 
-      if (_activePreset == TeamPreset.championsVgc) {
-        _enforceVgcPreset();
-      }
+      _enforceVgcPreset();
     } catch (e, stack) {
       debugPrint('Initialization Error: $e\n$stack');
       if (!mounted) return;
@@ -253,22 +239,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     await prefs.setString(_storageKey, encoded);
   }
 
-  void _applyPreset(TeamPreset preset) async {
-    _flushPendingPanelUpdates();
-    setState(() {
-      _activePreset = preset;
-      if (_activePreset == TeamPreset.championsVgc) {
-        _enforceVgcPreset();
-      }
-    });
-    await _saveTeam();
-    if (_activePreset == TeamPreset.championsVgc) {
-      _announce('Preset changed to Champions VGC. Levels set to 50, IVs set to 31.');
-    } else {
-      _announce('Preset changed to Freeform. Level and IV restrictions removed.');
-    }
-  }
-
   void _filter(String query) {
     final q = query.trim().toLowerCase();
     setState(() {
@@ -285,11 +255,9 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     _unfocus();
     final int pokedexNumber = baseEntry['num'] as int;
 
-    if (_activePreset == TeamPreset.championsVgc) {
-      if (_team.any((m) => m.pokedexNumber == pokedexNumber)) {
-        _announce('Species Clause: Pokédex #$pokedexNumber is already on your team.');
-        return;
-      }
+    if (_team.any((m) => m.pokedexNumber == pokedexNumber)) {
+      _announce('Species Clause: Pokédex #$pokedexNumber is already on your team.');
+      return;
     }
 
     if (_team.length >= 6) {
@@ -378,10 +346,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         genderRate: genderRate,
       );
 
-      if (_activePreset == TeamPreset.championsVgc) {
-        newMember.level = 50;
-        newMember.ivs = {'HP': 31, 'Atk': 31, 'Def': 31, 'SpA': 31, 'SpD': 31, 'Spe': 31};
-      }
+      newMember.level = 50;
+      newMember.ivs = {'HP': 31, 'Atk': 31, 'Def': 31, 'SpA': 31, 'SpD': 31, 'Spe': 31};
 
       setState(() {
         _team.add(newMember);
@@ -445,50 +411,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       if (!mounted) return;
       _announce('Could not toggle Mega form.');
     }
-  }
-
-  Future<void> _showLevelDialog(TeamMember member) async {
-    _flushPendingPanelUpdates();
-
-    if (_activePreset == TeamPreset.championsVgc) {
-      _announce('Levels are fixed at 50 in Champions VGC mode.');
-      return;
-    }
-
-    final controller = TextEditingController(text: member.level.toString());
-    await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('Set Level for ${member.name}', style: const TextStyle(fontSize: 14)),
-            _buildCloseDialogButton(context),
-          ],
-        ),
-        content: _buildLightGrayTextField(
-          controller: controller,
-          labelText: 'Level (1 - 100)',
-          keyboardType: TextInputType.number,
-        ),
-        actions: [
-          _buildLightGrayButton(
-            label: 'Save',
-            onPressed: () async {
-              final parsed = int.tryParse(controller.text);
-              if (parsed != null && parsed >= 1 && parsed <= 100) {
-                setState(() => member.level = parsed);
-                await _saveTeam();
-                _announce('${member.name} level change to $parsed');
-              }
-              if (context.mounted) Navigator.pop(context);
-            },
-          ),
-        ],
-      ),
-    );
-    _unfocus();
-    _unfocusAfterFrame();
   }
 
   Future<void> _showImportDialog() async {
@@ -619,10 +541,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         }
         for (final m in importedMembers) {
           if (_team.length < 6) {
-            if (_activePreset == TeamPreset.championsVgc) {
-              m.level = 50;
-              m.ivs = {'HP': 31, 'Atk': 31, 'Def': 31, 'SpA': 31, 'SpD': 31, 'Spe': 31};
-            }
+            m.level = 50;
+            m.ivs = {'HP': 31, 'Atk': 31, 'Def': 31, 'SpA': 31, 'SpD': 31, 'Spe': 31};
             _team.add(m);
             _collapsedCards.add(m);
           }
@@ -811,45 +731,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Semantics(
-            label: 'Select the battle format for team building',
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<TeamPreset>(
-                value: _activePreset,
-                isDense: true,
-                icon: const Icon(Icons.arrow_drop_down, size: 22),
-                items: const [
-                  DropdownMenuItem(
-                    value: TeamPreset.championsVgc,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text('Team Builder Preset', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-                        Text('Champions VGC', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                      ],
-                    ),
-                  ),
-                  DropdownMenuItem(
-                    value: TeamPreset.freeform,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text('Team Builder Preset', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-                        Text('Freeform', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                      ],
-                    ),
-                  ),
-                ],
-                onChanged: (preset) {
-                  if (preset != null && preset != _activePreset) {
-                    _applyPreset(preset);
-                  }
-                },
-              ),
-            ),
-          ),
+          title: const Text('Champions Team Builder', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           actions: [
             Semantics(
               label: 'Import team',
@@ -1014,11 +896,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         _buildEmojiButton(
-                          emoji: '🔼',
-                          semanticLabel: 'Change level for ${member.name}',
-                          onPressed: () => _showLevelDialog(member),
-                        ),
-                        _buildEmojiButton(
                           emoji: 'Ⓜ️',
                           semanticLabel: 'Toggle Mega form based on held item for ${member.name}',
                           onPressed: () => _toggleMegaForm(index),
@@ -1051,7 +928,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                       _buildPanelToggle('⚙️', 'Details', 'Open details editor for ${member.name}', false, () => _openPanelDialog(member, 'details')),
                       _buildPanelToggle('⚔️', 'Moves', 'Open move editor for ${member.name}', false, () => _openPanelDialog(member, 'moves')),
                       _buildPanelToggle('📈', 'EVs', 'Open EV allocation for ${member.name}', false, () => _openPanelDialog(member, 'evs')),
-                      _buildPanelToggle('🎚️', 'IVs', 'Open IV allocation for ${member.name}', false, () => _openPanelDialog(member, 'ivs')),
                       _buildPanelToggle('📊', 'Stats', 'Show stats dialog for ${member.name}', false, () => _showStats(member)),
                     ],
                   ),
@@ -1104,8 +980,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
     if (panelName == 'evs') {
       _initialEvs[member] = Map<String, int>.from(member.evs);
-    } else if (panelName == 'ivs') {
-      _initialIvs[member] = Map<String, int>.from(member.ivs);
     }
 
     if (!_movesCache.containsKey(member)) {
@@ -1137,9 +1011,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       case 'evs':
         title = 'EVs for ${member.name}';
         break;
-      case 'ivs':
-        title = 'IVs for ${member.name}';
-        break;
       default:
         return;
     }
@@ -1162,7 +1033,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                 onChanged: ({heldItem, gender, ability, nature}) async {
                   if (heldItem != null) {
                     final trimmed = heldItem.trim();
-                    if (_activePreset == TeamPreset.championsVgc && trimmed.isNotEmpty) {
+                    if (trimmed.isNotEmpty) {
                       final isDuplicate = _team.any((m) => m != member && (m.heldItem ?? '').toLowerCase().trim() == trimmed.toLowerCase());
                       if (isDuplicate) {
                         _announce('Item Clause: $trimmed is already held by another Pokémon.');
@@ -1209,18 +1080,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                 evs: member.evs,
                 onChanged: (evs) async {
                   setState(() => member.evs = evs);
-                  setDialogState(() {});
-                  await _saveTeam();
-                },
-              );
-              break;
-            case 'ivs':
-              content = IvEditorPanel(
-                ivs: member.ivs,
-                isLocked: _activePreset == TeamPreset.championsVgc,
-                onChanged: (ivs) async {
-                  if (_activePreset == TeamPreset.championsVgc) return;
-                  setState(() => member.ivs = ivs);
                   setDialogState(() {});
                   await _saveTeam();
                 },
