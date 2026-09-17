@@ -17,7 +17,7 @@ import '../widgets/move_editor_panel.dart';
 import '../widgets/stats_dialog.dart';
 
 class TeamBuilderScreen extends StatefulWidget {
-  const TeamBulderScreen({super.key});
+  const TeamBuilderScreen({super.key});
 
   @override
   State<TeamBuilderScreen> createState() => _TeamBuilderScreenState();
