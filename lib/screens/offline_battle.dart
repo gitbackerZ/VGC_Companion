@@ -651,6 +651,28 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           }
         };
 
+        // Returns an array of duplicate item names found across a team, or
+        // an empty array if every held item is unique (ignoring blank/no-item
+        // entries, which are always allowed to repeat).
+        globalThis.findDuplicateItems = function(team) {
+          try {
+            var seen = {};
+            var duplicates = [];
+            for (var i = 0; i < team.length; i++) {
+              var itemName = team[i] && team[i].item;
+              if (!itemName) continue;
+              if (seen[itemName]) {
+                if (duplicates.indexOf(itemName) === -1) duplicates.push(itemName);
+              } else {
+                seen[itemName] = true;
+              }
+            }
+            return duplicates;
+          } catch (e) {
+            return [];
+          }
+        };
+
         // Converts a generated PokemonSet[] into the plain-text sheet format
         // your TextField/parseTeam already understands, so a randomized team
         // can populate the same controller a person would otherwise type into.
@@ -772,6 +794,19 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
             if (!p1Team || !p2Team) {
               throw new Error('Random team generation failed — check debug-random-team-error in logs.');
+            }
+
+            // Safety net: reject battle start if either team has duplicate
+            // held items (Item Clause), rather than letting the battle begin
+            // with an invalid team. The person can then edit the offending
+            // team sheet manually in the text field before retrying.
+            var p1Dupes = globalThis.findDuplicateItems(p1Team);
+            var p2Dupes = globalThis.findDuplicateItems(p2Team);
+            if (p1Dupes.length > 0 || p2Dupes.length > 0) {
+              var dupeMsg = [];
+              if (p1Dupes.length > 0) dupeMsg.push('Player 1 has duplicate items: ' + p1Dupes.join(', '));
+              if (p2Dupes.length > 0) dupeMsg.push('Computer has duplicate items: ' + p2Dupes.join(', '));
+              return 'ERROR: Item Clause violation - ' + dupeMsg.join('; ');
             }
 
             let BattleCtor = globalThis.Battle;
@@ -1406,6 +1441,15 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         _statusMessage = 'JS Evaluation Error: ${result.stringResult}';
       });
       _announce('Failed to start battle.');
+      return;
+    }
+
+    if (result.stringResult.startsWith('ERROR: Item Clause violation')) {
+      setState(() {
+        _statusMessage = result.stringResult;
+        _stage = BattleStage.setup;
+      });
+      _announce('Battle rejected due to duplicate items. Please edit the team sheet manually.');
       return;
     }
 
