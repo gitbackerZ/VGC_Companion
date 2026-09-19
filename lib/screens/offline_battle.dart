@@ -554,6 +554,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               }
 
               if (species) {
+                globalThis.logBuffer.push('|debug-final-evs| ' + species + ': ' + JSON.stringify(evs) + ' level=' + level);
                 rawTeam.push({
                   name: species,
                   species: species,
