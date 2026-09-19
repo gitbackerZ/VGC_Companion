@@ -539,7 +539,6 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                 } else if (line.startsWith('-')) {
                   moves.push(line.substring(1).trim());
                 } else if (line.startsWith('EVs:')) {
-                  globalThis.logBuffer.push('|debug-ev-parse| matched line: ' + line);
                   const evPairs = line.replace('EVs:', '').split('/');
                   const evAbbrevMap = { hp: 'hp', atk: 'atk', def: 'def', spa: 'spa', spd: 'spd', spe: 'spe' };
                   for (const pair of evPairs) {
@@ -551,7 +550,8 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                       evs[evAbbrevMap[key]] = val;
                     }
                   }
-                              }
+                }
+              }
 
               if (species) {
                 rawTeam.push({
