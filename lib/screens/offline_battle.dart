@@ -543,8 +543,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                   const evPairs = line.replace('EVs:', '').split('/');
                   const evAbbrevMap = { hp: 'hp', atk: 'atk', def: 'def', spa: 'spa', spd: 'spd', spe: 'spe' };
                   for (const pair of evPairs) {
-                    const parts = pair.trim().split(/\s+/);
-                    globalThis.logBuffer.push('|debug-ev-pair| raw="' + pair + '" parts=' + JSON.stringify(parts));
+                    const parts = pair.trim().split(/\\s+/);
                     if (parts.length !== 2) continue;
                     const val = parseInt(parts[0]);
                     const key = parts[1].toLowerCase();
@@ -552,21 +551,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                       evs[evAbbrevMap[key]] = val;
                     }
                   }
-                  globalThis.logBuffer.push('|debug-ev-result| ' + JSON.stringify(evs));
-                } else if (line.startsWith('IVs:')) {
-                  const ivPairs = line.replace('IVs:', '').split('/');
-                  const ivAbbrevMap = { hp: 'hp', atk: 'atk', def: 'def', spa: 'spa', spd: 'spd', spe: 'spe' };
-                  for (const pair of ivPairs) {
-                    const parts = pair.trim().split(/\s+/);
-                    if (parts.length !== 2) continue;
-                    const val = parseInt(parts[0]);
-                    const key = parts[1].toLowerCase();
-                    if (!isNaN(val) && ivAbbrevMap[key]) {
-                      ivs[ivAbbrevMap[key]] = val;
-                    }
-                  }
-                }
-              }
+                              }
 
               if (species) {
                 rawTeam.push({
