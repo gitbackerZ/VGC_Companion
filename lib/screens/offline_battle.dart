@@ -900,6 +900,29 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                 fixTeamGenders(p1Team);
                 fixTeamGenders(p2Team);
 
+                // Convert legacy Showdown-style EVs (0-252 per stat) into the
+                // Champions mod's real Stat Point system (0-32 per stat) using
+                // the official HOME conversion rule: first SP costs 4 EV, each
+                // additional SP costs 8 EV. This lets every human-facing
+                // surface (typed team sheets, the Team Builder's EV editor,
+                // and the random generator's own breakpoint math) keep using
+                // familiar legacy EV numbers, with only this one boundary
+                // step translating them into what statModify actually expects.
+                function convertEvsToSp(team) {
+                  var statKeys = ['hp', 'atk', 'def', 'spa', 'spd', 'spe'];
+                  for (var ci = 0; ci < team.length; ci++) {
+                    var mon = team[ci];
+                    if (!mon.evs) continue;
+                    for (var si = 0; si < statKeys.length; si++) {
+                      var key = statKeys[si];
+                      var legacyEv = mon.evs[key] || 0;
+                      mon.evs[key] = Math.min(32, Math.floor((legacyEv + 4) / 8));
+                    }
+                  }
+                }
+                convertEvsToSp(p1Team);
+                convertEvsToSp(p2Team);
+
                 var p1Problems = globalThis.validateTeamSpecies(p1Team, probeDex);
                 var p2Problems = globalThis.validateTeamSpecies(p2Team, probeDex);
                 var allProblems = p1Problems.map(function(p) { return 'P1 ' + p; })
