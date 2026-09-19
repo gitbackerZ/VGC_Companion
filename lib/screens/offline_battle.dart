@@ -651,20 +651,25 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           }
         };
 
-        // Returns an array of duplicate item names found across a team, or
-        // an empty array if every held item is unique (ignoring blank/no-item
-        // entries, which are always allowed to repeat).
+        // Returns an array of { item, species: [...] } entries for every
+        // held item shared by two or more team members, or an empty array
+        // if every held item is unique (blank/no-item entries are always
+        // allowed to repeat and are ignored).
         globalThis.findDuplicateItems = function(team) {
           try {
-            var seen = {};
-            var duplicates = [];
+            var itemToSpecies = {};
             for (var i = 0; i < team.length; i++) {
-              var itemName = team[i] && team[i].item;
+              var mon = team[i];
+              var itemName = mon && mon.item;
               if (!itemName) continue;
-              if (seen[itemName]) {
-                if (duplicates.indexOf(itemName) === -1) duplicates.push(itemName);
-              } else {
-                seen[itemName] = true;
+              var speciesName = (mon.species || mon.name || 'Unknown');
+              if (!itemToSpecies[itemName]) itemToSpecies[itemName] = [];
+              itemToSpecies[itemName].push(speciesName);
+            }
+            var duplicates = [];
+            for (var key in itemToSpecies) {
+              if (itemToSpecies[key].length > 1) {
+                duplicates.push({ item: key, species: itemToSpecies[key] });
               }
             }
             return duplicates;
@@ -803,10 +808,15 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             var p1Dupes = globalThis.findDuplicateItems(p1Team);
             var p2Dupes = globalThis.findDuplicateItems(p2Team);
             if (p1Dupes.length > 0 || p2Dupes.length > 0) {
+              function formatDupes(dupes) {
+                return dupes.map(function(d) {
+                  return d.item + ' (' + d.species.join(', ') + ')';
+                }).join('; ');
+              }
               var dupeMsg = [];
-              if (p1Dupes.length > 0) dupeMsg.push('Player 1 has duplicate items: ' + p1Dupes.join(', '));
-              if (p2Dupes.length > 0) dupeMsg.push('Computer has duplicate items: ' + p2Dupes.join(', '));
-              return 'ERROR: Item Clause violation - ' + dupeMsg.join('; ');
+              if (p1Dupes.length > 0) dupeMsg.push('Player 1: ' + formatDupes(p1Dupes));
+              if (p2Dupes.length > 0) dupeMsg.push('Computer: ' + formatDupes(p2Dupes));
+              return 'ERROR: Item Clause violation - ' + dupeMsg.join(' | ');
             }
 
             let BattleCtor = globalThis.Battle;
@@ -909,7 +919,6 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         _statusMessage = 'Engine ready. Format active.';
       });
       _announce('Engine initialized successfully.');
-      _startLogPolling();
     } catch (e) {
       setState(() {
         _isLoading = false;
@@ -1412,6 +1421,8 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
   void _startMatch() {
     if (_jsRuntime == null) return;
+    _logTimer?.cancel();
+    _startLogPolling();
     setState(() {
       _rawLogs.clear();
       _p2TeamList.clear();
