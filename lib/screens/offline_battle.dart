@@ -937,6 +937,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
             globalThis.battle = battleInstance;
 
+            globalThis.logBuffer.push('|debug-preplayer-p1| ' + JSON.stringify(p1Team.map(function(m) { return { species: m.species, evs: m.evs }; })));
             if (typeof battleInstance.setPlayer === 'function') {
               battleInstance.setPlayer('p1', { name: 'Player 1', team: p1Team });
               battleInstance.setPlayer('p2', { name: 'Computer AI', team: p2Team });
