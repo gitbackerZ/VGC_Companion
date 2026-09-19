@@ -509,6 +509,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               let ability = '';
               let level = 50;
               let nature = 'Hardy';
+              let gender = '';
               const moves = [];
               const evs = { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };
 
@@ -526,10 +527,41 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                   ability = line.replace('Ability:', '').trim();
                 } else if (line.startsWith('Level:')) {
                   level = parseInt(line.replace('Level:', '').trim()) || 50;
+                } else if (line.startsWith('Gender:')) {
+                  const g = line.replace('Gender:', '').trim().toUpperCase();
+                  // Accept whatever's typed here at face value — the
+                  // pre-flight pass in startVGCBattle checks this against
+                  // the species' real Dex gender data and corrects/clears
+                  // it there, so no validation is needed at parse time.
+                  if (g === 'M' || g === 'F' || g === 'N') gender = g;
                 } else if (line.endsWith('Nature')) {
                   nature = line.replace(/Nature/i, '').trim() || 'Hardy';
                 } else if (line.startsWith('-')) {
                   moves.push(line.substring(1).trim());
+                } else if (line.startsWith('EVs:')) {
+                  const evPairs = line.replace('EVs:', '').split('/');
+                  const evAbbrevMap = { hp: 'hp', atk: 'atk', def: 'def', spa: 'spa', spd: 'spd', spe: 'spe' };
+                  for (const pair of evPairs) {
+                    const parts = pair.trim().split(/\s+/);
+                    if (parts.length !== 2) continue;
+                    const val = parseInt(parts[0]);
+                    const key = parts[1].toLowerCase();
+                    if (!isNaN(val) && evAbbrevMap[key]) {
+                      evs[evAbbrevMap[key]] = val;
+                    }
+                  }
+                } else if (line.startsWith('IVs:')) {
+                  const ivPairs = line.replace('IVs:', '').split('/');
+                  const ivAbbrevMap = { hp: 'hp', atk: 'atk', def: 'def', spa: 'spa', spd: 'spd', spe: 'spe' };
+                  for (const pair of ivPairs) {
+                    const parts = pair.trim().split(/\s+/);
+                    if (parts.length !== 2) continue;
+                    const val = parseInt(parts[0]);
+                    const key = parts[1].toLowerCase();
+                    if (!isNaN(val) && ivAbbrevMap[key]) {
+                      ivs[ivAbbrevMap[key]] = val;
+                    }
+                  }
                 }
               }
 
@@ -542,6 +574,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                   moves: moves,
                   nature: nature,
                   evs: evs,
+                  gender: gender,
                   level: level
                 });
               }
@@ -563,6 +596,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               nature: mon.nature || 'Hardy',
               evs: mon.evs || { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
               ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
+              gender: mon.gender || '',
               level: parseInt(mon.level) || 50
             });
           }
@@ -846,6 +880,37 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               });
               var probeDex = probeBattle.dex || probeBattle.gen || null;
               if (probeDex) {
+                // Correct any gender that's impossible for the species
+                // (e.g. an explicit 'F' typed for a male-only species like
+                // Tauros, or a leftover 'N' on a two-gender species) before
+                // validation/battle setup runs. Deriving the real value
+                // from Dex avoids silently building an inconsistent mon.
+                function fixTeamGenders(team) {
+                  for (var gi = 0; gi < team.length; gi++) {
+                    var mon = team[gi];
+                    try {
+                      var specEntry = probeDex.species && typeof probeDex.species.get === 'function'
+                        ? probeDex.species.get(mon.species || mon.name || '')
+                        : null;
+                      if (!specEntry || !specEntry.exists) continue;
+                      var realGender = specEntry.gender; // 'M' | 'F' | 'N' | '' (ratio-based)
+                      if (realGender === 'M' || realGender === 'F' || realGender === 'N') {
+                        // Fixed-gender or genderless species: force the correct value.
+                        mon.gender = realGender;
+                      } else if (mon.gender !== 'M' && mon.gender !== 'F') {
+                        // Two-gender species with no valid explicit choice: clear it
+                        // so the engine samples a gender from the species' ratio.
+                        mon.gender = '';
+                      }
+                      // else: two-gender species with a valid explicit M/F — leave as-is.
+                    } catch (fixErr) {
+                      globalThis.logBuffer.push('|debug-gender-fix-error| ' + (mon.species || mon.name || '?') + ': ' + (fixErr && fixErr.message ? fixErr.message : String(fixErr)));
+                    }
+                  }
+                }
+                fixTeamGenders(p1Team);
+                fixTeamGenders(p2Team);
+
                 var p1Problems = globalThis.validateTeamSpecies(p1Team, probeDex);
                 var p2Problems = globalThis.validateTeamSpecies(p2Team, probeDex);
                 var allProblems = p1Problems.map(function(p) { return 'P1 ' + p; })
