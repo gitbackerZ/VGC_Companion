@@ -791,6 +791,17 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               lines.push(header);
               if (mon.ability) lines.push('Ability: ' + mon.ability);
               lines.push('Level: ' + (mon.level || 50));
+              if (mon.evs) {
+                var evOrder = [['hp', 'HP'], ['atk', 'Atk'], ['def', 'Def'], ['spa', 'SpA'], ['spd', 'SpD'], ['spe', 'Spe']];
+                var evParts = [];
+                for (var ei = 0; ei < evOrder.length; ei++) {
+                  var evKey = evOrder[ei][0];
+                  var evLabel = evOrder[ei][1];
+                  var evVal = mon.evs[evKey];
+                  if (evVal) evParts.push(evVal + ' ' + evLabel);
+                }
+                if (evParts.length) lines.push('EVs: ' + evParts.join(' / '));
+              }
               if (mon.nature) lines.push(mon.nature + ' Nature');
               var moves = Array.isArray(mon.moves) ? mon.moves : [];
               for (var i = 0; i < moves.length; i++) {
