@@ -1901,28 +1901,22 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               const Text('Champions Doubles 6v6', style: TextStyle(fontSize: 15)),
               const SizedBox(width: 10),
               if (_stage == BattleStage.setup)
-                Semantics(
-                  label: _useBring4Format
-                      ? 'Bring 4 toggle on: show full 6, bring 4 to battle'
-                      : 'Bring 4 toggle off: full 6 vs 6 battle',
-                  button: true,
-                  child: InkWell(
-                    onTap: () => setState(() => _useBring4Format = !_useBring4Format),
-                    borderRadius: BorderRadius.circular(4),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: _useBring4Format ? Colors.amber[700] : Colors.transparent,
-                        border: Border.all(color: _useBring4Format ? Colors.amber[700]! : Colors.grey[500]!),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        'Bring 4',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: _useBring4Format ? Colors.black : Colors.grey[400],
-                        ),
+                InkWell(
+                  onTap: () => setState(() => _useBring4Format = !_useBring4Format),
+                  borderRadius: BorderRadius.circular(4),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: _useBring4Format ? Colors.amber[700] : Colors.transparent,
+                      border: Border.all(color: _useBring4Format ? Colors.amber[700]! : Colors.grey[500]!),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      'Bring 4',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: _useBring4Format ? Colors.black : Colors.grey[400],
                       ),
                     ),
                   ),
@@ -1937,8 +1931,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                 onPressed: () => setState(() => _stage = BattleStage.setup),
               ),
             Semantics(
-              label: 'Show VGC doubles ruleset info',
+              label: 'Info',
               button: true,
+              excludeSemantics: true,
               child: IconButton(
                 icon: const Text('ℹ️', style: TextStyle(fontSize: 16)),
                 onPressed: _showRulesInfoDialog,
@@ -2044,7 +2039,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         const SizedBox(height: 4),
         TextField(
           controller: _p1TeamController,
-          maxLines: 5,
+          minLines: 5,
+          maxLines: null,
+          keyboardType: TextInputType.multiline,
           style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
           decoration: const InputDecoration(
             labelText: 'Player 1 Team Sheet',
@@ -2075,7 +2072,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         const SizedBox(height: 4),
         TextField(
           controller: _p2TeamController,
-          maxLines: 5,
+          minLines: 5,
+          maxLines: null,
+          keyboardType: TextInputType.multiline,
           style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
           decoration: const InputDecoration(
             labelText: 'Computer Team Sheet',
