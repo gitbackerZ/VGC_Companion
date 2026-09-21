@@ -1895,7 +1895,40 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Gen 9 PvC Double Battle'),
+          titleSpacing: 8,
+          title: Row(
+            children: [
+              const Text('Champions Doubles 6v6', style: TextStyle(fontSize: 15)),
+              const SizedBox(width: 10),
+              if (_stage == BattleStage.setup)
+                Semantics(
+                  label: _useBring4Format
+                      ? 'Bring 4 toggle on: show full 6, bring 4 to battle'
+                      : 'Bring 4 toggle off: full 6 vs 6 battle',
+                  button: true,
+                  child: InkWell(
+                    onTap: () => setState(() => _useBring4Format = !_useBring4Format),
+                    borderRadius: BorderRadius.circular(4),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _useBring4Format ? Colors.amber[700] : Colors.transparent,
+                        border: Border.all(color: _useBring4Format ? Colors.amber[700]! : Colors.grey[500]!),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Bring 4',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: _useBring4Format ? Colors.black : Colors.grey[400],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
           actions: [
             if (_stage != BattleStage.setup)
               IconButton(
@@ -1903,6 +1936,14 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                 tooltip: 'New Battle Setup',
                 onPressed: () => setState(() => _stage = BattleStage.setup),
               ),
+            Semantics(
+              label: 'Show VGC doubles ruleset info',
+              button: true,
+              child: IconButton(
+                icon: const Text('ℹ️', style: TextStyle(fontSize: 16)),
+                onPressed: _showRulesInfoDialog,
+              ),
+            ),
           ],
         ),
         body: _isLoading
@@ -1935,25 +1976,49 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     }
   }
 
+  Future<void> _showRulesInfoDialog() async {
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('VGC Doubles Ruleset', style: TextStyle(fontSize: 15)),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              Text('Species Clause', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              Text('Only one of each Pokémon species allowed per team.', style: TextStyle(fontSize: 11)),
+              SizedBox(height: 8),
+              Text('Item Clause', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              Text('No two team members may hold the same item.', style: TextStyle(fontSize: 11)),
+              SizedBox(height: 8),
+              Text('Level 50 (Adjust Level Down)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              Text('All Pokémon are forced to level 50 regardless of typed level.', style: TextStyle(fontSize: 11)),
+              SizedBox(height: 8),
+              Text('Bring 4 (VGC Toggle)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              Text('When on, teams show their full 6 at Team Preview but only 4 are brought into battle.', style: TextStyle(fontSize: 11)),
+              SizedBox(height: 8),
+              Text('Stat Points (SP), not EVs', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              Text('Typed team sheets use familiar legacy EVs (0-252 per stat), which are converted internally to the real Champions Stat Point system before battle.', style: TextStyle(fontSize: 11)),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSetupStage() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Semantics(
           header: true,
-          child: const Text('Setup PvC Gen 9 Teams', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        ),
-        const SizedBox(height: 12),
-        Semantics(
-          label: _useBring4Format
-              ? 'VGC Toggle on: show full 6 and bring 4 to battle'
-              : 'VGC Toggle off',
-          child: SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('VGC Toggle', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-            subtitle: const Text('Show full 6 and bring 4 to battle.', style: TextStyle(fontSize: 11, color: Colors.grey)),
-            value: _useBring4Format,
-            onChanged: (v) => setState(() => _useBring4Format = v),
+          child: const Text(
+            'Input Showdown-compatible team sheets with legacy 510 EV spreads.',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
           ),
         ),
         const SizedBox(height: 12),
@@ -2026,7 +2091,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             onPressed: _handleTeamSubmission,
             style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple),
             icon: const Icon(Icons.play_arrow, color: Colors.white),
-            label: const Text('Start Custom Teams Battle', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            label: const Text('Start Battle', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         ),
         ],
