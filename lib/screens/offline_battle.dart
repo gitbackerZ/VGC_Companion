@@ -2065,7 +2065,13 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         const SizedBox(height: 4),
         TextField(
           controller: _p1TeamController,
-          maxLines: 5,
+          minLines: 5,
+          maxLines: null,
+          keyboardType: TextInputType.multiline,
+          autocorrect: false,
+          enableSuggestions: false,
+          smartDashesType: SmartDashesType.disabled,
+          smartQuotesType: SmartQuotesType.disabled,
           style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
           decoration: const InputDecoration(
             labelText: 'Player 1 Team Sheet',
@@ -2096,7 +2102,13 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         const SizedBox(height: 4),
         TextField(
           controller: _p2TeamController,
-          maxLines: 5,
+          minLines: 5,
+          maxLines: null,
+          keyboardType: TextInputType.multiline,
+          autocorrect: false,
+          enableSuggestions: false,
+          smartDashesType: SmartDashesType.disabled,
+          smartQuotesType: SmartQuotesType.disabled,
           style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
           decoration: const InputDecoration(
             labelText: 'Computer Team Sheet',
