@@ -1896,32 +1896,43 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       child: Scaffold(
         appBar: AppBar(
           titleSpacing: 8,
-          title: Row(
-            children: [
-              const Text('Champions Doubles 6v6', style: TextStyle(fontSize: 15)),
-              const SizedBox(width: 10),
-              if (_stage == BattleStage.setup)
-                InkWell(
-                  onTap: () => setState(() => _useBring4Format = !_useBring4Format),
-                  borderRadius: BorderRadius.circular(4),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: _useBring4Format ? Colors.amber[700] : Colors.transparent,
-                      border: Border.all(color: _useBring4Format ? Colors.amber[700]! : Colors.grey[500]!),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      'Bring 4',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: _useBring4Format ? Colors.black : Colors.grey[400],
+          title: Semantics(
+            label: 'Champions Doubles 6v6',
+            excludeSemantics: true,
+            child: Row(
+              children: [
+                const Text('Champions Doubles 6v6', style: TextStyle(fontSize: 15)),
+                const SizedBox(width: 10),
+                if (_stage == BattleStage.setup)
+                  InkWell(
+                    onTap: () {
+                      setState(() => _useBring4Format = !_useBring4Format);
+                      final msg = _useBring4Format
+                          ? 'Bring 4 turned on. Full 6 shown, 4 brought to battle.'
+                          : 'Bring 4 turned off. Full 6 vs 6 battle.';
+                      _announce(msg);
+                      _rawLogs.add('|debug-bring4-toggle| $msg');
+                    },
+                    borderRadius: BorderRadius.circular(4),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _useBring4Format ? Colors.amber[700] : Colors.transparent,
+                        border: Border.all(color: _useBring4Format ? Colors.amber[700]! : Colors.grey[500]!),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Bring 4',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: _useBring4Format ? Colors.black : Colors.grey[400],
+                        ),
                       ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
           actions: [
             if (_stage != BattleStage.setup)
@@ -2039,9 +2050,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         const SizedBox(height: 4),
         TextField(
           controller: _p1TeamController,
-          minLines: 5,
-          maxLines: null,
-          keyboardType: TextInputType.multiline,
+          maxLines: 5,
           style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
           decoration: const InputDecoration(
             labelText: 'Player 1 Team Sheet',
@@ -2072,9 +2081,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         const SizedBox(height: 4),
         TextField(
           controller: _p2TeamController,
-          minLines: 5,
-          maxLines: null,
-          keyboardType: TextInputType.multiline,
+          maxLines: 5,
           style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
           decoration: const InputDecoration(
             labelText: 'Computer Team Sheet',
