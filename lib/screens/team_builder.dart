@@ -52,13 +52,13 @@ class DetailsEditorPanel extends StatelessWidget {
     return ['Male', 'Female'];
   }
 
-  List<String> _getUniqueAbilityNames() {
+  List<Map<String, dynamic>> _getUniqueAbilities() {
     final seen = <String>{};
-    final result = <String>[];
+    final result = <Map<String, dynamic>>[];
     for (final a in abilities ?? const []) {
       final name = a['name'] as String?;
       if (name != null && name.isNotEmpty && seen.add(name)) {
-        result.add(name);
+        result.add(a);
       }
     }
     return result;
@@ -83,8 +83,9 @@ class DetailsEditorPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final genderOptions = _getGenderOptions();
-    final abilityOptions = _getUniqueAbilityNames();
-    final safeAbilityValue = abilityOptions.contains(ability) ? ability : null;
+    final abilityOptions = _getUniqueAbilities();
+    final abilityNames = abilityOptions.map((a) => a['name'] as String).toSet();
+    final safeAbilityValue = abilityNames.contains(ability) ? ability : null;
     final natureNames = natures.map((n) => n['name'] as String).toSet();
     final safeNatureValue = natureNames.contains(nature) ? nature : null;
 
@@ -133,12 +134,42 @@ class DetailsEditorPanel extends StatelessWidget {
               child: DropdownButtonFormField<String>(
                 key: const ValueKey('ability_dropdown'),
                 value: safeAbilityValue,
+                isExpanded: true,
                 style: _fieldTextStyle,
                 dropdownColor: const Color(0xFF2A2A2E),
                 decoration: _fieldDecoration('Ability'),
-                items: abilityOptions
-                    .map((name) => DropdownMenuItem(value: name, child: Text(name, style: _fieldTextStyle)))
-                    .toList(),
+                selectedItemBuilder: (context) {
+                  return abilityOptions.map((a) {
+                    return Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(a['name'] as String, style: _fieldTextStyle, overflow: TextOverflow.ellipsis),
+                    );
+                  }).toList();
+                },
+                items: abilityOptions.map((a) {
+                  final name = a['name'] as String;
+                  final desc = a['shortDesc'] as String? ?? '';
+                  return DropdownMenuItem(
+                    value: name,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(name, style: _fieldTextStyle),
+                          if (desc.isNotEmpty)
+                            Text(
+                              desc,
+                              style: const TextStyle(fontSize: 11, color: Color(0xFFB0B0B0)),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
                 onChanged: (val) {
                   if (val != null) onChanged(ability: val);
                 },
@@ -196,7 +227,7 @@ class DetailsEditorPanel extends StatelessWidget {
 
 class _HeldItemField extends StatefulWidget {
   final String initialValue;
-  final List<String> itemList;
+  final List<Map<String, dynamic>> itemList;
   final ValueChanged<String> onChanged;
 
   const _HeldItemField({
@@ -232,18 +263,58 @@ class _HeldItemFieldState extends State<_HeldItemField> {
 
   @override
   Widget build(BuildContext context) {
-    return Autocomplete<String>(
+    return Autocomplete<Map<String, dynamic>>(
       initialValue: TextEditingValue(text: widget.initialValue),
+      displayStringForOption: (item) => item['name'] as String,
       optionsBuilder: (TextEditingValue value) {
         if (value.text.isEmpty || widget.itemList.isEmpty) {
-          return const Iterable<String>.empty();
+          return const Iterable<Map<String, dynamic>>.empty();
         }
         final query = value.text.toLowerCase();
         return widget.itemList
-            .where((item) => item.toLowerCase().contains(query))
+            .where((item) => (item['name'] as String? ?? '').toLowerCase().contains(query))
             .take(8);
       },
-      onSelected: (selected) => widget.onChanged(selected),
+      optionsViewBuilder: (context, onSelected, options) {
+        final list = options.toList();
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 4,
+            color: const Color(0xFF2A2A2E),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 260, maxWidth: 320),
+              child: ListView.builder(
+                shrinkWrap: true,
+                padding: EdgeInsets.zero,
+                itemCount: list.length,
+                itemBuilder: (context, index) {
+                  final item = list[index];
+                  final name = item['name'] as String? ?? '';
+                  final desc = item['shortDesc'] as String? ?? '';
+                  return InkWell(
+                    onTap: () => onSelected(item),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(name, style: const TextStyle(fontSize: 15, color: Colors.white, fontWeight: FontWeight.bold)),
+                          if (desc.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(desc, style: const TextStyle(fontSize: 12, color: Color(0xFFCFCFCF))),
+                          ],
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+      onSelected: (selected) => widget.onChanged(selected['name'] as String),
       fieldViewBuilder: (context, controller, focusNode, onEditingComplete) {
         // Attach the listener only once per focusNode instance, and keep a
         // reference to the exact closure so dispose() can remove it correctly.
@@ -393,7 +464,7 @@ class EvEditorPanel extends StatelessWidget {
 
 class MoveEditorPanel extends StatelessWidget {
   final List<String?> moves;
-  final List<String> availableMoves;
+  final List<Map<String, dynamic>> availableMoves;
   final ValueChanged<List<String?>> onChanged;
 
   const MoveEditorPanel({
@@ -402,6 +473,47 @@ class MoveEditorPanel extends StatelessWidget {
     required this.availableMoves,
     required this.onChanged,
   });
+
+  Map<String, dynamic>? _dataForMove(String? name) {
+    if (name == null) return null;
+    for (final m in availableMoves) {
+      if (m['name'] == name) return m;
+    }
+    return null;
+  }
+
+  void _showMoveInfo(BuildContext context, Map<String, dynamic> moveData) {
+    final type = moveData['type'] as String? ?? '?';
+    final category = moveData['category'] as String? ?? '?';
+    final power = moveData['basePower'];
+    final accuracy = moveData['accuracy'];
+    final powerStr = (power == null || power == 0) ? '—' : power.toString();
+    final accStr = (accuracy == true) ? '—' : (accuracy?.toString() ?? '?');
+    final desc = (moveData['shortDesc'] as String?)?.isNotEmpty == true
+        ? moveData['shortDesc'] as String
+        : (moveData['desc'] as String? ?? 'No description available.');
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(moveData['name'] as String? ?? 'Move', style: const TextStyle(fontSize: 15)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Type: $type   |   Category: $category', style: const TextStyle(fontSize: 13)),
+            const SizedBox(height: 4),
+            Text('Power: $powerStr   |   Accuracy: $accStr', style: const TextStyle(fontSize: 13)),
+            const SizedBox(height: 10),
+            Text(desc, style: const TextStyle(fontSize: 13)),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -432,53 +544,80 @@ class MoveEditorPanel extends StatelessWidget {
 
   Widget _buildMoveDropdown(BuildContext context, int slotIndex) {
     final currentMove = moves.length > slotIndex ? moves[slotIndex] : null;
+    final availableMoveNames = availableMoves.map((m) => m['name'] as String).toList();
+    final currentMoveData = _dataForMove(currentMove);
 
     return Semantics(
       label: 'Move slot ${slotIndex + 1}',
-      child: DropdownButtonFormField<String>(
-        key: ValueKey('move_dropdown_$slotIndex'),
-        value: availableMoves.contains(currentMove) ? currentMove : null,
-        isDense: true,
-        style: const TextStyle(fontSize: 14, color: Colors.white),
-        dropdownColor: Colors.grey[900],
-        decoration: InputDecoration(
-          labelText: 'Move ${slotIndex + 1}',
-          labelStyle: const TextStyle(color: Colors.white70, fontSize: 12),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Color(0xFF9E9E9E))),
-        ),
-        items: [
-          const DropdownMenuItem<String>(
-            value: null,
-            child: Text('(None)', style: TextStyle(fontSize: 13, color: Colors.white54)),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: DropdownButtonFormField<String>(
+              key: ValueKey('move_dropdown_$slotIndex'),
+              value: availableMoveNames.contains(currentMove) ? currentMove : null,
+              isDense: true,
+              isExpanded: true,
+              style: const TextStyle(fontSize: 14, color: Colors.white),
+              dropdownColor: Colors.grey[900],
+              decoration: InputDecoration(
+                labelText: 'Move ${slotIndex + 1}',
+                labelStyle: const TextStyle(color: Colors.white70, fontSize: 12),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Color(0xFF9E9E9E))),
+              ),
+              items: [
+                const DropdownMenuItem<String>(
+                  value: null,
+                  child: Text('(None)', style: TextStyle(fontSize: 13, color: Colors.white54)),
+                ),
+                ...availableMoves.map((m) {
+                  final name = m['name'] as String;
+                  final type = m['type'] as String? ?? '';
+                  final power = m['basePower'];
+                  final powerStr = (power == null || power == 0) ? '—' : power.toString();
+                  return DropdownMenuItem<String>(
+                    value: name,
+                    child: Text(
+                      '$name  ($type, $powerStr BP)',
+                      style: const TextStyle(fontSize: 13, color: Colors.white),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  );
+                }),
+              ],
+              onChanged: (selected) {
+                if (selected != null) {
+                  final duplicateSlot = moves.indexWhere(
+                    (m) => m != null && m == selected,
+                  );
+                  if (duplicateSlot != -1 && duplicateSlot != slotIndex) {
+                    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                      SnackBar(content: Text('$selected is already selected in another slot.')),
+                    );
+                    return;
+                  }
+                }
+
+                final updated = List<String?>.from(moves);
+                while (updated.length < 4) {
+                  updated.add(null);
+                }
+                updated[slotIndex] = selected;
+                onChanged(updated);
+              },
+            ),
           ),
-          ...availableMoves.map(
-            (m) => DropdownMenuItem<String>(
-              value: m,
-              child: Text(m, style: const TextStyle(fontSize: 14, color: Colors.white)),
+          Semantics(
+            label: currentMoveData != null ? 'Show details for $currentMove' : 'No move selected for slot ${slotIndex + 1}',
+            button: true,
+            excludeSemantics: true,
+            child: IconButton(
+              icon: const Icon(Icons.info_outline, size: 18, color: Colors.white70),
+              onPressed: currentMoveData != null ? () => _showMoveInfo(context, currentMoveData) : null,
             ),
           ),
         ],
-        onChanged: (selected) {
-          if (selected != null) {
-            final duplicateSlot = moves.indexWhere(
-              (m) => m != null && m == selected,
-            );
-            if (duplicateSlot != -1 && duplicateSlot != slotIndex) {
-              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                SnackBar(content: Text('$selected is already selected in another slot.')),
-              );
-              return;
-            }
-          }
-
-          final updated = List<String?>.from(moves);
-          while (updated.length < 4) {
-            updated.add(null);
-          }
-          updated[slotIndex] = selected;
-          onChanged(updated);
-        },
       ),
     );
   }
@@ -619,11 +758,11 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
   List<Map<String, dynamic>> _baseSpeciesList = [];
   List<Map<String, dynamic>> _filtered = [];
-  List<String> _itemList = [];
+  List<Map<String, dynamic>> _itemList = [];
   List<Map<String, dynamic>> _natures = [];
   List<TeamMember> _team = [];
 
-  final Map<TeamMember, List<String>> _movesCache = {};
+  final Map<TeamMember, List<Map<String, dynamic>>> _movesCache = {};
   final Map<TeamMember, List<Map<String, dynamic>>> _abilitiesCache = {};
   final Map<TeamMember, Map<String, dynamic>> _speciesDataCache = {};
   final Set<TeamMember> _collapsedCards = {};
@@ -762,7 +901,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     return result;
   }
 
-  List<String> _filterBattleItems(List<String> rawItems) {
+  List<Map<String, dynamic>> _filterBattleItems(List<Map<String, dynamic>> rawItems) {
     final megaAndOrbPattern = RegExp(
       r'ite($|[\s\-_]*[xy]|\b)|red[\s\-_]*orb|blue[\s\-_]*orb',
       caseSensitive: false,
@@ -773,7 +912,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     );
 
     return rawItems.where((item) {
-      final trimmed = item.trim();
+      final trimmed = (item['name'] as String? ?? '').trim();
       if (trimmed.isEmpty) return false;
       if (megaAndOrbPattern.hasMatch(trimmed)) return true;
       if (junkPattern.hasMatch(trimmed.toLowerCase())) return false;
@@ -1604,8 +1743,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       try {
         final movesData = await _service.getMovesForSpecies(member.name);
         if (!mounted) return;
-        final moves = movesData.map((m) => m['name'].toString()).toList();
-        setState(() => _movesCache[member] = moves);
+        setState(() => _movesCache[member] = movesData);
       } catch (_) {}
     }
     if (!_abilitiesCache.containsKey(member)) {

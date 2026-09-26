@@ -429,7 +429,7 @@ class JsEngineService {
     }
   }
 
-  Future<List<String>> getItemList() async {
+  Future<List<Map<String, dynamic>>> getItemList() async {
     if (!isReady) return [];
     final script = '''
       (function() {
@@ -450,7 +450,10 @@ class JsEngineService {
           var isStandard = !item.isNonstandard;
 
           if (isStandard || isPastGen || isMegaStone) {
-            result.push(item.name);
+            result.push({
+              name: item.name,
+              shortDesc: item.shortDesc || item.desc || ''
+            });
           }
         }
         return JSON.stringify(result);
@@ -458,8 +461,13 @@ class JsEngineService {
     ''';
     final result = _jsRuntime!.evaluate(script);
     if (result.isError) return [];
-    final List<dynamic> list = json.decode(result.stringResult);
-    return list.cast<String>();
+    try {
+      final decoded = json.decode(result.stringResult);
+      if (decoded is! List) return [];
+      return decoded.whereType<Map>().map((m) => m.cast<String, dynamic>()).toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   Future<List<Map<String, dynamic>>> getBaseSpeciesList() async {
@@ -705,16 +713,42 @@ class JsEngineService {
   }
 
   Future<List<Map<String, dynamic>>> getAbilitiesForPokemon(String name) async {
+    if (!isReady) return [];
+    final sanitized = _toId(name);
+    final script = '''
+      (function() {
+        try {
+          var champDex = (globalThis.Dex && globalThis.Dex.dexes) ? globalThis.Dex.dexes.champions : globalThis.Dex;
+          var species = champDex.species.get("$sanitized");
+          if (!species || !species.exists || !species.abilities) return JSON.stringify([]);
+
+          var seen = {};
+          var result = [];
+          var slots = Object.keys(species.abilities);
+          for (var i = 0; i < slots.length; i++) {
+            var abilityName = species.abilities[slots[i]];
+            if (!abilityName) continue;
+            if (seen[abilityName]) continue;
+            seen[abilityName] = true;
+
+            var abilityData = champDex.abilities.get(abilityName);
+            result.push({
+              name: (abilityData && abilityData.exists) ? abilityData.name : abilityName,
+              shortDesc: (abilityData && (abilityData.shortDesc || abilityData.desc)) || ''
+            });
+          }
+          return JSON.stringify(result);
+        } catch (e) {
+          return JSON.stringify([]);
+        }
+      })()
+    ''';
+    final result = _jsRuntime!.evaluate(script);
+    if (result.isError) return [];
     try {
-      final data = await getPokemon(name);
-      final raw = data['abilities'];
-      if (raw is Map) {
-        return raw.values.map((a) => {'name': a.toString()}).toList();
-      }
-      if (raw is List) {
-        return raw.map((a) => {'name': a.toString()}).toList();
-      }
-      return [];
+      final decoded = json.decode(result.stringResult);
+      if (decoded is! List) return [];
+      return decoded.whereType<Map>().map((m) => m.cast<String, dynamic>()).toList();
     } catch (_) {
       return [];
     }
