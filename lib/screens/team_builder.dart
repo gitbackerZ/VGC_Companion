@@ -23,7 +23,7 @@ class DetailsEditorPanel extends StatelessWidget {
   final String? ability;
   final List<Map<String, dynamic>>? abilities;
   final String nature;
-  final List<String> itemList;
+  final List<Map<String, dynamic>> itemList;
   final List<Map<String, dynamic>> natures;
   final Function({
     String? heldItem,
@@ -231,6 +231,7 @@ class _HeldItemField extends StatefulWidget {
   final ValueChanged<String> onChanged;
 
   const _HeldItemField({
+    super.key,
     required this.initialValue,
     required this.itemList,
     required this.onChanged,
