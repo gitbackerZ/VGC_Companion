@@ -766,6 +766,57 @@ class JsEngineService {
     }
   }
 
+  List<Map<String, dynamic>>? _naturesCache;
+
+  /// Fetches the full nature list directly from the Showdown engine's Dex,
+  /// rather than keeping a hand-maintained Dart copy in sync with whatever
+  /// the champions/championsregma mods define. Cached after first success
+  /// since the nature list is static for the lifetime of the JS runtime.
+  Future<List<Map<String, dynamic>>> getAllNatures() async {
+    if (_naturesCache != null) return _naturesCache!;
+    if (!isReady) return [];
+
+    // Reads directly from the raw NatureDataTable (Dex.data.Natures), keyed
+    // by lowercase nature id with { name, plus?, minus? } entries. This
+    // avoids depending on whether Dex.natures exposes a convenience
+    // .all()/.get() wrapper, since the underlying data table is the one
+    // guaranteed shape across Showdown builds.
+    final script = '''
+      (function() {
+        var idMap = { atk: 'Atk', def: 'Def', spa: 'SpA', spd: 'SpD', spe: 'Spe' };
+        var raw = (Dex.data && Dex.data.Natures) || {};
+        var keys = Object.keys(raw);
+        var result = [];
+        for (var i = 0; i < keys.length; i++) {
+          var n = raw[keys[i]];
+          if (!n || !n.name) continue;
+          result.push({
+            name: n.name,
+            boosted: n.plus ? (idMap[n.plus] || null) : null,
+            lowered: n.minus ? (idMap[n.minus] || null) : null
+          });
+        }
+        return JSON.stringify(result);
+      })()
+    ''';
+
+    final result = _jsRuntime!.evaluate(script);
+    if (result.isError) return [];
+
+    try {
+      final decoded = json.decode(result.stringResult);
+      if (decoded is! List) return [];
+      final natures = decoded
+          .whereType<Map>()
+          .map((m) => m.cast<String, dynamic>())
+          .toList();
+      _naturesCache = natures;
+      return natures;
+    } catch (_) {
+      return [];
+    }
+  }
+
   Future<Map<String, String>> getNatureBoosts(String nature) async {
     if (!isReady) return {'plus': '', 'minus': ''};
     try {

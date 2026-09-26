@@ -7,14 +7,646 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/team_member.dart';
 import '../services/js_engine_service.dart';
 import '../services/team_text_codec.dart';
-import '../widgets/details_editor_panel.dart';
-import '../widgets/ev_editor_panel.dart';
+import '../services/stat_calculator.dart';
 
-import '../widgets/move_editor_panel.dart';
-import '../widgets/stats_dialog.dart';
+// =============================================================================
+// Inlined: TeamMember (was ../models/team_member.dart)
+// =============================================================================
+
+/// VGC-standard fixed values: every team member is always level 50 with
+/// maximum (31) IVs in every stat. These are not user-configurable.
+const int kFixedLevel = 50;
+const Map<String, int> kFixedIvs = {
+  'HP': 31,
+  'Atk': 31,
+  'Def': 31,
+  'SpA': 31,
+  'SpD': 31,
+  'Spe': 31,
+};
+
+class TeamMember {
+  String name;
+  int pokedexNumber;
+  List<String> types;
+  String? heldItem;
+  List<String?> moves;
+  String nature;
+  Map<String, int> evs;
+  String? ability;
+  String gender;
+  int genderRate;
+
+  /// Fixed at VGC standard; always level 50 with max IVs.
+  int get level => kFixedLevel;
+  Map<String, int> get ivs => kFixedIvs;
+
+  TeamMember({
+    required this.name,
+    required this.pokedexNumber,
+    List<String>? types,
+    this.heldItem,
+    List<String?>? moves,
+    this.nature = 'Hardy',
+    Map<String, int>? evs,
+    this.ability,
+    this.gender = 'Male',
+    this.genderRate = 4,
+  })  : types = types ?? [],
+        moves = moves ?? List.filled(4, null),
+        evs = evs ?? {'HP': 0, 'Atk': 0, 'Def': 0, 'SpA': 0, 'SpD': 0, 'Spe': 0};
+
+  int get evTotal => evs.values.fold(0, (a, b) => a + b);
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'pokedexNumber': pokedexNumber,
+        'types': types,
+        'heldItem': heldItem,
+        'moves': moves,
+        'nature': nature,
+        'evs': evs,
+        'ability': ability,
+        'gender': gender,
+        'genderRate': genderRate,
+      };
+
+  factory TeamMember.fromJson(Map<String, dynamic> json) => TeamMember(
+        name: json['name'],
+        pokedexNumber: json['pokedexNumber'],
+        types: List<String>.from(json['types'] ?? []),
+        heldItem: json['heldItem'],
+        moves: List<String?>.from(json['moves'] ?? List.filled(4, null)),
+        nature: json['nature'] ?? 'Hardy',
+        evs: Map<String, int>.from(json['evs'] ?? {'HP': 0, 'Atk': 0, 'Def': 0, 'SpA': 0, 'SpD': 0, 'Spe': 0}),
+        ability: json['ability'],
+        gender: json['gender'] ?? 'Male',
+        genderRate: json['genderRate'] ?? 4,
+      );
+}
+
+// =============================================================================
+// Inlined: DetailsEditorPanel (was ../widgets/details_editor_panel.dart)
+// =============================================================================
+
+class DetailsEditorPanel extends StatelessWidget {
+  final String? heldItem;
+  final String gender;
+  final int genderRate;
+  final String? ability;
+  final List<Map<String, dynamic>>? abilities;
+  final String nature;
+  final List<String> itemList;
+  final List<Map<String, dynamic>> natures;
+  final Function({
+    String? heldItem,
+    String? gender,
+    String? ability,
+    String? nature,
+  }) onChanged;
+
+  const DetailsEditorPanel({
+    super.key,
+    this.heldItem,
+    required this.gender,
+    required this.genderRate,
+    this.ability,
+    this.abilities,
+    required this.nature,
+    this.itemList = const [],
+    this.natures = const [],
+    required this.onChanged,
+  });
+
+  List<String> _getGenderOptions() {
+    if (genderRate == -1) return ['Genderless'];
+    if (genderRate == 0) return ['Male'];
+    if (genderRate == 8) return ['Female'];
+    return ['Male', 'Female'];
+  }
+
+  List<String> _getUniqueAbilityNames() {
+    final seen = <String>{};
+    final result = <String>[];
+    for (final a in abilities ?? const []) {
+      final name = a['name'] as String?;
+      if (name != null && name.isNotEmpty && seen.add(name)) {
+        result.add(name);
+      }
+    }
+    return result;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final genderOptions = _getGenderOptions();
+    final abilityOptions = _getUniqueAbilityNames();
+    final safeAbilityValue = abilityOptions.contains(ability) ? ability : null;
+    final natureNames = natures.map((n) => n['name'] as String).toSet();
+    final safeNatureValue = natureNames.contains(nature) ? nature : null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Customize Details',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _HeldItemField(
+                initialValue: heldItem ?? '',
+                itemList: itemList,
+                onChanged: (val) => onChanged(heldItem: val),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: genderOptions.contains(gender) ? gender : genderOptions.first,
+                decoration: const InputDecoration(
+                  labelText: 'Gender',
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+                items: genderOptions
+                    .map((g) => DropdownMenuItem(value: g, child: Text(g)))
+                    .toList(),
+                onChanged: (val) {
+                  if (val != null) onChanged(gender: val);
+                },
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: safeAbilityValue,
+                decoration: const InputDecoration(
+                  labelText: 'Ability',
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+                items: abilityOptions
+                    .map((name) => DropdownMenuItem(value: name, child: Text(name)))
+                    .toList(),
+                onChanged: (val) {
+                  if (val != null) onChanged(ability: val);
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: safeNatureValue,
+                decoration: const InputDecoration(
+                  labelText: 'Nature',
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+                selectedItemBuilder: (context) {
+                  return natures.map((n) {
+                    return Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        n['name'] as String,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    );
+                  }).toList();
+                },
+                items: natures.map((n) {
+                  final boosted = n['boosted'] as String?;
+                  final lowered = n['lowered'] as String?;
+                  final String boostText = (boosted != null && lowered != null)
+                      ? ' (+$boosted, -$lowered)'
+                      : ' (neutral)';
+                  return DropdownMenuItem(
+                    value: n['name'] as String,
+                    child: Text(
+                      '${n['name']}$boostText',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  );
+                }).toList(),
+                onChanged: (val) {
+                  if (val != null) onChanged(nature: val);
+                },
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+// =============================================================================
+// Held item field with proper focus-listener lifecycle management
+// =============================================================================
+
+class _HeldItemField extends StatefulWidget {
+  final String initialValue;
+  final List<String> itemList;
+  final ValueChanged<String> onChanged;
+
+  const _HeldItemField({
+    required this.initialValue,
+    required this.itemList,
+    required this.onChanged,
+  });
+
+  @override
+  State<_HeldItemField> createState() => _HeldItemFieldState();
+}
+
+class _HeldItemFieldState extends State<_HeldItemField> {
+  FocusNode? _attachedFocusNode;
+  VoidCallback? _focusListener;
+  TextEditingController? _attachedController;
+
+  void _handleFocusChange() {
+    if (_attachedFocusNode != null &&
+        !_attachedFocusNode!.hasFocus &&
+        _attachedController != null) {
+      widget.onChanged(_attachedController!.text.trim());
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_attachedFocusNode != null && _focusListener != null) {
+      _attachedFocusNode!.removeListener(_focusListener!);
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Autocomplete<String>(
+      initialValue: TextEditingValue(text: widget.initialValue),
+      optionsBuilder: (TextEditingValue value) {
+        if (value.text.isEmpty || widget.itemList.isEmpty) {
+          return const Iterable<String>.empty();
+        }
+        final query = value.text.toLowerCase();
+        return widget.itemList
+            .where((item) => item.toLowerCase().contains(query))
+            .take(8);
+      },
+      onSelected: (selected) => widget.onChanged(selected),
+      fieldViewBuilder: (context, controller, focusNode, onEditingComplete) {
+        // Attach the listener only once per focusNode instance, and keep a
+        // reference to the exact closure so dispose() can remove it correctly.
+        if (_attachedFocusNode != focusNode) {
+          if (_attachedFocusNode != null && _focusListener != null) {
+            _attachedFocusNode!.removeListener(_focusListener!);
+          }
+          _attachedFocusNode = focusNode;
+          _attachedController = controller;
+          _focusListener = _handleFocusChange;
+          focusNode.addListener(_focusListener!);
+        }
+
+        return TextField(
+          controller: controller,
+          focusNode: focusNode,
+          onEditingComplete: () {
+            onEditingComplete();
+            widget.onChanged(controller.text.trim());
+          },
+          decoration: InputDecoration(
+            labelText: 'Held Item',
+            isDense: true,
+            border: const OutlineInputBorder(),
+            suffixIcon: controller.text.isNotEmpty
+                ? IconButton(
+                    icon: const Icon(Icons.clear, size: 18),
+                    onPressed: () {
+                      controller.clear();
+                      widget.onChanged('');
+                    },
+                  )
+                : null,
+          ),
+          onChanged: (val) {
+            if (val.trim().isEmpty) widget.onChanged('');
+          },
+        );
+      },
+    );
+  }
+}
+
+// =============================================================================
+// Inlined: EvEditorPanel (was ../widgets/ev_editor_panel.dart)
+// =============================================================================
+
+class EvEditorPanel extends StatelessWidget {
+  final Map<String, int> evs;
+  final ValueChanged<Map<String, int>> onChanged;
+
+  const EvEditorPanel({
+    super.key,
+    required this.evs,
+    required this.onChanged,
+  });
+
+  static const _statsOrder = ['HP', 'Atk', 'Def', 'SpA', 'SpD', 'Spe'];
+
+  int get totalEvs => evs.values.fold(0, (a, b) => a + b);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(12.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('EV Allocation', style: TextStyle(fontWeight: FontWeight.bold)),
+              Semantics(
+                label: 'Total EVs allocated: $totalEvs out of 510 maximum',
+                child: Text(
+                  'Total: $totalEvs / 510',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: totalEvs > 510 ? Colors.red : Colors.green,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              childAspectRatio: 2.2,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+            ),
+            itemCount: _statsOrder.length,
+            itemBuilder: (context, index) {
+              final stat = _statsOrder[index];
+              final currentEv = evs[stat] ?? 0;
+
+              return Semantics(
+                label: 'Effort Value for $stat, current value $currentEv',
+                textField: true,
+                excludeSemantics: true,
+                child: TextFormField(
+                  initialValue: currentEv.toString(),
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: stat,
+                    floatingLabelBehavior: FloatingLabelBehavior.always,
+                    isDense: true,
+                    border: const OutlineInputBorder(),
+                  ),
+                  onChanged: (val) {
+                    final parsed = int.tryParse(val) ?? 0;
+                    final updated = Map<String, int>.from(evs);
+                    final otherTotal = totalEvs - currentEv;
+                    final maxAllowed = (510 - otherTotal).clamp(0, 252);
+                    updated[stat] = parsed.clamp(0, maxAllowed);
+                    onChanged(updated);
+                  },
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// Inlined: MoveEditorPanel (was ../widgets/move_editor_panel.dart)
+// =============================================================================
+
+class MoveEditorPanel extends StatelessWidget {
+  final List<String?> moves;
+  final List<String> availableMoves;
+  final ValueChanged<List<String?>> onChanged;
+
+  const MoveEditorPanel({
+    super.key,
+    required this.moves,
+    required this.availableMoves,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(6.0),
+      color: Colors.black87,
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(child: _buildMoveDropdown(context, 0)),
+              const SizedBox(width: 6),
+              Expanded(child: _buildMoveDropdown(context, 1)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(child: _buildMoveDropdown(context, 2)),
+              const SizedBox(width: 6),
+              Expanded(child: _buildMoveDropdown(context, 3)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMoveDropdown(BuildContext context, int slotIndex) {
+    final currentMove = moves.length > slotIndex ? moves[slotIndex] : null;
+
+    return Semantics(
+      label: 'Move slot ${slotIndex + 1}',
+      child: DropdownButtonFormField<String>(
+        value: availableMoves.contains(currentMove) ? currentMove : null,
+        isDense: true,
+        style: const TextStyle(fontSize: 10, color: Colors.white),
+        dropdownColor: Colors.grey[900],
+        decoration: InputDecoration(
+          labelText: 'Move ${slotIndex + 1}',
+          labelStyle: const TextStyle(color: Colors.white70, fontSize: 10),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          border: const OutlineInputBorder(),
+        ),
+        items: [
+          const DropdownMenuItem<String>(
+            value: null,
+            child: Text('(None)', style: TextStyle(fontSize: 10, color: Colors.white54)),
+          ),
+          ...availableMoves.map(
+            (m) => DropdownMenuItem<String>(
+              value: m,
+              child: Text(m, style: const TextStyle(fontSize: 10, color: Colors.white)),
+            ),
+          ),
+        ],
+        onChanged: (selected) {
+          if (selected != null) {
+            final duplicateSlot = moves.indexWhere(
+              (m) => m != null && m == selected,
+            );
+            if (duplicateSlot != -1 && duplicateSlot != slotIndex) {
+              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                SnackBar(content: Text('$selected is already selected in another slot.')),
+              );
+              return;
+            }
+          }
+
+          final updated = List<String?>.from(moves);
+          while (updated.length < 4) {
+            updated.add(null);
+          }
+          updated[slotIndex] = selected;
+          onChanged(updated);
+        },
+      ),
+    );
+  }
+}
+
+// =============================================================================
+// Inlined: StatsDialog (was ../widgets/stats_dialog.dart)
+// =============================================================================
+
+class StatsDialog extends StatelessWidget {
+  final TeamMember member;
+  final Map<String, int> normalStats;
+  final String boosted;
+  final String lowered;
+
+  const StatsDialog({
+    super.key,
+    required this.member,
+    required this.normalStats,
+    required this.boosted,
+    required this.lowered,
+  });
+
+  static Future<void> show(BuildContext context, TeamMember member, JsEngineService service) async {
+    final natureInfo = await service.getNatureBoosts(member.nature);
+    final boosted = natureInfo['plus'] ?? '';
+    final lowered = natureInfo['minus'] ?? '';
+
+    final pokemonData = await service.getPokemon(member.name);
+    final rawStats = pokemonData['baseStats'] as Map<String, dynamic>;
+    final normalBaseStats = rawStats.map((k, v) => MapEntry(k, (v as num).toInt()));
+
+    final normalStats = StatCalculator.calculate(
+      baseStats: normalBaseStats,
+      evs: member.evs,
+      ivs: member.ivs,
+      level: member.level,
+      natureBoosted: boosted,
+      natureLowered: lowered,
+    );
+
+    if (!context.mounted) return;
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatsDialog(
+        member: member,
+        normalStats: normalStats,
+        boosted: boosted,
+        lowered: lowered,
+      ),
+    );
+  }
+
+  List<Widget> _buildStatRows(Map<String, int> stats) {
+    return stats.entries.map((e) {
+      final isBoosted = (e.key == 'Atk' && boosted == 'Attack') ||
+          (e.key == 'Def' && boosted == 'Defense') ||
+          (e.key == 'SpA' && boosted == 'Sp. Atk') ||
+          (e.key == 'SpD' && boosted == 'Sp. Def') ||
+          (e.key == 'Spe' && boosted == 'Speed');
+      final isLowered = (e.key == 'Atk' && lowered == 'Attack') ||
+          (e.key == 'Def' && lowered == 'Defense') ||
+          (e.key == 'SpA' && lowered == 'Sp. Atk') ||
+          (e.key == 'SpD' && lowered == 'Sp. Def') ||
+          (e.key == 'Spe' && lowered == 'Speed');
+      final suffix = isBoosted ? ' (+)' : (isLowered ? ' (-)' : '');
+      final semantic = '${e.key}: ${e.value}${isBoosted ? ", boosted" : ""}${isLowered ? ", lowered" : ""}';
+      return Text(
+        '${e.key}: ${e.value}$suffix',
+        semanticsLabel: semantic,
+      );
+    }).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final ivStr = member.ivs.entries.map((e) => '${e.key} ${e.value}').join(', ');
+    final evStr = member.evs.entries.map((e) => '${e.key} ${e.value}').join(', ');
+
+    return AlertDialog(
+      title: Text('${member.name.toUpperCase()} — Level ${member.level} Stats'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Nature: ${member.nature}'),
+            const SizedBox(height: 6),
+            Text(
+              'IVs: $ivStr',
+              style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+            ),
+            Text(
+              'EVs: $evStr',
+              style: const TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+            ),
+            const SizedBox(height: 12),
+            const Text('Calculated Stats', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 4),
+            ..._buildStatRows(normalStats),
+          ],
+        ),
+      ),
+      actions: [
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: cs.primaryContainer.withValues(alpha: 0.85),
+            foregroundColor: cs.onPrimaryContainer,
+          ),
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+      ],
+    );
+  }
+}
+
+// =============================================================================
+// Original TeamBuilderScreen
+// =============================================================================
 
 class TeamBuilderScreen extends StatefulWidget {
   const TeamBuilderScreen({super.key});
@@ -34,11 +666,11 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   List<Map<String, dynamic>> _baseSpeciesList = [];
   List<Map<String, dynamic>> _filtered = [];
   List<String> _itemList = [];
+  List<Map<String, dynamic>> _natures = [];
   List<TeamMember> _team = [];
 
   final Map<TeamMember, List<String>> _movesCache = {};
   final Map<TeamMember, List<Map<String, dynamic>>> _abilitiesCache = {};
-  final Map<TeamMember, String?> _activePanels = {};
   final Set<TeamMember> _collapsedCards = {};
 
   final Map<TeamMember, Map<String, int>> _initialEvs = {};
@@ -92,8 +724,14 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         }
         _initialEvs.remove(member);
       }
+    }
+  }
 
-      }
+  void _evictMemberCaches(TeamMember member) {
+    _movesCache.remove(member);
+    _abilitiesCache.remove(member);
+    _initialEvs.remove(member);
+    _collapsedCards.remove(member);
   }
 
   bool _mapsEqual(Map<String, int> m1, Map<String, int> m2) {
@@ -135,11 +773,9 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           gender: m.gender,
           genderRate: m.genderRate,
         )
-          ..level = m.level
           ..heldItem = m.heldItem
           ..nature = m.nature
-          ..evs = Map<String, int>.from(m.evs)
-          ..ivs = Map<String, int>.from(m.ivs);
+          ..evs = Map<String, int>.from(m.evs);
         result.add(baseMember);
       } catch (_) {
         final fallback = m.name.split('-Mega').first.split('-Primal').first;
@@ -152,11 +788,9 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           gender: m.gender,
           genderRate: m.genderRate,
         )
-          ..level = m.level
           ..heldItem = m.heldItem
           ..nature = m.nature
-          ..evs = Map<String, int>.from(m.evs)
-          ..ivs = Map<String, int>.from(m.ivs);
+          ..evs = Map<String, int>.from(m.evs);
         result.add(copy);
       }
     }
@@ -189,6 +823,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
       final baseList = await _service.getBaseSpeciesList();
       final items = await _service.getItemList();
+      final natures = await _service.getAllNatures();
       await _loadSavedTeam();
 
       if (!mounted) return;
@@ -196,6 +831,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       setState(() {
         _baseSpeciesList = baseList;
         _itemList = _filterBattleItems(items);
+        _natures = natures;
         _filtered = [];
         _loading = false;
         for (final member in _team) {
@@ -203,10 +839,10 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         }
         if (baseList.isEmpty) {
           _statusMessage = 'DIAG: ${_service.lastDiagnostics ?? "no diagnostics captured"}';
+        } else if (natures.isEmpty) {
+          _statusMessage = 'DIAG: Nature list failed to load from engine (Dex.data.Natures empty or unreachable).';
         }
       });
-
-      _enforceVgcPreset();
     } catch (e, stack) {
       debugPrint('Initialization Error: $e\n$stack');
       if (!mounted) return;
@@ -214,13 +850,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         _statusMessage = 'Error loading roster: $e';
         _loading = false;
       });
-    }
-  }
-
-  void _enforceVgcPreset() {
-    for (final member in _team) {
-      member.level = 50;
-      member.ivs = {'HP': 31, 'Atk': 31, 'Def': 31, 'SpA': 31, 'SpD': 31, 'Spe': 31};
     }
   }
 
@@ -345,9 +974,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         gender: defaultGender,
         genderRate: genderRate,
       );
-
-      newMember.level = 50;
-      newMember.ivs = {'HP': 31, 'Atk': 31, 'Def': 31, 'SpA': 31, 'SpD': 31, 'Spe': 31};
 
       setState(() {
         _team.add(newMember);
@@ -524,6 +1150,44 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     _unfocusAfterFrame();
   }
 
+  Future<void> _confirmRemoveAllTeamMembers() async {
+    _flushPendingPanelUpdates();
+    _unfocus();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove All Pokémon?', style: TextStyle(fontSize: 14)),
+        content: const Text(
+          'This will clear your entire team. This cannot be undone.',
+          style: TextStyle(fontSize: 12),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove All', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      for (final member in List<TeamMember>.from(_team)) {
+        _evictMemberCaches(member);
+      }
+      _team.clear();
+    });
+    await _saveTeam();
+    if (!mounted) return;
+    _announce('All Pokémon removed from team');
+  }
+
   Future<void> _processImport({required bool replace}) async {
     final text = _importController.text.trim();
     if (text.isEmpty) return;
@@ -541,8 +1205,6 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         }
         for (final m in importedMembers) {
           if (_team.length < 6) {
-            m.level = 50;
-            m.ivs = {'HP': 31, 'Atk': 31, 'Def': 31, 'SpA': 31, 'SpD': 31, 'Spe': 31};
             _team.add(m);
             _collapsedCards.add(m);
           }
@@ -753,6 +1415,16 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                 onPressed: _showExportDialog,
               ),
             ),
+            Semantics(
+              label: 'Remove all Pokémon from team',
+              button: true,
+              container: true,
+              excludeSemantics: true,
+              child: IconButton(
+                icon: const Text('🧹', style: TextStyle(fontSize: 16)),
+                onPressed: _team.isEmpty ? null : _confirmRemoveAllTeamMembers,
+              ),
+            ),
           ],
         ),
         body: Column(
@@ -844,10 +1516,11 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
     final typesStr = member.types.join('/');
     final itemStr = (member.heldItem != null && member.heldItem!.isNotEmpty) ? member.heldItem! : 'None';
+    final abilityStr = member.ability ?? 'None';
     final movesStr = member.moves.where((m) => m != null && m.isNotEmpty).join(' / ');
-    final int totalEvs = member.evs.values.fold(0, (sum, val) => sum + val);
+    final int totalEvs = member.evTotal;
 
-    final semanticSummary = '${member.name}, Types: $typesStr, Item: $itemStr, Level: ${member.level}, Ability: ${member.ability ?? "None"}, Nature: ${member.nature}, Gender: ${member.gender}, Moves: ${movesStr.isNotEmpty ? movesStr : "None"}, Total EVs: $totalEvs';
+    final semanticSummary = '${member.name}, Types: $typesStr, Item: $itemStr, Level: ${member.level}, Ability: $abilityStr, Nature: ${member.nature}, Gender: ${member.gender}, Moves: ${movesStr.isNotEmpty ? movesStr : "None"}, Total EVs: $totalEvs';
 
     return Semantics(
       key: ValueKey('member_card_${member.pokedexNumber}_$index'),
@@ -863,75 +1536,84 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                 _collapsedCards.remove(member);
               } else {
                 _collapsedCards.add(member);
-                _activePanels[member] = null;
               }
             });
           },
           child: Padding(
             padding: const EdgeInsets.all(8.0),
-            child: Column(
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${member.name.toUpperCase()}  $typesStr',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '@$itemStr  ✦$abilityStr',
+                        style: const TextStyle(fontSize: 10, fontFamily: 'monospace'),
+                      ),
+                      if (!isCollapsed) ...[
+                        const SizedBox(height: 8),
+                        Text('Gender: ${member.gender} | Nature: ${member.nature}', style: const TextStyle(fontSize: 10)),
+                        Text('Moves: ${movesStr.isNotEmpty ? movesStr : "None"}', style: const TextStyle(fontSize: 10)),
+                        Text('Total EVs: $totalEvs / 510', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 6),
+                SizedBox(
+                  width: 64,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            '${member.name.toUpperCase()}  $typesStr',
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                          _buildEmojiButton(
+                            emoji: 'Ⓜ️',
+                            semanticLabel: 'Toggle Mega form based on held item for ${member.name}',
+                            onPressed: () => _toggleMegaForm(index),
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '@$itemStr  lvl.${member.level}',
-                            style: const TextStyle(fontSize: 10, fontFamily: 'monospace'),
+                          _buildEmojiButton(
+                            emoji: '📝',
+                            semanticLabel: 'Edit details, moves, and EVs for ${member.name}',
+                            onPressed: () => _openEditDialog(member),
                           ),
                         ],
                       ),
-                    ),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _buildEmojiButton(
-                          emoji: 'Ⓜ️',
-                          semanticLabel: 'Toggle Mega form based on held item for ${member.name}',
-                          onPressed: () => _toggleMegaForm(index),
-                        ),
-                        _buildEmojiButton(
-                          emoji: '🗑️',
-                          semanticLabel: 'Remove ${member.name} from team',
-                          onPressed: () async {
-                            _flushPendingPanelUpdates(member);
-                            final name = member.name;
-                            setState(() => _team.removeAt(index));
-                            await _saveTeam();
-                            _announce('$name removed from team');
-                          },
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-
-                if (!isCollapsed) ...[
-                  const Divider(height: 12),
-                  Text('Ability: ${member.ability ?? "None"} | Gender: ${member.gender} | Nature: ${member.nature}', style: const TextStyle(fontSize: 10)),
-                  Text('Moves: ${movesStr.isNotEmpty ? movesStr : "None"}', style: const TextStyle(fontSize: 10)),
-                  Text('Total EVs: $totalEvs / 510', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 6),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: [
-                      _buildPanelToggle('⚙️', 'Details', 'Open details editor for ${member.name}', false, () => _openPanelDialog(member, 'details')),
-                      _buildPanelToggle('⚔️', 'Moves', 'Open move editor for ${member.name}', false, () => _openPanelDialog(member, 'moves')),
-                      _buildPanelToggle('📈', 'EVs', 'Open EV allocation for ${member.name}', false, () => _openPanelDialog(member, 'evs')),
-                      _buildPanelToggle('📊', 'Stats', 'Show stats dialog for ${member.name}', false, () => _showStats(member)),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          _buildEmojiButton(
+                            emoji: '📊',
+                            semanticLabel: 'Show stats dialog for ${member.name}',
+                            onPressed: () => _showStats(member),
+                          ),
+                          _buildEmojiButton(
+                            emoji: '🗑️',
+                            semanticLabel: 'Remove ${member.name} from team',
+                            onPressed: () async {
+                              _flushPendingPanelUpdates(member);
+                              final name = member.name;
+                              setState(() {
+                                _team.removeAt(index);
+                                _evictMemberCaches(member);
+                              });
+                              await _saveTeam();
+                              _announce('$name removed from team');
+                            },
+                          ),
+                        ],
+                      ),
                     ],
                   ),
-                ],
+                ),
               ],
             ),
           ),
@@ -956,31 +1638,13 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     );
   }
 
-  Widget _buildPanelToggle(String emoji, String label, String semanticLabel, bool isActive, VoidCallback onPressed) {
-    return Semantics(
-      label: semanticLabel,
-      button: true,
-      container: true,
-      excludeSemantics: true,
-      child: TextButton(
-        style: TextButton.styleFrom(
-          minimumSize: const Size(32, 24),
-          padding: EdgeInsets.zero,
-          backgroundColor: isActive ? Theme.of(context).colorScheme.primaryContainer : Colors.transparent,
-        ),
-        onPressed: onPressed,
-        child: Text(emoji, style: const TextStyle(fontSize: 13)),
-      ),
-    );
-  }
-
-  Future<void> _openPanelDialog(TeamMember member, String panelName) async {
+  Future<void> _openEditDialog(TeamMember member) async {
     _unfocus();
     _flushPendingPanelUpdates(member);
 
-    if (panelName == 'evs') {
-      _initialEvs[member] = Map<String, int>.from(member.evs);
-    }
+    // Track EVs at dialog-open time so we can announce a change once the
+    // dialog closes, same as the old EV-only panel did.
+    _initialEvs[member] = Map<String, int>.from(member.evs);
 
     if (!_movesCache.containsKey(member)) {
       try {
@@ -1000,112 +1664,98 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
     if (!mounted) return;
 
-    final String title;
-    switch (panelName) {
-      case 'details':
-        title = 'Details for ${member.name}';
-        break;
-      case 'moves':
-        title = 'Moves for ${member.name}';
-        break;
-      case 'evs':
-        title = 'EVs for ${member.name}';
-        break;
-      default:
-        return;
-    }
-
     await showDialog(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) {
-          Widget content;
-          switch (panelName) {
-            case 'details':
-              content = DetailsEditorPanel(
-                heldItem: member.heldItem,
-                gender: member.gender,
-                genderRate: member.genderRate,
-                ability: member.ability,
-                abilities: _abilitiesCache[member],
-                nature: member.nature,
-                itemList: _itemList,
-                onChanged: ({heldItem, gender, ability, nature}) async {
-                  if (heldItem != null) {
-                    final trimmed = heldItem.trim();
-                    if (trimmed.isNotEmpty) {
-                      final isDuplicate = _team.any((m) => m != member && (m.heldItem ?? '').toLowerCase().trim() == trimmed.toLowerCase());
-                      if (isDuplicate) {
-                        _announce('Item Clause: $trimmed is already held by another Pokémon.');
-                        return;
-                      }
-                    }
-                    setState(() => member.heldItem = trimmed);
-                    setDialogState(() {});
-                    _announce('${member.name} is now holding ${trimmed.isEmpty ? "no item" : trimmed}');
-                  }
-                  if (gender != null) {
-                    setState(() => member.gender = gender);
-                    setDialogState(() {});
-                    _announce('${member.name} gender set to $gender');
-                  }
-                  if (ability != null) {
-                    setState(() => member.ability = ability);
-                    setDialogState(() {});
-                    _announce('${member.name} ability change to $ability');
-                  }
-                  if (nature != null) {
-                    setState(() => member.nature = nature);
-                    setDialogState(() {});
-                    _announce('${member.name} nature set to $nature');
-                  }
-                  await _saveTeam();
-                },
-              );
-              break;
-            case 'moves':
-              content = MoveEditorPanel(
-                moves: member.moves,
-                availableMoves: _movesCache[member] ?? [],
-                onChanged: (moves) async {
-                  setState(() => member.moves = moves);
-                  setDialogState(() {});
-                  await _saveTeam();
-                  _announce('${member.name} moveset updated');
-                },
-              );
-              break;
-            case 'evs':
-              content = EvEditorPanel(
-                evs: member.evs,
-                onChanged: (evs) async {
-                  setState(() => member.evs = evs);
-                  setDialogState(() {});
-                  await _saveTeam();
-                },
-              );
-              break;
-            default:
-              content = const SizedBox.shrink();
-          }
-
           return AlertDialog(
             title: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Flexible(child: Text(title, style: const TextStyle(fontSize: 14))),
+                Flexible(child: Text('Edit ${member.name}', style: const TextStyle(fontSize: 14))),
                 _buildCloseDialogButton(dialogContext),
               ],
             ),
             content: SingleChildScrollView(
-              child: content,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  DetailsEditorPanel(
+                    heldItem: member.heldItem,
+                    gender: member.gender,
+                    genderRate: member.genderRate,
+                    ability: member.ability,
+                    abilities: _abilitiesCache[member],
+                    nature: member.nature,
+                    itemList: _itemList,
+                    natures: _natures,
+                    onChanged: ({heldItem, gender, ability, nature}) async {
+                      if (heldItem != null) {
+                        final trimmed = heldItem.trim();
+                        if (trimmed.isNotEmpty) {
+                          final isDuplicate = _team.any((m) => m != member && (m.heldItem ?? '').toLowerCase().trim() == trimmed.toLowerCase());
+                          if (isDuplicate) {
+                            _announce('Item Clause: $trimmed is already held by another Pokémon.');
+                            return;
+                          }
+                        }
+                        setState(() => member.heldItem = trimmed);
+                        setDialogState(() {});
+                        _announce('${member.name} is now holding ${trimmed.isEmpty ? "no item" : trimmed}');
+                      }
+                      if (gender != null) {
+                        setState(() => member.gender = gender);
+                        setDialogState(() {});
+                        _announce('${member.name} gender set to $gender');
+                      }
+                      if (ability != null) {
+                        setState(() => member.ability = ability);
+                        setDialogState(() {});
+                        _announce('${member.name} ability change to $ability');
+                      }
+                      if (nature != null) {
+                        setState(() => member.nature = nature);
+                        setDialogState(() {});
+                        _announce('${member.name} nature set to $nature');
+                      }
+                      await _saveTeam();
+                    },
+                  ),
+                  const SizedBox(height: 14),
+                  const Divider(),
+                  const SizedBox(height: 8),
+                  const Text('Moves', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  const SizedBox(height: 8),
+                  MoveEditorPanel(
+                    moves: member.moves,
+                    availableMoves: _movesCache[member] ?? [],
+                    onChanged: (moves) async {
+                      setState(() => member.moves = moves);
+                      setDialogState(() {});
+                      await _saveTeam();
+                      _announce('${member.name} moveset updated');
+                    },
+                  ),
+                  const SizedBox(height: 14),
+                  const Divider(),
+                  EvEditorPanel(
+                    evs: member.evs,
+                    onChanged: (evs) async {
+                      setState(() => member.evs = evs);
+                      setDialogState(() {});
+                      await _saveTeam();
+                    },
+                  ),
+                ],
+              ),
             ),
           );
         },
       ),
     );
 
-    // Flush after dialog closes (for EV/IV change announcements)
+    // Flush after dialog closes (for EV change announcements)
     _flushPendingPanelUpdates(member);
     _unfocus();
     _unfocusAfterFrame();
