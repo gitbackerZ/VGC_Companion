@@ -64,6 +64,22 @@ class DetailsEditorPanel extends StatelessWidget {
     return result;
   }
 
+  static InputDecoration _fieldDecoration(String label) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(fontSize: 13, color: Color(0xFFCFCFCF)),
+      isDense: true,
+      filled: true,
+      fillColor: const Color(0xFF2A2A2E),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Color(0xFF757575))),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Color(0xFF9E9E9E))),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Colors.lightBlueAccent, width: 2)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+    );
+  }
+
+  static const _fieldTextStyle = TextStyle(fontSize: 15, color: Colors.white);
+
   @override
   Widget build(BuildContext context) {
     final genderOptions = _getGenderOptions();
@@ -77,30 +93,30 @@ class DetailsEditorPanel extends StatelessWidget {
       children: [
         const Text(
           'Customize Details',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: _HeldItemField(
+                key: const ValueKey('held_item_field'),
                 initialValue: heldItem ?? '',
                 itemList: itemList,
                 onChanged: (val) => onChanged(heldItem: val),
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 10),
             Expanded(
               child: DropdownButtonFormField<String>(
+                key: const ValueKey('gender_dropdown'),
                 value: genderOptions.contains(gender) ? gender : genderOptions.first,
-                decoration: const InputDecoration(
-                  labelText: 'Gender',
-                  isDense: true,
-                  border: OutlineInputBorder(),
-                ),
+                style: _fieldTextStyle,
+                dropdownColor: const Color(0xFF2A2A2E),
+                decoration: _fieldDecoration('Gender'),
                 items: genderOptions
-                    .map((g) => DropdownMenuItem(value: g, child: Text(g)))
+                    .map((g) => DropdownMenuItem(value: g, child: Text(g, style: _fieldTextStyle)))
                     .toList(),
                 onChanged: (val) {
                   if (val != null) onChanged(gender: val);
@@ -109,41 +125,40 @@ class DetailsEditorPanel extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: DropdownButtonFormField<String>(
+                key: const ValueKey('ability_dropdown'),
                 value: safeAbilityValue,
-                decoration: const InputDecoration(
-                  labelText: 'Ability',
-                  isDense: true,
-                  border: OutlineInputBorder(),
-                ),
+                style: _fieldTextStyle,
+                dropdownColor: const Color(0xFF2A2A2E),
+                decoration: _fieldDecoration('Ability'),
                 items: abilityOptions
-                    .map((name) => DropdownMenuItem(value: name, child: Text(name)))
+                    .map((name) => DropdownMenuItem(value: name, child: Text(name, style: _fieldTextStyle)))
                     .toList(),
                 onChanged: (val) {
                   if (val != null) onChanged(ability: val);
                 },
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 10),
             Expanded(
               child: DropdownButtonFormField<String>(
+                key: const ValueKey('nature_dropdown'),
                 value: safeNatureValue,
-                decoration: const InputDecoration(
-                  labelText: 'Nature',
-                  isDense: true,
-                  border: OutlineInputBorder(),
-                ),
+                style: _fieldTextStyle,
+                dropdownColor: const Color(0xFF2A2A2E),
+                decoration: _fieldDecoration('Nature'),
                 selectedItemBuilder: (context) {
                   return natures.map((n) {
                     return Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
                         n['name'] as String,
+                        style: _fieldTextStyle,
                         overflow: TextOverflow.ellipsis,
                       ),
                     );
@@ -159,7 +174,7 @@ class DetailsEditorPanel extends StatelessWidget {
                     value: n['name'] as String,
                     child: Text(
                       '${n['name']}$boostText',
-                      style: const TextStyle(fontSize: 12),
+                      style: const TextStyle(fontSize: 14, color: Colors.white),
                     ),
                   );
                 }).toList(),
@@ -245,17 +260,23 @@ class _HeldItemFieldState extends State<_HeldItemField> {
         return TextField(
           controller: controller,
           focusNode: focusNode,
+          style: const TextStyle(fontSize: 15, color: Colors.white),
           onEditingComplete: () {
             onEditingComplete();
             widget.onChanged(controller.text.trim());
           },
           decoration: InputDecoration(
             labelText: 'Held Item',
+            labelStyle: const TextStyle(fontSize: 13, color: Color(0xFFCFCFCF)),
             isDense: true,
-            border: const OutlineInputBorder(),
+            filled: true,
+            fillColor: const Color(0xFF2A2A2E),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Color(0xFF9E9E9E))),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Colors.lightBlueAccent, width: 2)),
             suffixIcon: controller.text.isNotEmpty
                 ? IconButton(
-                    icon: const Icon(Icons.clear, size: 18),
+                    icon: const Icon(Icons.clear, size: 20, color: Colors.white70),
                     onPressed: () {
                       controller.clear();
                       widget.onChanged('');
@@ -319,9 +340,9 @@ class EvEditorPanel extends StatelessWidget {
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 3,
-              childAspectRatio: 2.2,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
+              childAspectRatio: 1.7,
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 10,
             ),
             itemCount: _statsOrder.length,
             itemBuilder: (context, index) {
@@ -333,13 +354,20 @@ class EvEditorPanel extends StatelessWidget {
                 textField: true,
                 excludeSemantics: true,
                 child: TextFormField(
+                  key: ValueKey('ev_field_$stat'),
                   initialValue: currentEv.toString(),
                   keyboardType: TextInputType.number,
+                  style: const TextStyle(fontSize: 16, color: Colors.white),
                   decoration: InputDecoration(
                     labelText: stat,
+                    labelStyle: const TextStyle(fontSize: 13, color: Color(0xFFCFCFCF)),
                     floatingLabelBehavior: FloatingLabelBehavior.always,
                     isDense: true,
-                    border: const OutlineInputBorder(),
+                    filled: true,
+                    fillColor: const Color(0xFF2A2A2E),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Color(0xFF9E9E9E))),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Colors.lightBlueAccent, width: 2)),
                   ),
                   onChanged: (val) {
                     final parsed = int.tryParse(val) ?? 0;
@@ -408,25 +436,26 @@ class MoveEditorPanel extends StatelessWidget {
     return Semantics(
       label: 'Move slot ${slotIndex + 1}',
       child: DropdownButtonFormField<String>(
+        key: ValueKey('move_dropdown_$slotIndex'),
         value: availableMoves.contains(currentMove) ? currentMove : null,
         isDense: true,
-        style: const TextStyle(fontSize: 10, color: Colors.white),
+        style: const TextStyle(fontSize: 14, color: Colors.white),
         dropdownColor: Colors.grey[900],
         decoration: InputDecoration(
           labelText: 'Move ${slotIndex + 1}',
-          labelStyle: const TextStyle(color: Colors.white70, fontSize: 10),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-          border: const OutlineInputBorder(),
+          labelStyle: const TextStyle(color: Colors.white70, fontSize: 12),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Color(0xFF9E9E9E))),
         ),
         items: [
           const DropdownMenuItem<String>(
             value: null,
-            child: Text('(None)', style: TextStyle(fontSize: 10, color: Colors.white54)),
+            child: Text('(None)', style: TextStyle(fontSize: 13, color: Colors.white54)),
           ),
           ...availableMoves.map(
             (m) => DropdownMenuItem<String>(
               value: m,
-              child: Text(m, style: const TextStyle(fontSize: 10, color: Colors.white)),
+              child: Text(m, style: const TextStyle(fontSize: 14, color: Colors.white)),
             ),
           ),
         ],
@@ -596,6 +625,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
 
   final Map<TeamMember, List<String>> _movesCache = {};
   final Map<TeamMember, List<Map<String, dynamic>>> _abilitiesCache = {};
+  final Map<TeamMember, Map<String, dynamic>> _speciesDataCache = {};
   final Set<TeamMember> _collapsedCards = {};
 
   final Map<TeamMember, Map<String, int>> _initialEvs = {};
@@ -655,8 +685,18 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
   void _evictMemberCaches(TeamMember member) {
     _movesCache.remove(member);
     _abilitiesCache.remove(member);
+    _speciesDataCache.remove(member);
     _initialEvs.remove(member);
     _collapsedCards.remove(member);
+  }
+
+  Future<void> _ensureSpeciesData(TeamMember member) async {
+    if (_speciesDataCache.containsKey(member)) return;
+    try {
+      final data = await _service.getPokemon(member.name);
+      if (!mounted) return;
+      setState(() => _speciesDataCache[member] = data);
+    } catch (_) {}
   }
 
   bool _mapsEqual(Map<String, int> m1, Map<String, int> m2) {
@@ -1444,6 +1484,9 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
     final abilityStr = member.ability ?? 'None';
     final movesStr = member.moves.where((m) => m != null && m.isNotEmpty).join(' / ');
     final int totalEvs = member.evTotal;
+    final speciesData = _speciesDataCache[member];
+    final heightStr = speciesData != null ? '${speciesData['heightm'] ?? '?'} m' : null;
+    final weightStr = speciesData != null ? '${speciesData['weightkg'] ?? '?'} kg' : null;
 
     final semanticSummary = '${member.name}, Types: $typesStr, Item: $itemStr, Level: ${member.level}, Ability: $abilityStr, Nature: ${member.nature}, Gender: ${member.gender}, Moves: ${movesStr.isNotEmpty ? movesStr : "None"}, Total EVs: $totalEvs';
 
@@ -1456,6 +1499,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
         child: InkWell(
           onTap: () {
             _flushPendingPanelUpdates(member);
+            final willExpand = isCollapsed;
             setState(() {
               if (isCollapsed) {
                 _collapsedCards.remove(member);
@@ -1463,82 +1507,67 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                 _collapsedCards.add(member);
               }
             });
+            if (willExpand) _ensureSpeciesData(member);
           },
           child: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Row(
+            padding: const EdgeInsets.all(10.0),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${member.name.toUpperCase()}  $typesStr',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '@$itemStr  ✦$abilityStr',
-                        style: const TextStyle(fontSize: 10, fontFamily: 'monospace'),
-                      ),
-                      if (!isCollapsed) ...[
-                        const SizedBox(height: 8),
-                        Text('Gender: ${member.gender} | Nature: ${member.nature}', style: const TextStyle(fontSize: 10)),
-                        Text('Moves: ${movesStr.isNotEmpty ? movesStr : "None"}', style: const TextStyle(fontSize: 10)),
-                        Text('Total EVs: $totalEvs / 510', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                      ],
-                    ],
-                  ),
+                Text(
+                  '${member.name.toUpperCase()}  $typesStr',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                 ),
-                const SizedBox(width: 6),
-                SizedBox(
-                  width: 64,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          _buildEmojiButton(
-                            emoji: 'Ⓜ️',
-                            semanticLabel: 'Toggle Mega form based on held item for ${member.name}',
-                            onPressed: () => _toggleMegaForm(index),
-                          ),
-                          _buildEmojiButton(
-                            emoji: '📝',
-                            semanticLabel: 'Edit details, moves, and EVs for ${member.name}',
-                            onPressed: () => _openEditDialog(member),
-                          ),
-                        ],
-                      ),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          _buildEmojiButton(
-                            emoji: '📊',
-                            semanticLabel: 'Show stats dialog for ${member.name}',
-                            onPressed: () => _showStats(member),
-                          ),
-                          _buildEmojiButton(
-                            emoji: '🗑️',
-                            semanticLabel: 'Remove ${member.name} from team',
-                            onPressed: () async {
-                              _flushPendingPanelUpdates(member);
-                              final name = member.name;
-                              setState(() {
-                                _team.removeAt(index);
-                                _evictMemberCaches(member);
-                              });
-                              await _saveTeam();
-                              _announce('$name removed from team');
-                            },
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
+                const SizedBox(height: 3),
+                Text(
+                  '@$itemStr  ✦$abilityStr',
+                  style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
                 ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _buildEmojiButton(
+                      emoji: 'Ⓜ️',
+                      semanticLabel: 'Toggle Mega form based on held item for ${member.name}',
+                      onPressed: () => _toggleMegaForm(index),
+                    ),
+                    _buildEmojiButton(
+                      emoji: '📝',
+                      semanticLabel: 'Edit details, moves, and EVs for ${member.name}',
+                      onPressed: () => _openEditDialog(member),
+                    ),
+                    _buildEmojiButton(
+                      emoji: '📊',
+                      semanticLabel: 'Show stats dialog for ${member.name}',
+                      onPressed: () => _showStats(member),
+                    ),
+                    _buildEmojiButton(
+                      emoji: '🗑️',
+                      semanticLabel: 'Remove ${member.name} from team',
+                      onPressed: () async {
+                        _flushPendingPanelUpdates(member);
+                        final name = member.name;
+                        setState(() {
+                          _team.removeAt(index);
+                          _evictMemberCaches(member);
+                        });
+                        await _saveTeam();
+                        _announce('$name removed from team');
+                      },
+                    ),
+                  ],
+                ),
+                if (!isCollapsed) ...[
+                  const Divider(height: 14),
+                  Text('Gender: ${member.gender} | Nature: ${member.nature}', style: const TextStyle(fontSize: 13)),
+                  if (heightStr != null && weightStr != null)
+                    Text('Height: $heightStr | Weight: $weightStr', style: const TextStyle(fontSize: 13)),
+                  const SizedBox(height: 2),
+                  Text('Moves: ${movesStr.isNotEmpty ? movesStr : "None"}', style: const TextStyle(fontSize: 13)),
+                  const SizedBox(height: 2),
+                  Text('Total EVs: $totalEvs / 510', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                ],
               ],
             ),
           ),
@@ -1556,8 +1585,8 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       child: InkWell(
         onTap: onPressed,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-          child: Text(emoji, style: const TextStyle(fontSize: 21)),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Text(emoji, style: const TextStyle(fontSize: 24)),
         ),
       ),
     );
@@ -1593,7 +1622,14 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) {
-          return AlertDialog(
+          // Prevents the dialog from resizing when the on-screen keyboard
+          // opens/closes. That resize is what triggers the layout +
+          // semantics-tree rebuild that drops TalkBack's accessibility
+          // focus off the active field. Ignoring viewInsets here keeps the
+          // dialog's layout stable across keyboard show/hide.
+          return MediaQuery(
+            data: MediaQuery.of(dialogContext).removeViewInsets(removeBottom: true),
+            child: AlertDialog(
             title: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -1607,6 +1643,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   DetailsEditorPanel(
+                    key: const ValueKey('details_panel'),
                     heldItem: member.heldItem,
                     gender: member.gender,
                     genderRate: member.genderRate,
@@ -1653,6 +1690,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                   const Text('Moves', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                   const SizedBox(height: 8),
                   MoveEditorPanel(
+                    key: const ValueKey('moves_panel'),
                     moves: member.moves,
                     availableMoves: _movesCache[member] ?? [],
                     onChanged: (moves) async {
@@ -1665,6 +1703,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                   const SizedBox(height: 14),
                   const Divider(),
                   EvEditorPanel(
+                    key: const ValueKey('evs_panel'),
                     evs: member.evs,
                     onChanged: (evs) async {
                       setState(() => member.evs = evs);
@@ -1674,6 +1713,7 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
                   ),
                 ],
               ),
+            ),
             ),
           );
         },
