@@ -173,12 +173,10 @@ class TeamTextCodec {
             pokedexNumber: 0,
             heldItem: item,
             ability: ability,
-            level: level,
             gender: gender,
             nature: nature,
             moves: moves,
             evs: evs,
-            ivs: {'HP': 31, 'Atk': 31, 'Def': 31, 'SpA': 31, 'SpD': 31, 'Spe': 31},
           ));
         }
       }
@@ -269,12 +267,10 @@ class TeamTextCodec {
           pokedexNumber: 0,
           heldItem: heldItem,
           ability: ability,
-          level: level,
           gender: gender,
           nature: nature,
           moves: moves,
           evs: evs,
-          ivs: ivs,
         ));
       }
     }
