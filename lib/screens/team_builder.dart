@@ -13,6 +13,82 @@ import '../services/team_text_codec.dart';
 import '../services/stat_calculator.dart';
 
 // =============================================================================
+// Shared theme-aware "inverted contrast" field style, used across the Edit
+// dialog (DetailsEditorPanel, EvEditorPanel, MoveEditorPanel, _HeldItemField)
+// so every field container looks and behaves the same regardless of the
+// device's light/dark theme.
+// =============================================================================
+
+class _EditFieldTheme {
+  final Color fillColor;
+  final Color textColor;
+  final Color labelColor;
+  final Color secondaryTextColor;
+  final Color borderColor;
+  final Color focusedBorderColor;
+  final Color dropdownColor;
+  final Color placeholderColor;
+
+  const _EditFieldTheme({
+    required this.fillColor,
+    required this.textColor,
+    required this.labelColor,
+    required this.secondaryTextColor,
+    required this.borderColor,
+    required this.focusedBorderColor,
+    required this.dropdownColor,
+    required this.placeholderColor,
+  });
+
+  factory _EditFieldTheme.of(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // Inverted relative to the surrounding dialog: dark dialog -> light
+    // field fill with dark text, light dialog -> dark field fill with
+    // light text. This keeps the field always high-contrast against
+    // whichever theme the dialog itself is rendered in.
+    if (isDark) {
+      return const _EditFieldTheme(
+        fillColor: Color(0xFFF0F0F0),
+        textColor: Colors.black,
+        labelColor: Color(0xFF3A3A3A),
+        secondaryTextColor: Color(0xFF5A5A5A),
+        borderColor: Color(0xFF616161),
+        focusedBorderColor: Colors.blueAccent,
+        dropdownColor: Color(0xFFF0F0F0),
+        placeholderColor: Color(0xFF757575),
+      );
+    } else {
+      return const _EditFieldTheme(
+        fillColor: Color(0xFF2A2A2E),
+        textColor: Colors.white,
+        labelColor: Color(0xFFCFCFCF),
+        secondaryTextColor: Color(0xFFB0B0B0),
+        borderColor: Color(0xFF9E9E9E),
+        focusedBorderColor: Colors.lightBlueAccent,
+        dropdownColor: Color(0xFF2A2A2E),
+        placeholderColor: Color(0xFF9E9E9E),
+      );
+    }
+  }
+
+  InputDecoration decoration(String label) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: TextStyle(fontSize: 13, color: labelColor),
+      isDense: true,
+      filled: true,
+      fillColor: fillColor,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: borderColor)),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: borderColor)),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: focusedBorderColor, width: 2)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+    );
+  }
+
+  TextStyle get fieldTextStyle => TextStyle(fontSize: 15, color: textColor);
+}
+
+// =============================================================================
 // Inlined: DetailsEditorPanel (was ../widgets/details_editor_panel.dart)
 // =============================================================================
 
@@ -64,24 +140,9 @@ class DetailsEditorPanel extends StatelessWidget {
     return result;
   }
 
-  static InputDecoration _fieldDecoration(String label) {
-    return InputDecoration(
-      labelText: label,
-      labelStyle: const TextStyle(fontSize: 13, color: Color(0xFFCFCFCF)),
-      isDense: true,
-      filled: true,
-      fillColor: const Color(0xFF2A2A2E),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Color(0xFF757575))),
-      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Color(0xFF9E9E9E))),
-      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Colors.lightBlueAccent, width: 2)),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-    );
-  }
-
-  static const _fieldTextStyle = TextStyle(fontSize: 15, color: Colors.white);
-
   @override
   Widget build(BuildContext context) {
+    final fieldTheme = _EditFieldTheme.of(context);
     final genderOptions = _getGenderOptions();
     final abilityOptions = _getUniqueAbilities();
     final abilityNames = abilityOptions.map((a) => a['name'] as String).toSet();
@@ -113,11 +174,11 @@ class DetailsEditorPanel extends StatelessWidget {
               child: DropdownButtonFormField<String>(
                 key: const ValueKey('gender_dropdown'),
                 value: genderOptions.contains(gender) ? gender : genderOptions.first,
-                style: _fieldTextStyle,
-                dropdownColor: const Color(0xFF2A2A2E),
-                decoration: _fieldDecoration('Gender'),
+                style: fieldTheme.fieldTextStyle,
+                dropdownColor: fieldTheme.dropdownColor,
+                decoration: fieldTheme.decoration('Gender'),
                 items: genderOptions
-                    .map((g) => DropdownMenuItem(value: g, child: Text(g, style: _fieldTextStyle)))
+                    .map((g) => DropdownMenuItem(value: g, child: Text(g, style: fieldTheme.fieldTextStyle)))
                     .toList(),
                 onChanged: (val) {
                   if (val != null) onChanged(gender: val);
@@ -135,14 +196,14 @@ class DetailsEditorPanel extends StatelessWidget {
                 key: const ValueKey('ability_dropdown'),
                 value: safeAbilityValue,
                 isExpanded: true,
-                style: _fieldTextStyle,
-                dropdownColor: const Color(0xFF2A2A2E),
-                decoration: _fieldDecoration('Ability'),
+                style: fieldTheme.fieldTextStyle,
+                dropdownColor: fieldTheme.dropdownColor,
+                decoration: fieldTheme.decoration('Ability'),
                 selectedItemBuilder: (context) {
                   return abilityOptions.map((a) {
                     return Align(
                       alignment: Alignment.centerLeft,
-                      child: Text(a['name'] as String, style: _fieldTextStyle, overflow: TextOverflow.ellipsis),
+                      child: Text(a['name'] as String, style: fieldTheme.fieldTextStyle, overflow: TextOverflow.ellipsis),
                     );
                   }).toList();
                 },
@@ -157,11 +218,11 @@ class DetailsEditorPanel extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(name, style: _fieldTextStyle),
+                          Text(name, style: fieldTheme.fieldTextStyle),
                           if (desc.isNotEmpty)
                             Text(
                               desc,
-                              style: const TextStyle(fontSize: 11, color: Color(0xFFB0B0B0)),
+                              style: TextStyle(fontSize: 11, color: fieldTheme.secondaryTextColor),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -180,16 +241,16 @@ class DetailsEditorPanel extends StatelessWidget {
               child: DropdownButtonFormField<String>(
                 key: const ValueKey('nature_dropdown'),
                 value: safeNatureValue,
-                style: _fieldTextStyle,
-                dropdownColor: const Color(0xFF2A2A2E),
-                decoration: _fieldDecoration('Nature'),
+                style: fieldTheme.fieldTextStyle,
+                dropdownColor: fieldTheme.dropdownColor,
+                decoration: fieldTheme.decoration('Nature'),
                 selectedItemBuilder: (context) {
                   return natures.map((n) {
                     return Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
                         n['name'] as String,
-                        style: _fieldTextStyle,
+                        style: fieldTheme.fieldTextStyle,
                         overflow: TextOverflow.ellipsis,
                       ),
                     );
@@ -205,7 +266,7 @@ class DetailsEditorPanel extends StatelessWidget {
                     value: n['name'] as String,
                     child: Text(
                       '${n['name']}$boostText',
-                      style: const TextStyle(fontSize: 14, color: Colors.white),
+                      style: TextStyle(fontSize: 14, color: fieldTheme.textColor),
                     ),
                   );
                 }).toList(),
@@ -277,12 +338,13 @@ class _HeldItemFieldState extends State<_HeldItemField> {
             .take(8);
       },
       optionsViewBuilder: (context, onSelected, options) {
+        final fieldTheme = _EditFieldTheme.of(context);
         final list = options.toList();
         return Align(
           alignment: Alignment.topLeft,
           child: Material(
             elevation: 4,
-            color: const Color(0xFF2A2A2E),
+            color: fieldTheme.fillColor,
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 260, maxWidth: 320),
               child: ListView.builder(
@@ -300,10 +362,10 @@ class _HeldItemFieldState extends State<_HeldItemField> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(name, style: const TextStyle(fontSize: 15, color: Colors.white, fontWeight: FontWeight.bold)),
+                          Text(name, style: TextStyle(fontSize: 15, color: fieldTheme.textColor, fontWeight: FontWeight.bold)),
                           if (desc.isNotEmpty) ...[
                             const SizedBox(height: 2),
-                            Text(desc, style: const TextStyle(fontSize: 12, color: Color(0xFFCFCFCF))),
+                            Text(desc, style: TextStyle(fontSize: 12, color: fieldTheme.secondaryTextColor)),
                           ],
                         ],
                       ),
@@ -329,26 +391,19 @@ class _HeldItemFieldState extends State<_HeldItemField> {
           focusNode.addListener(_focusListener!);
         }
 
+        final fieldTheme = _EditFieldTheme.of(context);
         return TextField(
           controller: controller,
           focusNode: focusNode,
-          style: const TextStyle(fontSize: 15, color: Colors.white),
+          style: fieldTheme.fieldTextStyle,
           onEditingComplete: () {
             onEditingComplete();
             widget.onChanged(controller.text.trim());
           },
-          decoration: InputDecoration(
-            labelText: 'Held Item',
-            labelStyle: const TextStyle(fontSize: 13, color: Color(0xFFCFCFCF)),
-            isDense: true,
-            filled: true,
-            fillColor: const Color(0xFF2A2A2E),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Color(0xFF9E9E9E))),
-            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Colors.lightBlueAccent, width: 2)),
+          decoration: fieldTheme.decoration('Held Item').copyWith(
             suffixIcon: controller.text.isNotEmpty
                 ? IconButton(
-                    icon: const Icon(Icons.clear, size: 20, color: Colors.white70),
+                    icon: Icon(Icons.clear, size: 20, color: fieldTheme.secondaryTextColor),
                     onPressed: () {
                       controller.clear();
                       widget.onChanged('');
@@ -421,6 +476,7 @@ class EvEditorPanel extends StatelessWidget {
               final stat = _statsOrder[index];
               final currentEv = evs[stat] ?? 0;
 
+              final fieldTheme = _EditFieldTheme.of(context);
               return Semantics(
                 label: 'Effort Value for $stat, current value $currentEv',
                 textField: true,
@@ -429,17 +485,10 @@ class EvEditorPanel extends StatelessWidget {
                   key: ValueKey('ev_field_$stat'),
                   initialValue: currentEv.toString(),
                   keyboardType: TextInputType.number,
-                  style: const TextStyle(fontSize: 16, color: Colors.white),
-                  decoration: InputDecoration(
-                    labelText: stat,
-                    labelStyle: const TextStyle(fontSize: 13, color: Color(0xFFCFCFCF)),
+                  style: fieldTheme.fieldTextStyle.copyWith(fontSize: 16),
+                  decoration: fieldTheme.decoration(stat).copyWith(
                     floatingLabelBehavior: FloatingLabelBehavior.always,
-                    isDense: true,
-                    filled: true,
-                    fillColor: const Color(0xFF2A2A2E),
                     contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Color(0xFF9E9E9E))),
-                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Colors.lightBlueAccent, width: 2)),
                   ),
                   onChanged: (val) {
                     final parsed = int.tryParse(val) ?? 0;
@@ -520,7 +569,6 @@ class MoveEditorPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(6.0),
-      color: Colors.black87,
       child: Column(
         children: [
           Row(
@@ -544,6 +592,7 @@ class MoveEditorPanel extends StatelessWidget {
   }
 
   Widget _buildMoveDropdown(BuildContext context, int slotIndex) {
+    final fieldTheme = _EditFieldTheme.of(context);
     final currentMove = moves.length > slotIndex ? moves[slotIndex] : null;
     final availableMoveNames = availableMoves.map((m) => m['name'] as String).toList();
     final currentMoveData = _dataForMove(currentMove);
@@ -559,18 +608,15 @@ class MoveEditorPanel extends StatelessWidget {
               value: availableMoveNames.contains(currentMove) ? currentMove : null,
               isDense: true,
               isExpanded: true,
-              style: const TextStyle(fontSize: 14, color: Colors.white),
-              dropdownColor: Colors.grey[900],
-              decoration: InputDecoration(
-                labelText: 'Move ${slotIndex + 1}',
-                labelStyle: const TextStyle(color: Colors.white70, fontSize: 12),
+              style: fieldTheme.fieldTextStyle.copyWith(fontSize: 14),
+              dropdownColor: fieldTheme.dropdownColor,
+              decoration: fieldTheme.decoration('Move ${slotIndex + 1}').copyWith(
                 contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: Color(0xFF9E9E9E))),
               ),
               items: [
-                const DropdownMenuItem<String>(
+                DropdownMenuItem<String>(
                   value: null,
-                  child: Text('(None)', style: TextStyle(fontSize: 13, color: Colors.white54)),
+                  child: Text('(None)', style: TextStyle(fontSize: 13, color: fieldTheme.placeholderColor)),
                 ),
                 ...availableMoves.map((m) {
                   final name = m['name'] as String;
@@ -581,7 +627,7 @@ class MoveEditorPanel extends StatelessWidget {
                     value: name,
                     child: Text(
                       '$name  ($type, $powerStr BP)',
-                      style: const TextStyle(fontSize: 13, color: Colors.white),
+                      style: TextStyle(fontSize: 13, color: fieldTheme.textColor),
                       overflow: TextOverflow.ellipsis,
                     ),
                   );
@@ -1651,63 +1697,92 @@ class _TeamBuilderScreenState extends State<TeamBuilderScreen> {
           },
           child: Padding(
             padding: const EdgeInsets.all(10.0),
-            child: Column(
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '${member.name.toUpperCase()}  $typesStr',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        member.name.toUpperCase(),
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        typesStr,
+                        style: const TextStyle(fontSize: 12, color: Color(0xFFB0B0B0)),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '@$itemStr',
+                        style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
+                      ),
+                      Text(
+                        '✦$abilityStr',
+                        style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
+                      ),
+                      if (!isCollapsed) ...[
+                        const Divider(height: 14),
+                        Text('Gender: ${member.gender} | Nature: ${member.nature}', style: const TextStyle(fontSize: 13)),
+                        if (heightStr != null && weightStr != null)
+                          Text('Height: $heightStr | Weight: $weightStr', style: const TextStyle(fontSize: 13)),
+                        const SizedBox(height: 4),
+                        Text('Moves: ${movesStr.isNotEmpty ? movesStr : "None"}', style: const TextStyle(fontSize: 13)),
+                        const SizedBox(height: 4),
+                        Text('Total EVs: $totalEvs / 510', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                      ],
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  '@$itemStr  ✦$abilityStr',
-                  style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 72,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          _buildEmojiButton(
+                            emoji: 'Ⓜ️',
+                            semanticLabel: 'Toggle Mega form based on held item for ${member.name}',
+                            onPressed: () => _toggleMegaForm(index),
+                          ),
+                          _buildEmojiButton(
+                            emoji: '📝',
+                            semanticLabel: 'Edit details, moves, and EVs for ${member.name}',
+                            onPressed: () => _openEditDialog(member),
+                          ),
+                        ],
+                      ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          _buildEmojiButton(
+                            emoji: '📊',
+                            semanticLabel: 'Show stats dialog for ${member.name}',
+                            onPressed: () => _showStats(member),
+                          ),
+                          _buildEmojiButton(
+                            emoji: '🗑️',
+                            semanticLabel: 'Remove ${member.name} from team',
+                            onPressed: () async {
+                              _flushPendingPanelUpdates(member);
+                              final name = member.name;
+                              setState(() {
+                                _team.removeAt(index);
+                                _evictMemberCaches(member);
+                              });
+                              await _saveTeam();
+                              _announce('$name removed from team');
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    _buildEmojiButton(
-                      emoji: 'Ⓜ️',
-                      semanticLabel: 'Toggle Mega form based on held item for ${member.name}',
-                      onPressed: () => _toggleMegaForm(index),
-                    ),
-                    _buildEmojiButton(
-                      emoji: '📝',
-                      semanticLabel: 'Edit details, moves, and EVs for ${member.name}',
-                      onPressed: () => _openEditDialog(member),
-                    ),
-                    _buildEmojiButton(
-                      emoji: '📊',
-                      semanticLabel: 'Show stats dialog for ${member.name}',
-                      onPressed: () => _showStats(member),
-                    ),
-                    _buildEmojiButton(
-                      emoji: '🗑️',
-                      semanticLabel: 'Remove ${member.name} from team',
-                      onPressed: () async {
-                        _flushPendingPanelUpdates(member);
-                        final name = member.name;
-                        setState(() {
-                          _team.removeAt(index);
-                          _evictMemberCaches(member);
-                        });
-                        await _saveTeam();
-                        _announce('$name removed from team');
-                      },
-                    ),
-                  ],
-                ),
-                if (!isCollapsed) ...[
-                  const Divider(height: 14),
-                  Text('Gender: ${member.gender} | Nature: ${member.nature}', style: const TextStyle(fontSize: 13)),
-                  if (heightStr != null && weightStr != null)
-                    Text('Height: $heightStr | Weight: $weightStr', style: const TextStyle(fontSize: 13)),
-                  const SizedBox(height: 2),
-                  Text('Moves: ${movesStr.isNotEmpty ? movesStr : "None"}', style: const TextStyle(fontSize: 13)),
-                  const SizedBox(height: 2),
-                  Text('Total EVs: $totalEvs / 510', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                ],
               ],
             ),
           ),
