@@ -440,6 +440,13 @@ class JsEngineService {
           ? Object.keys(globalThis.PSStaticData.base.items)
           : [];
 
+        function descFor(kind, id, obj) {
+          var t = globalThis.PSStaticData && globalThis.PSStaticData.text &&
+                  globalThis.PSStaticData.text[kind];
+          var e = t && t[id];
+          return (e && (e.shortDesc || e.desc)) || (obj && (obj.shortDesc || obj.desc)) || '';
+        }
+
         var result = [];
         for (var i = 0; i < itemKeys.length; i++) {
           var item = champDex.items.get(itemKeys[i]);
@@ -452,7 +459,7 @@ class JsEngineService {
           if (isStandard || isPastGen || isMegaStone) {
             result.push({
               name: item.name,
-              shortDesc: item.shortDesc || item.desc || ''
+              shortDesc: descFor('items', item.id, item)
             });
           }
         }
@@ -686,10 +693,27 @@ class JsEngineService {
               }
             }
 
+            function descFor(kind, id, obj) {
+              var t = globalThis.PSStaticData && globalThis.PSStaticData.text &&
+                      globalThis.PSStaticData.text[kind];
+              var e = t && t[id];
+              return {
+                shortDesc: (e && (e.shortDesc || e.desc)) || obj.shortDesc || obj.desc || '',
+                desc: (e && (e.desc || e.shortDesc)) || obj.desc || obj.shortDesc || ''
+              };
+            }
+
             var moveIds = Object.keys(moveIdSet);
             var moves = moveIds
               .map(function(mid) { return champDex.moves.get(mid); })
-              .filter(function(m) { return m && m.exists && !m.isNonstandard; });
+              .filter(function(m) { return m && m.exists && !m.isNonstandard; })
+              .map(function(m) {
+                var o = JSON.parse(JSON.stringify(m));
+                var d = descFor('moves', m.id, m);
+                o.shortDesc = d.shortDesc;
+                o.desc = d.desc;
+                return o;
+              });
 
             return JSON.stringify(moves);
           } catch (e) {
@@ -722,6 +746,13 @@ class JsEngineService {
           var species = champDex.species.get("$sanitized");
           if (!species || !species.exists || !species.abilities) return JSON.stringify([]);
 
+          function descFor(kind, id, obj) {
+            var t = globalThis.PSStaticData && globalThis.PSStaticData.text &&
+                    globalThis.PSStaticData.text[kind];
+            var e = t && t[id];
+            return (e && (e.shortDesc || e.desc)) || (obj && (obj.shortDesc || obj.desc)) || '';
+          }
+
           var seen = {};
           var result = [];
           var slots = Object.keys(species.abilities);
@@ -734,7 +765,7 @@ class JsEngineService {
             var abilityData = champDex.abilities.get(abilityName);
             result.push({
               name: (abilityData && abilityData.exists) ? abilityData.name : abilityName,
-              shortDesc: (abilityData && (abilityData.shortDesc || abilityData.desc)) || ''
+              shortDesc: abilityData ? descFor('abilities', abilityData.id, abilityData) : ''
             });
           }
           return JSON.stringify(result);
