@@ -452,11 +452,12 @@ class JsEngineService {
           var item = champDex.items.get(itemKeys[i]);
           if (!item || !item.exists) continue;
 
-          var isPastGen = item.isNonstandard === 'Past';
-          var isMegaStone = !!item.megaStone || !!item.megaEvolves;
-          var isStandard = !item.isNonstandard;
-
-          if (isStandard || isPastGen || isMegaStone) {
+          // In the champions mod, items.ts explicitly sets isNonstandard
+          // to either null (legal in this mod) or a truthy value like
+          // "Past" (banned in this mod). Trust that verdict directly
+          // instead of re-including anything Past-tagged, since that
+          // previously let banned items back into the list.
+          if (!item.isNonstandard) {
             result.push({
               name: item.name,
               shortDesc: descFor('items', item.id, item)

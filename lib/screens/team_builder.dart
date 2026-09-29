@@ -532,37 +532,27 @@ class MoveEditorPanel extends StatelessWidget {
     return null;
   }
 
-  void _showMoveInfo(BuildContext context, Map<String, dynamic> moveData) {
-    final type = moveData['type'] as String? ?? '?';
-    final category = moveData['category'] as String? ?? '?';
-    final power = moveData['basePower'];
-    final accuracy = moveData['accuracy'];
-    final powerStr = (power == null || power == 0) ? '—' : power.toString();
-    final accStr = (accuracy == true) ? '—' : (accuracy?.toString() ?? '?');
-    final desc = (moveData['shortDesc'] as String?)?.isNotEmpty == true
-        ? moveData['shortDesc'] as String
-        : (moveData['desc'] as String? ?? 'No description available.');
+  static String _powerStr(Map<String, dynamic> m) {
+    final power = m['basePower'];
+    return (power == null || power == 0) ? '—' : power.toString();
+  }
 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(moveData['name'] as String? ?? 'Move', style: const TextStyle(fontSize: 15)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Type: $type   |   Category: $category', style: const TextStyle(fontSize: 13)),
-            const SizedBox(height: 4),
-            Text('Power: $powerStr   |   Accuracy: $accStr', style: const TextStyle(fontSize: 13)),
-            const SizedBox(height: 10),
-            Text(desc, style: const TextStyle(fontSize: 13)),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
-        ],
-      ),
-    );
+  static String _accuracyStr(Map<String, dynamic> m) {
+    final accuracy = m['accuracy'];
+    if (accuracy == true) return '—';
+    return accuracy != null ? '$accuracy%' : '?';
+  }
+
+  static String _statLine(Map<String, dynamic> m) {
+    final type = m['type'] as String? ?? '?';
+    final category = m['category'] as String? ?? '?';
+    return '$type · $category · ${_powerStr(m)} BP · ${_accuracyStr(m)} acc';
+  }
+
+  static String _descFor(Map<String, dynamic> m) {
+    final shortDesc = m['shortDesc'] as String?;
+    if (shortDesc != null && shortDesc.isNotEmpty) return shortDesc;
+    return (m['desc'] as String?) ?? '';
   }
 
   @override
@@ -598,73 +588,91 @@ class MoveEditorPanel extends StatelessWidget {
     final currentMoveData = _dataForMove(currentMove);
 
     return Semantics(
-      label: 'Move slot ${slotIndex + 1}',
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            child: DropdownButtonFormField<String>(
-              key: ValueKey('move_dropdown_$slotIndex'),
-              value: availableMoveNames.contains(currentMove) ? currentMove : null,
-              isDense: true,
-              isExpanded: true,
-              style: fieldTheme.fieldTextStyle.copyWith(fontSize: 14),
-              dropdownColor: fieldTheme.dropdownColor,
-              decoration: fieldTheme.decoration('Move ${slotIndex + 1}').copyWith(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      label: currentMoveData != null
+          ? 'Move slot ${slotIndex + 1}: $currentMove, ${_statLine(currentMoveData)}. ${_descFor(currentMoveData)}'
+          : 'Move slot ${slotIndex + 1}, empty',
+      child: DropdownButtonFormField<String>(
+        key: ValueKey('move_dropdown_$slotIndex'),
+        value: availableMoveNames.contains(currentMove) ? currentMove : null,
+        isDense: false,
+        isExpanded: true,
+        itemHeight: null,
+        style: fieldTheme.fieldTextStyle.copyWith(fontSize: 14),
+        dropdownColor: fieldTheme.dropdownColor,
+        decoration: fieldTheme.decoration('Move ${slotIndex + 1}').copyWith(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        ),
+        selectedItemBuilder: (context) {
+          final options = <String?>[null, ...availableMoves.map((m) => m['name'] as String)];
+          return options.map((name) {
+            if (name == null) {
+              return Align(
+                alignment: Alignment.centerLeft,
+                child: Text('(None)', style: TextStyle(fontSize: 14, color: fieldTheme.placeholderColor)),
+              );
+            }
+            final data = _dataForMove(name);
+            return Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                data != null ? '$name  (${_statLine(data)})' : name,
+                style: fieldTheme.fieldTextStyle.copyWith(fontSize: 14),
+                overflow: TextOverflow.ellipsis,
               ),
-              items: [
-                DropdownMenuItem<String>(
-                  value: null,
-                  child: Text('(None)', style: TextStyle(fontSize: 13, color: fieldTheme.placeholderColor)),
+            );
+          }).toList();
+        },
+        items: [
+          DropdownMenuItem<String>(
+            value: null,
+            child: Text('(None)', style: TextStyle(fontSize: 13, color: fieldTheme.placeholderColor)),
+          ),
+          ...availableMoves.map((m) {
+            final name = m['name'] as String;
+            final desc = _descFor(m);
+            return DropdownMenuItem<String>(
+              value: name,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(name, style: TextStyle(fontSize: 14, color: fieldTheme.textColor, fontWeight: FontWeight.bold)),
+                    Text(_statLine(m), style: TextStyle(fontSize: 11, color: fieldTheme.secondaryTextColor)),
+                    if (desc.isNotEmpty)
+                      Text(
+                        desc,
+                        style: TextStyle(fontSize: 11, color: fieldTheme.secondaryTextColor),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                  ],
                 ),
-                ...availableMoves.map((m) {
-                  final name = m['name'] as String;
-                  final type = m['type'] as String? ?? '';
-                  final power = m['basePower'];
-                  final powerStr = (power == null || power == 0) ? '—' : power.toString();
-                  return DropdownMenuItem<String>(
-                    value: name,
-                    child: Text(
-                      '$name  ($type, $powerStr BP)',
-                      style: TextStyle(fontSize: 13, color: fieldTheme.textColor),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  );
-                }),
-              ],
-              onChanged: (selected) {
-                if (selected != null) {
-                  final duplicateSlot = moves.indexWhere(
-                    (m) => m != null && m == selected,
-                  );
-                  if (duplicateSlot != -1 && duplicateSlot != slotIndex) {
-                    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                      SnackBar(content: Text('$selected is already selected in another slot.')),
-                    );
-                    return;
-                  }
-                }
-
-                final updated = List<String?>.from(moves);
-                while (updated.length < 4) {
-                  updated.add(null);
-                }
-                updated[slotIndex] = selected;
-                onChanged(updated);
-              },
-            ),
-          ),
-          Semantics(
-            label: currentMoveData != null ? 'Show details for $currentMove' : 'No move selected for slot ${slotIndex + 1}',
-            button: true,
-            excludeSemantics: true,
-            child: IconButton(
-              icon: const Icon(Icons.info_outline, size: 18, color: Colors.white70),
-              onPressed: currentMoveData != null ? () => _showMoveInfo(context, currentMoveData) : null,
-            ),
-          ),
+              ),
+            );
+          }),
         ],
+        onChanged: (selected) {
+          if (selected != null) {
+            final duplicateSlot = moves.indexWhere(
+              (m) => m != null && m == selected,
+            );
+            if (duplicateSlot != -1 && duplicateSlot != slotIndex) {
+              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                SnackBar(content: Text('$selected is already selected in another slot.')),
+              );
+              return;
+            }
+          }
+
+          final updated = List<String?>.from(moves);
+          while (updated.length < 4) {
+            updated.add(null);
+          }
+          updated[slotIndex] = selected;
+          onChanged(updated);
+        },
       ),
     );
   }
