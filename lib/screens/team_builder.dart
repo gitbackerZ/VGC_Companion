@@ -591,6 +591,8 @@ class MoveEditorPanel extends StatelessWidget {
       label: currentMoveData != null
           ? 'Move slot ${slotIndex + 1}: $currentMove, ${_statLine(currentMoveData)}. ${_descFor(currentMoveData)}'
           : 'Move slot ${slotIndex + 1}, empty',
+      container: true,
+      excludeSemantics: true,
       child: DropdownButtonFormField<String>(
         key: ValueKey('move_dropdown_$slotIndex'),
         value: availableMoveNames.contains(currentMove) ? currentMove : null,
