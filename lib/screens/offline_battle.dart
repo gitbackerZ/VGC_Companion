@@ -1136,7 +1136,13 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       case '-weather':
         if (parts.length < 3) return line;
         if (parts[2] == 'none') return 'The weather cleared.';
-        return 'The weather is ${parts[2]}.';
+        final w = parts[2]
+            .replaceAll('RainDance', 'rain')
+            .replaceAll('SunnyDay', 'harsh sunlight')
+            .replaceAll('DesolateLand', 'extremely harsh sunlight')
+            .replaceAll('PrimordialSea', 'heavy rain');
+        if (line.contains('[upkeep]')) return 'The $w continues.';
+        return 'The weather is $w.';
       case '-ability':
         if (parts.length < 4) return line;
         return "${nameOf(parts[2])}'s ${parts[3]} activated";
@@ -1163,10 +1169,10 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         return 'The attack missed!';
       case 'detailschange':
         if (parts.length < 4) return line;
-        return '${nameOf(parts[2])} transformed into ${nameOf(parts[3])}!';
+        return '${nameOf(parts[2])} changed into ${parts[3].split(',')[0]}!';
       case '-mega':
         if (parts.length < 4) return line;
-        return '${nameOf(parts[2])} Mega Evolved into ${parts[3]}!';
+        return '${nameOf(parts[2])} Mega Evolved using ${parts.length > 4 ? parts[4] : parts[3]}!';
       case '-enditem':
         if (parts.length < 4) return line;
         return '${nameOf(parts[2])}\'s ${parts[3]} was consumed.';
@@ -1186,6 +1192,15 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       case '-prepare':
         if (parts.length < 4) return line;
         return '${nameOf(parts[2])} is preparing ${parts[3]}!';
+      case '-item':
+        if (parts.length < 4) return line;
+        final itemOf = parts.length > 5 && parts[5].startsWith('[of] ')
+            ? nameOf(parts[5].substring(5))
+            : '';
+        if (parts.length > 4 && parts[4].contains('Frisk') && itemOf.isNotEmpty) {
+          return '$itemOf frisked ${nameOf(parts[2])} and found ${parts[3]}!';
+        }
+        return '${nameOf(parts[2])} has ${parts[3]}.';
       case '-mustrecharge':
         if (parts.length < 3) return line;
         return '${nameOf(parts[2])} must recharge!';
@@ -1413,7 +1428,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     const Set<String> silentCommands = {
       'split', 'request', 't:', 'upkeep', '-anim', 'debug',
       'gametype', 'player', 'gen', 'tier', 'clearpoke', 'teamsize',
-      'start', 'teampreview',
+      'start', 'teampreview', 'rule',
     };
 
     switch (parts[1]) {
@@ -1838,7 +1853,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     } else {
       List<String> slotActions = [];
 
-      if (_s1IsSwitch) {
+      if (_isFaintedSlot(0)) {
+        slotActions.add('pass');
+      } else if (_s1IsSwitch) {
         slotActions.add('switch $_s1SwitchChoice');
       } else {
         String act = 'move $_s1MoveChoice';
@@ -1856,7 +1873,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       if (activeList.length > 1) {
         final slot2Data = activeList[1] as Map<String, dynamic>?;
         final slot2Moves = slot2Data?['moves'] as List<dynamic>? ?? [];
-        final slot2Fainted = slot2Moves.isEmpty && !_s2IsSwitch;
+        final slot2Fainted = _isFaintedSlot(1) || (slot2Moves.isEmpty && !_s2IsSwitch);
         if (slot2Fainted) {
           // Defensive: nothing valid to submit for this slot — skip it
           // rather than sending a malformed choice.
@@ -2586,7 +2603,21 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   // Shot/Solar Beam/Sky Attack). There is nothing to choose — the target
   // was already committed on the declaring turn — so no interactive
   // controller should be shown at all.
+  bool _isFaintedSlot(int slotIndex) {
+    final pokemon = _currentRequest?['side']?['pokemon'] as List<dynamic>? ?? [];
+    if (slotIndex >= pokemon.length) return false;
+    final p = pokemon[slotIndex];
+    if (p is! Map) return false;
+    final cond = p['condition']?.toString() ?? '';
+    return cond.endsWith('fnt') || cond.startsWith('0');
+  }
+
   bool _isLockedContinuationSlot(List<dynamic> activeList, int slotIndex) {
+    // A fainted mon with no replacement stays in its slot. Treat it like a
+    // locked slot: no controls, nothing to choose.
+    if (_currentRequest != null &&
+        !_currentRequest!.containsKey('forceSwitch') &&
+        _isFaintedSlot(slotIndex)) return true;
     if (activeList.length <= slotIndex) return false;
     final moves = activeList[slotIndex]['moves'] as List<dynamic>? ?? [];
     if (moves.length != 1) return false;
@@ -2596,17 +2627,21 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
   Widget _buildLockedSlotPanel(String slotTitle, List<dynamic> moves) {
     final moveName = moves.isNotEmpty && moves[0] is Map ? (moves[0]['move']?.toString() ?? 'its move') : 'its move';
+    final bool reallyLocked = moves.length == 1 && moves[0] is Map && !(moves[0] as Map).containsKey('pp');
+    final String message = reallyLocked
+        ? '$slotTitle is locked into $moveName (no input needed)'
+        : '$slotTitle has fainted (no input needed)';
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Semantics(
-        label: '$slotTitle is locked into using $moveName. No action needed.',
+        label: message,
         child: Row(
           children: [
             const Icon(Icons.lock, size: 16, color: Colors.grey),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
-                '$slotTitle is locked into $moveName (no input needed)',
+                message,
                 style: const TextStyle(fontSize: 12, color: Colors.grey, fontStyle: FontStyle.italic),
               ),
             ),
