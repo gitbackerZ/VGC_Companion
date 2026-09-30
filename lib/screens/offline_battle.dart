@@ -1102,7 +1102,10 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       case '-damage':
         if (parts.length < 4) return line;
         final hp = parts[3].split(' ')[0];
-        return '${nameOf(parts[2])} took damage → $hp HP';
+        final dmgFrom = parts.length > 4 && parts[4].startsWith('[from] ')
+            ? ' from ${parts[4].substring(7)}'
+            : '';
+        return '${nameOf(parts[2])} took damage$dmgFrom → $hp HP';
       case '-heal':
         if (parts.length < 4) return line;
         final hp = parts[3].split(' ')[0];
@@ -1113,7 +1116,8 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       case 'switch':
       case 'drag':
         if (parts.length < 4) return line;
-        return '${nameOf(parts[3])} was sent out';
+        final sentOut = parts[3].split(',')[0];
+        return '$sentOut was sent out';
       case '-supereffective':
         return "It's super effective!";
       case '-resisted':
@@ -1142,6 +1146,20 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             .replaceAll('DesolateLand', 'extremely harsh sunlight')
             .replaceAll('PrimordialSea', 'heavy rain');
         if (line.contains('[upkeep]')) return 'The $w continues.';
+        final wAbility = RegExp(r'\[from\] ability: ([^|]+)').firstMatch(line);
+        final wOf = RegExp(r'\[of\] ([^|]+)').firstMatch(line);
+        if (wAbility != null && wOf != null) {
+          const wVerbs = {
+            'Sandstorm': 'whipped up a sandstorm!',
+            'RainDance': 'made it rain!',
+            'SunnyDay': 'intensified the sun\'s rays!',
+            'Snowscape': 'whipped up a snowstorm!',
+            'Snow': 'whipped up a snowstorm!',
+            'Hail': 'whipped up a hailstorm!',
+          };
+          final wVerb = wVerbs[parts[2]] ?? 'changed the weather to $w.';
+          return "${nameOf(wOf.group(1)!)}'s ${wAbility.group(1)} $wVerb";
+        }
         return 'The weather is $w.';
       case '-ability':
         if (parts.length < 4) return line;
@@ -1507,6 +1525,11 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
       setState(() {
         if (data.containsKey('teamPreview') && data['teamPreview'] == true) {
+          // The engine re-sends the preview request after Player 1 confirms.
+          // Ignore it so it isn't announced again or reset.
+          if (_stage == BattleStage.teamPreview && _p1TeamList.isNotEmpty) {
+            return;
+          }
           _currentRequest = Map<String, dynamic>.from(data);
           _stage = BattleStage.teamPreview;
           _p1TeamList = data['side']?['pokemon'] ?? [];
@@ -1667,6 +1690,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       _p1HasMegaEvolved = false;
       _p2HasMegaEvolved = false;
       _turnHistory.clear();
+      _turnHistory.add({'turn': 0, 'lines': <String>[]});
       _currentTurnNumber = 0;
       _isWaiting = false;
     });
@@ -3259,7 +3283,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             itemBuilder: (context, index) {
               final entry = _turnHistory[index];
               return ListTile(
-                title: Text('Turn ${entry['turn']}'),
+                title: Text(entry['turn'] == 0 ? 'Battle Start' : 'Turn ${entry['turn']}'),
                 onTap: () {
                   Navigator.of(context).pop();
                   _showTurnDetailDialog(entry, showBackToList: true);
@@ -3286,6 +3310,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             !l.startsWith('|debug') &&
             !l.startsWith('|request') &&
             !l.startsWith('|t:') &&
+            !l.startsWith('|split|') &&
+            !l.startsWith('|upkeep') &&
+            l.trim() != '|' &&
             !l.startsWith('|error|'))
         .map(_humanizeLogLine)
         .where((l) => l.trim().isNotEmpty)
@@ -3304,7 +3331,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Turn ${entry['turn']} Log'),
+        title: Text(entry['turn'] == 0 ? 'Battle Start Log' : 'Turn ${entry['turn']} Log'),
         content: SizedBox(
           width: double.maxFinite,
           height: 500,
