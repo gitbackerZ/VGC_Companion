@@ -330,6 +330,64 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           return ('' + text).toLowerCase().replace(/[^a-z0-9]/g, '');
         };
 
+        globalThis.humanizeFromText = function(line) {
+          try {
+            var p = line.split('|');
+            var cmd = p[1];
+            var keyFor = {
+              '-singleturn': 'start', '-singlemove': 'start', '-start': 'start',
+              '-end': 'end', '-activate': 'activate', '-block': 'block',
+              '-fieldstart': 'start', '-fieldend': 'end',
+              '-sidestart': 'start', '-sideend': 'end'
+            };
+            var key = keyFor[cmd];
+            if (!key) return '';
+            var text = globalThis.PSStaticData && globalThis.PSStaticData.text;
+            if (!text) return '';
+
+            function afterColon(s) {
+              var i = s.indexOf(': ');
+              return i >= 0 ? s.substring(i + 2) : s;
+            }
+
+            var isFieldish = (cmd === '-fieldstart' || cmd === '-fieldend');
+            var raw = (isFieldish ? p[2] : p[3]) || '';
+            var kinds = ['moves', 'abilities', 'items'];
+            var name = raw;
+            var ci = raw.indexOf(': ');
+            if (ci >= 0) {
+              var prefix = raw.substring(0, ci);
+              if (prefix === 'move' || prefix === 'ability' || prefix === 'item') {
+                kinds = [prefix === 'move' ? 'moves' : (prefix === 'ability' ? 'abilities' : 'items')];
+                name = raw.substring(ci + 2);
+              }
+            }
+            var id = globalThis.toID(name);
+            var entry = null;
+            for (var i = 0; i < kinds.length && !entry; i++) {
+              var tbl = text[kinds[i]];
+              var e = tbl && tbl[id];
+              if (e && e[key]) entry = e;
+            }
+            if (!entry) return '';
+
+            var mon = isFieldish ? '' : afterColon(p[2] || '');
+            var of = '';
+            for (var j = 3; j < p.length; j++) {
+              if (p[j].indexOf('[of] ') === 0) of = afterColon(p[j].substring(5));
+            }
+            var out = String(entry[key]);
+            out = out.split('{POKEMON}').join(mon);
+            out = out.split('{TARGET}').join(mon);
+            out = out.split('{SOURCE}').join(of);
+            out = out.split('{EFFECT}').join(name);
+            out = out.split('{TEAM}').join((p[2] || '').indexOf('p1') === 0 ? 'your team' : 'the opposing team');
+            out = out.replace(/[{][A-Z_]+[}]/g, '');
+            out = out.replace(/ +/g, ' ').trim();
+            return out;
+          } catch (e) { return ''; }
+        };
+
         globalThis.getLogs = function() {
           const logs = JSON.stringify(globalThis.logBuffer || []);
           globalThis.logBuffer = [];
@@ -1021,6 +1079,17 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     if (parts.length < 2) return line;
     final cmd = parts[1];
 
+    // Prefer Showdown's own text templates for effect-style lines.
+    const templated = {
+      '-singleturn', '-singlemove', '-start', '-end', '-activate',
+      '-block', '-fieldstart', '-fieldend', '-sidestart', '-sideend',
+    };
+    if (templated.contains(cmd) && _jsRuntime != null) {
+      final r = _jsRuntime!.evaluate(
+          'globalThis.humanizeFromText(${jsonEncode(line)});');
+      if (!r.isError && r.stringResult.isNotEmpty) return r.stringResult;
+    }
+
     String nameOf(String raw) {
       final idx = raw.indexOf(':');
       return idx != -1 ? raw.substring(idx + 1).trim() : raw;
@@ -1114,6 +1183,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       case 'swap':
         if (parts.length < 3) return line;
         return '${nameOf(parts[2])} swapped positions.';
+      case '-prepare':
+        if (parts.length < 4) return line;
+        return '${nameOf(parts[2])} is preparing ${parts[3]}!';
       case '-mustrecharge':
         if (parts.length < 3) return line;
         return '${nameOf(parts[2])} must recharge!';
@@ -1151,7 +1223,31 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         return '${nameOf(parts[2])}\'s stat changes were set.';
       case '-singleturn':
         if (parts.length < 4) return line;
-        return '${nameOf(parts[2])} is protected by ${parts[3].replaceAll('move: ', '')} this turn.';
+        final stMove = parts[3].replaceAll('move: ', '');
+        final stMon = nameOf(parts[2]);
+        switch (stMove) {
+          case 'Follow Me':
+            return '$stMon became the center of attention!';
+          case 'Rage Powder':
+            return '$stMon is redirecting attacks with Rage Powder!';
+          case 'Spotlight':
+            return '$stMon was made the center of attention!';
+          case 'Helping Hand':
+            return '$stMon is ready to help!';
+          case 'Endure':
+            return '$stMon braced itself!';
+          case 'Protect':
+          case 'Detect':
+          case 'Spiky Shield':
+          case "King's Shield":
+          case 'Baneful Bunker':
+          case 'Obstruct':
+          case 'Silk Trap':
+          case 'Burning Bulwark':
+            return '$stMon protected itself!';
+          default:
+            return '$stMon is protected by $stMove this turn.';
+        }
       case '-singlemove':
         if (parts.length < 4) return line;
         return '${nameOf(parts[2])} is affected by ${parts[3].replaceAll('move: ', '')} this move.';
@@ -1335,6 +1431,10 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         final hp = parts.length > 4 ? parts[4] : '';
         _activeNames[slot] = name;
         _activeHp[slot] = hp;
+        // A different Pokémon in this slot must not inherit the previous
+        // occupant's remembered move index.
+        if (slot == 'p1a') _lastS1MoveChoice = null;
+        if (slot == 'p1b') _lastS2MoveChoice = null;
         _announce(_humanizeLogLine(line));
         break;
       case '-damage':
@@ -1364,8 +1464,13 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         // -sidestart, weather, abilities, and any future mechanic without
         // needing a manual whitelist add each time.
         if (line.startsWith('|debug')) break;
+        if (line.contains('[silent]')) break;
         if (silentCommands.contains(parts[1])) break;
-        _announce(_humanizeLogLine(line));
+        final humanized = _humanizeLogLine(line);
+        if (humanized == line) {
+          _rawLogs.add('|debug-unhandled| ${parts[1]}');
+        }
+        _announce(humanized);
         break;
     }
   }
@@ -1418,6 +1523,29 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           _isWaiting = false;
           _currentRequest = Map<String, dynamic>.from(data);
           _stage = BattleStage.inBattle;
+
+          // Default forced-switch picks to distinct benched Pokémon so the
+          // UI never starts on an invalid "#1" (an active or fainted mon).
+          if (data.containsKey('forceSwitch')) {
+            final pokemon = data['side']?['pokemon'] as List<dynamic>? ?? [];
+            final bench = <int>[];
+            for (int i = 0; i < pokemon.length; i++) {
+              final p = pokemon[i];
+              final fainted = p['condition']?.toString().startsWith('0') ?? false;
+              if (p['active'] != true && !fainted) bench.add(i + 1);
+            }
+            final forceList = data['forceSwitch'] as List<dynamic>;
+            int next = 0;
+            for (int i = 0; i < forceList.length; i++) {
+              if (forceList[i] == true && next < bench.length) {
+                if (i == 0) {
+                  _s1SwitchChoice = bench[next++];
+                } else {
+                  _s2SwitchChoice = bench[next++];
+                }
+              }
+            }
+          }
 
           if (isNewTurn) {
             // Genuine new turn: reset switch/mega state, but restore the
@@ -1749,7 +1877,11 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     }
 
     _jsRuntime!.evaluate("globalThis.sendAction('$p1Action');");
-    _jsRuntime!.evaluate("globalThis.sendAction('${_buildP2MoveAction()}');");
+    // During a p1 forceSwitch, p2 is in `wait` and has no pending request.
+    // (p2's own forced switches are handled in _fetchLogs via '>p2 default'.)
+    if (!isForceSwitch) {
+      _jsRuntime!.evaluate("globalThis.sendAction('${_buildP2MoveAction()}');");
+    }
     _fetchLogs();
 
     _announce('Player actions submitted.');
@@ -2505,6 +2637,13 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   }) {
     if (isForceSwitch) {
       // Forced switches get their own dedicated overlay — see _showForcedSwitchOverlay.
+      String switchLabel = 'Choose Switch-In';
+      for (final s in switches) {
+        if (s['slot'] == selectedSwitch) {
+          switchLabel = 'Switching to ${s['name']}';
+          break;
+        }
+      }
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
@@ -2516,7 +2655,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                 switches: switches,
                 onSwitchChanged: onSwitchChanged,
               ),
-              child: Text(selectedSwitch > 0 ? 'Switching to #$selectedSwitch' : 'Choose Switch-In'),
+              child: Text(switchLabel),
             ),
           ],
         ),
