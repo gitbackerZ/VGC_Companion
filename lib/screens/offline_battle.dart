@@ -1088,6 +1088,10 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       if (!h.isError &&
           h.stringResult.isNotEmpty &&
           !h.stringResult.startsWith('HUMANIZE-ERR')) {
+        if ((cmd == '-damage' || cmd == '-heal') && parts.length > 3) {
+          final hpNow = parts[3].split(' ')[0];
+          return '${h.stringResult} ($hpNow HP)';
+        }
         return h.stringResult;
       }
     }
