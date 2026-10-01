@@ -3328,6 +3328,16 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             !l.startsWith('|request') &&
             !l.startsWith('|t:') &&
             !l.startsWith('|split|') &&
+            !l.startsWith('|gametype|') &&
+            !l.startsWith('|player|') &&
+            !l.startsWith('|gen|') &&
+            !l.startsWith('|tier|') &&
+            !l.startsWith('|rule|') &&
+            !l.startsWith('|clearpoke') &&
+            !l.startsWith('|poke|') &&
+            !l.startsWith('|teampreview') &&
+            !l.startsWith('|teamsize|') &&
+            l.trim() != '|start' &&
             !l.startsWith('|upkeep') &&
             l.trim() != '|' &&
             !l.startsWith('|error|'))
@@ -3344,7 +3354,10 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         humanLines.add(line);
       }
     }
-    final lines = humanLines.join('\n');
+    final String formatHeader = entry['turn'] == 0
+        ? '${_useBring4Format ? 'Champions Doubles 4v4' : 'Champions Doubles 6v6'}\n'
+        : '';
+    final lines = formatHeader + humanLines.join('\n');
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
