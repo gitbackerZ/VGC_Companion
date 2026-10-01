@@ -1079,6 +1079,19 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     if (parts.length < 2) return line;
     final cmd = parts[1];
 
+    // Official Showdown parser first; our cases below are the fallback.
+    if (_jsRuntime != null &&
+        !line.startsWith('|turn|') &&
+        !line.startsWith('|-hint|')) {
+      final h = _jsRuntime!.evaluate(
+          'globalThis.humanizeLog(${jsonEncode(line)});');
+      if (!h.isError &&
+          h.stringResult.isNotEmpty &&
+          !h.stringResult.startsWith('HUMANIZE-ERR')) {
+        return h.stringResult;
+      }
+    }
+
     // Prefer Showdown's own text templates for effect-style lines.
     const templated = {
       '-singleturn', '-singlemove', '-start', '-end', '-activate',
