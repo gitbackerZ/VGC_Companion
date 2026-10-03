@@ -388,6 +388,21 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           } catch (e) { return ''; }
         };
 
+        globalThis.getMoveInfo = function(id) {
+          try {
+            var b = globalThis.battle;
+            var d = (b && b.dex) ? b.dex : globalThis.Dex;
+            var m = d.moves.get(id);
+            if (!m || !m.exists) return "{}";
+            var t = globalThis.PSStaticData && globalThis.PSStaticData.text && globalThis.PSStaticData.text.moves;
+            var e = t && t[m.id];
+            var desc = (e && (e.shortDesc || e.desc)) || m.shortDesc || m.desc || "";
+            return JSON.stringify({ type: m.type, category: m.category, bp: m.basePower, acc: m.accuracy, desc: desc });
+          } catch (err) {
+            return "{}";
+          }
+        };
+
         globalThis.getLogs = function() {
           const logs = JSON.stringify(globalThis.logBuffer || []);
           globalThis.logBuffer = [];
@@ -2346,14 +2361,18 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   }
 
   Widget _previewGrid(int count, Widget Function(int) builder) {
-    return GridView.count(
-      crossAxisCount: 3,
+    final extent = MediaQuery.textScalerOf(context).scale(92);
+    return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      crossAxisSpacing: 6,
-      mainAxisSpacing: 6,
-      childAspectRatio: 0.6,
-      children: List.generate(count, builder),
+      itemCount: count,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 6,
+        mainAxisSpacing: 6,
+        mainAxisExtent: extent,
+      ),
+      itemBuilder: (context, i) => builder(i),
     );
   }
 
@@ -2364,43 +2383,57 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     required String badgeText,
     required VoidCallback? onTap,
   }) {
+    final cs = Theme.of(context).colorScheme;
+    final bg = selected ? cs.surface : cs.inverseSurface;
+    final fg = selected ? cs.onSurface : cs.onInverseSurface;
+
     final name = (data?['name'] as String?) ?? fallbackName;
     final types = (data?['types'] as List<dynamic>?)?.map((t) => t.toString()).toList() ?? [];
     final item = (data?['item'] as String?) ?? '';
     final ability = (data?['ability'] as String?) ?? '';
     final moves = (data?['moves'] as List<dynamic>?)?.map((m) => m.toString()).toList() ?? [];
     final typeText = types.map((t) => _typeShorthand[t] ?? t.toUpperCase()).join('/');
+    final mv = List<String>.generate(4, (i) => i < moves.length ? moves[i] : '');
+
+    Widget cell(String text, {bool bold = false, int flex = 1}) {
+      return Expanded(
+        flex: flex,
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: 10, color: fg, fontWeight: bold ? FontWeight.bold : FontWeight.normal),
+        ),
+      );
+    }
 
     final card = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
       decoration: BoxDecoration(
-        color: selected ? Colors.blue.withOpacity(0.3) : Colors.grey[850],
-        border: Border.all(color: selected ? Colors.blue : Colors.grey[700]!),
+        color: bg,
+        border: Border.all(color: selected ? cs.primary : cs.inverseSurface, width: selected ? 3 : 1),
         borderRadius: BorderRadius.circular(6),
       ),
-      padding: const EdgeInsets.all(6),
       child: Column(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            height: 16,
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: badgeText.isEmpty
-                  ? const SizedBox.shrink()
-                  : Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                      decoration: BoxDecoration(color: Colors.amber[700], borderRadius: BorderRadius.circular(3)),
-                      child: Text(badgeText, style: const TextStyle(fontSize: 9, color: Colors.black, fontWeight: FontWeight.bold)),
-                    ),
-            ),
+          Row(
+            children: [
+              if (badgeText.isNotEmpty)
+                Container(
+                  margin: const EdgeInsets.only(right: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                  decoration: BoxDecoration(color: Colors.amber[700], borderRadius: BorderRadius.circular(3)),
+                  child: Text(badgeText, style: const TextStyle(fontSize: 8, color: Colors.black, fontWeight: FontWeight.bold)),
+                ),
+              cell(name, bold: true, flex: 3),
+              cell(typeText, flex: 2),
+            ],
           ),
-          Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-          if (typeText.isNotEmpty) Text(typeText, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9, color: Colors.lightBlueAccent)),
-          if (ability.isNotEmpty) Text(ability, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9)),
-          if (item.isNotEmpty) Text('@$item', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9, color: Colors.amberAccent)),
-          const SizedBox(height: 3),
-          for (final m in moves)
-            Text(m, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9, color: Colors.grey)),
+          Row(children: [cell(ability), cell(item.isEmpty ? '' : '@$item')]),
+          Row(children: [cell(mv[0]), cell(mv[1])]),
+          Row(children: [cell(mv[2]), cell(mv[3])]),
         ],
       ),
     );
@@ -2778,6 +2811,25 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     );
   }
 
+  final Map<String, Map<String, dynamic>> _moveInfoCache = {};
+  final Set<String> _expandedMoves = {};
+
+  Map<String, dynamic> _moveInfo(String id) {
+    final cached = _moveInfoCache[id];
+    if (cached != null) return cached;
+    if (_jsRuntime == null) return {};
+    final r = _jsRuntime!.evaluate('globalThis.getMoveInfo(${jsonEncode(id)});');
+    Map<String, dynamic> out = {};
+    if (!r.isError) {
+      try {
+        final d = jsonDecode(r.stringResult);
+        if (d is Map) out = Map<String, dynamic>.from(d);
+      } catch (_) {}
+    }
+    if (out.isNotEmpty) _moveInfoCache[id] = out;
+    return out;
+  }
+
   Widget _buildLockedSlotPanel(String slotTitle, List<dynamic> moves) {
     final moveName = moves.isNotEmpty && moves[0] is Map ? (moves[0]['move']?.toString() ?? 'its move') : 'its move';
     final bool reallyLocked = moves.length == 1 && moves[0] is Map && !(moves[0] as Map).containsKey('pp');
@@ -2937,47 +2989,158 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     required ValueChanged<bool> onToggleSwitch,
     required ValueChanged<int?> onSwitchChanged,
   }) {
+    final cs = Theme.of(context).colorScheme;
+
+    Widget typeChip(String t) {
+      final bg = _typeColors[t] ?? Colors.grey;
+      final fgc = bg.computeLuminance() > 0.5 ? Colors.black : Colors.white;
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(3),
+          border: Border.all(color: Colors.black54, width: 0.5),
+        ),
+        child: Text(_typeShorthand[t] ?? t.toUpperCase(),
+            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: fgc)),
+      );
+    }
+
+    Widget categoryIcon(String c, Color color) {
+      final IconData icon = c == 'Physical'
+          ? Icons.flash_on
+          : (c == 'Special' ? Icons.blur_circular : Icons.shield_outlined);
+      return Icon(icon, size: 18, color: color);
+    }
+
     Widget buildMoveCell(int idx) {
       if (idx >= moves.length) return const SizedBox.shrink();
       final m = moves[idx];
       final moveNum = idx + 1;
-      final moveName = m is Map ? (m['move'] ?? 'Move $moveNum') : 'Move $moveNum';
+      final moveName = m is Map ? (m['move'] ?? 'Move $moveNum').toString() : 'Move $moveNum';
+      final moveId = m is Map ? (m['id'] ?? '').toString() : '';
       final disabled = m is Map && (m['disabled'] == true);
       final selected = moveNum == selectedMove;
-      return Semantics(
-        button: true,
-                child: ElevatedButton(
-          onPressed: disabled
-              ? null
-              : () {
-                  onMoveChanged(moveNum);
-                  final String? targetType = m is Map ? m['target']?.toString() : null;
-                  if (targetType == 'adjacentAlly') {
-                    // Only one possible ally exists in a 2-mon doubles side —
-                    // no real choice to make, so auto-resolve instead of
-                    // prompting the overlay.
-                    onTargetChanged(slotNumber == 1 ? -2 : -1);
-                  } else if (_moveNeedsTargetForOverlay(m)) {
-                    _showTargetOverlay(
-                      slotNumber: slotNumber,
-                      moveIdx: moveNum,
-                      onTargetChanged: onTargetChanged,
-                      currentTarget: selectedTarget,
-                    );
-                  } else {
-                    onTargetChanged(null);
-                  }
-                },
-          style: ElevatedButton.styleFrom(
-            backgroundColor: disabled ? Colors.grey[900] : (selected ? Colors.green[700] : Colors.grey[800]),
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
-            minimumSize: const Size(0, 40),
-          ),
-          child: Text(
-            disabled ? '$moveName ✕' : moveName,
-            semanticsLabel: disabled ? '$moveName, disabled' : (selected ? '$moveName, selected' : moveName),
-            style: TextStyle(fontSize: 11, color: disabled ? Colors.grey : null),
-            overflow: TextOverflow.ellipsis,
+      final info = moveId.isEmpty ? <String, dynamic>{} : _moveInfo(moveId);
+      final type = (info['type'] ?? '').toString();
+      final category = (info['category'] ?? '').toString();
+      final pp = (m is Map && m['pp'] != null) ? '${m['pp']}/${m['maxpp']}' : '';
+      final key = '$slotNumber:$moveId';
+      final expanded = _expandedMoves.contains(key);
+      final bg = selected ? cs.surface : cs.inverseSurface;
+      final fg = selected ? cs.onSurface : cs.onInverseSurface;
+
+      final bpv = info['bp'];
+      final accv = info['acc'];
+      final power = (bpv is num && bpv > 0) ? '$bpv' : '-';
+      final accText = accv is num ? '$accv%' : '-';
+      final desc = (info['desc'] ?? '').toString();
+      final details = 'Power $power. Accuracy $accText. $desc';
+
+      void selectMove() {
+        onMoveChanged(moveNum);
+        final String? targetType = m is Map ? m['target']?.toString() : null;
+        if (targetType == 'adjacentAlly') {
+          onTargetChanged(slotNumber == 1 ? -2 : -1);
+        } else if (_moveNeedsTargetForOverlay(m)) {
+          _showTargetOverlay(
+            slotNumber: slotNumber,
+            moveIdx: moveNum,
+            onTargetChanged: onTargetChanged,
+            currentTarget: selectedTarget,
+          );
+        } else {
+          onTargetChanged(null);
+        }
+      }
+
+      void toggleExpand() {
+        setState(() {
+          if (expanded) {
+            _expandedMoves.remove(key);
+          } else {
+            _expandedMoves.add(key);
+          }
+        });
+        if (!expanded) _announce('$moveName. $details');
+      }
+
+      final label = [
+        moveName,
+        if (type.isNotEmpty) type,
+        if (category.isNotEmpty) category.toLowerCase(),
+        if (pp.isNotEmpty) '$pp PP',
+        if (disabled) 'disabled' else if (selected) 'selected',
+      ].join(', ');
+
+      return Opacity(
+        opacity: disabled ? 0.5 : 1.0,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3),
+          child: Material(
+            color: bg,
+            clipBehavior: Clip.antiAlias,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+              side: BorderSide(color: selected ? cs.primary : cs.inverseSurface, width: selected ? 3 : 1),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Semantics(
+                        button: true,
+                        label: label,
+                        excludeSemantics: true,
+                        child: InkWell(
+                          onTap: disabled ? null : selectMove,
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(10, 10, 4, 10),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    disabled ? '$moveName ✕' : moveName,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: fg),
+                                  ),
+                                ),
+                                if (type.isNotEmpty) ...[const SizedBox(width: 6), typeChip(type)],
+                                if (category.isNotEmpty) ...[const SizedBox(width: 6), categoryIcon(category, fg)],
+                                if (pp.isNotEmpty) ...[
+                                  const SizedBox(width: 6),
+                                  Text(pp, style: TextStyle(fontSize: 11, color: fg)),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Semantics(
+                      button: true,
+                      label: expanded ? 'Hide details for $moveName' : 'Show details for $moveName',
+                      excludeSemantics: true,
+                      child: IconButton(
+                        icon: Icon(expanded ? Icons.expand_less : Icons.expand_more, color: fg),
+                        onPressed: toggleExpand,
+                      ),
+                    ),
+                  ],
+                ),
+                if (expanded)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                    child: Text(
+                      'Power $power    Accuracy $accText\n$desc',
+                      style: TextStyle(fontSize: 12, color: fg),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       );
@@ -2985,29 +3148,33 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
     Widget megaCell() {
       if (!canMega) return const SizedBox.shrink();
+      final bg = isMega ? cs.surface : cs.inverseSurface;
+      final fg = isMega ? cs.onSurface : cs.onInverseSurface;
       return Semantics(
         button: true,
         checked: isMega,
+        excludeSemantics: true,
         label: isMega ? 'Mega Evolve, enabled' : 'Mega Evolve, disabled. Double tap to toggle.',
-        child: InkWell(
-          onTap: () => onMegaToggled(!isMega),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
-            decoration: BoxDecoration(
-              color: isMega ? Colors.purple.withOpacity(0.35) : Colors.purple.withOpacity(0.1),
-              border: Border.all(color: Colors.purpleAccent, width: 1.5),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(isMega ? Icons.check_box : Icons.check_box_outline_blank, size: 16, color: Colors.purpleAccent),
-                const SizedBox(width: 3),
-                const Flexible(
-                  child: Text('MEGA', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.purpleAccent), overflow: TextOverflow.ellipsis),
-                ),
-              ],
+        child: Material(
+          color: bg,
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(color: isMega ? cs.primary : cs.inverseSurface, width: isMega ? 3 : 1),
+          ),
+          child: InkWell(
+            onTap: () => onMegaToggled(!isMega),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(isMega ? Icons.check_box : Icons.check_box_outline_blank, size: 18, color: fg),
+                  const SizedBox(width: 6),
+                  Text('MEGA', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: fg)),
+                ],
+              ),
             ),
           ),
         ),
@@ -3018,40 +3185,48 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       if (!canSwitch) return const SizedBox.shrink();
       return Semantics(
         button: true,
+        excludeSemantics: true,
         label: 'Switch Out instead of using a move',
-        child: OutlinedButton(
-          onPressed: () => _showSwitchOverlay(
-            slotNumber: slotNumber,
-            switches: switches,
-            onSwitchChanged: onSwitchChanged,
-            onToggleSwitch: onToggleSwitch,
+        child: Material(
+          color: cs.inverseSurface,
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(color: cs.inverseSurface, width: 1),
           ),
-          style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
-            minimumSize: const Size(0, 40),
+          child: InkWell(
+            onTap: () => _showSwitchOverlay(
+              slotNumber: slotNumber,
+              switches: switches,
+              onSwitchChanged: onSwitchChanged,
+              onToggleSwitch: onToggleSwitch,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              child: Center(
+                child: Text('SWITCH',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: cs.onInverseSurface)),
+              ),
+            ),
           ),
-          child: const Text('SWITCH', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
         ),
       );
     }
 
-    return Table(
-      columnWidths: const {
-        0: FlexColumnWidth(1),
-        1: FlexColumnWidth(1),
-        2: FlexColumnWidth(1),
-      },
+    return Column(
       children: [
-        TableRow(children: [
-          Padding(padding: const EdgeInsets.all(3), child: buildMoveCell(0)),
-          Padding(padding: const EdgeInsets.all(3), child: buildMoveCell(1)),
-          Padding(padding: const EdgeInsets.all(3), child: megaCell()),
-        ]),
-        TableRow(children: [
-          Padding(padding: const EdgeInsets.all(3), child: buildMoveCell(2)),
-          Padding(padding: const EdgeInsets.all(3), child: buildMoveCell(3)),
-          Padding(padding: const EdgeInsets.all(3), child: switchCell()),
-        ]),
+        for (int i = 0; i < moves.length; i++) buildMoveCell(i),
+        if (canMega || canSwitch)
+          Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Row(
+              children: [
+                if (canMega) Expanded(child: megaCell()),
+                if (canMega && canSwitch) const SizedBox(width: 6),
+                if (canSwitch) Expanded(child: switchCell()),
+              ],
+            ),
+          ),
       ],
     );
   }
@@ -3187,7 +3362,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                         onSwitchChanged(s['slot'] as int);
                         Navigator.of(context).pop(); // auto-dismiss on selection
                       },
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[800]),
+                      style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.inverseSurface, foregroundColor: Theme.of(context).colorScheme.onInverseSurface),
                       child: Text('${s['name']} (${s['condition']})', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12)),
                     ),
                   );
@@ -3244,7 +3419,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                         onSwitchChanged(s['slot'] as int);
                         Navigator.of(context).pop(); // auto-dismiss on selection
                       },
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[800]),
+                      style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.inverseSurface, foregroundColor: Theme.of(context).colorScheme.onInverseSurface),
                       child: Text('${s['name']} (${s['condition']})', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12)),
                     ),
                   );
