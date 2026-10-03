@@ -1079,19 +1079,6 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     if (parts.length < 2) return line;
     final cmd = parts[1];
 
-    if (parts.length > 3 && parts[1] == '-heal' && line.contains('[from] drain')) {
-      String who(String s, bool lower) {
-        final i = s.indexOf(': ');
-        final n = i >= 0 ? s.substring(i + 2) : s;
-        if (s.startsWith('p2')) return (lower ? 'the opposing ' : 'The opposing ') + n;
-        return n;
-      }
-      final drainSrc = RegExp(r'\[of\] ([^|]+)').firstMatch(line);
-      final drainHp = parts[3].split(' ')[0];
-      final from = drainSrc != null ? ' from ${who(drainSrc.group(1)!, true)}' : '';
-      return '${who(parts[2], false)} drained energy$from and restored HP! ($drainHp HP)';
-    }
-
     // Official Showdown parser first; our cases below are the fallback.
     if (_jsRuntime != null &&
         !line.startsWith('|turn|') &&
@@ -1348,19 +1335,15 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
   void _startAnnounceDrainIfNeeded() {
     if (_announceDrainTimer != null && _announceDrainTimer!.isActive) return;
-    _drainNextAnnouncement();
-  }
-
-  void _drainNextAnnouncement() {
-    if (_announceQueue.isEmpty) {
-      _announceDrainTimer = null;
-      return;
-    }
-    final next = _announceQueue.removeAt(0);
-    SemanticsService.announce(next, TextDirection.ltr);
-    // Wait long enough for the screen reader to finish speaking this line.
-    final ms = 600 + next.length * 55;
-    _announceDrainTimer = Timer(Duration(milliseconds: ms), _drainNextAnnouncement);
+    _announceDrainTimer = Timer.periodic(const Duration(milliseconds: 700), (timer) {
+      if (_announceQueue.isEmpty) {
+        timer.cancel();
+        _announceDrainTimer = null;
+        return;
+      }
+      final next = _announceQueue.removeAt(0);
+      SemanticsService.announce(next, TextDirection.ltr);
+    });
   }
 
   void _startLogPolling() {
@@ -1829,16 +1812,15 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   }
 
   void _confirmTeamPreviewSelection() {
-    final int minLeads = math.min(2, _p1TeamList.length);
-    if (_selectedPreviewSlots.length < minLeads || _jsRuntime == null) return;
+    if (_selectedPreviewSlots.length != _maxPickTeamSize || _jsRuntime == null) return;
 
     List<int> fullOrder = List.from(_selectedPreviewSlots);
-    final remaining = <int>[
-      for (int i = 1; i <= _p1TeamList.length; i++)
-        if (!fullOrder.contains(i)) i
-    ]..shuffle(_rng);
-    while (fullOrder.length < _maxPickTeamSize && remaining.isNotEmpty) {
-      fullOrder.add(remaining.removeAt(0));
+    if (_maxPickTeamSize >= _p1TeamList.length) {
+      for (int i = 1; i <= _p1TeamList.length; i++) {
+        if (!fullOrder.contains(i)) {
+          fullOrder.add(i);
+        }
+      }
     }
     final p1Order = fullOrder.join('');
 
@@ -2279,8 +2261,8 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         const SizedBox(height: 4),
         TextField(
           controller: _p1TeamController,
-          minLines: 9,
-          maxLines: 9,
+          minLines: 5,
+          maxLines: null,
           keyboardType: TextInputType.multiline,
           autocorrect: false,
           enableSuggestions: false,
@@ -2316,8 +2298,8 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         const SizedBox(height: 4),
         TextField(
           controller: _p2TeamController,
-          minLines: 9,
-          maxLines: 9,
+          minLines: 5,
+          maxLines: null,
           keyboardType: TextInputType.multiline,
           autocorrect: false,
           enableSuggestions: false,
@@ -2345,92 +2327,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     );
   }
 
-  Widget _previewGrid(int count, Widget Function(int) builder) {
-    return GridView.count(
-      crossAxisCount: 3,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisSpacing: 6,
-      mainAxisSpacing: 6,
-      childAspectRatio: 0.6,
-      children: List.generate(count, builder),
-    );
-  }
-
-  Widget _buildPreviewCard({
-    required Map<String, dynamic>? data,
-    required String fallbackName,
-    required bool selected,
-    required String badgeText,
-    required VoidCallback? onTap,
-  }) {
-    final name = (data?['name'] as String?) ?? fallbackName;
-    final types = (data?['types'] as List<dynamic>?)?.map((t) => t.toString()).toList() ?? [];
-    final item = (data?['item'] as String?) ?? '';
-    final ability = (data?['ability'] as String?) ?? '';
-    final moves = (data?['moves'] as List<dynamic>?)?.map((m) => m.toString()).toList() ?? [];
-    final typeText = types.map((t) => _typeShorthand[t] ?? t.toUpperCase()).join('/');
-
-    final card = Container(
-      decoration: BoxDecoration(
-        color: selected ? Colors.blue.withOpacity(0.3) : Colors.grey[850],
-        border: Border.all(color: selected ? Colors.blue : Colors.grey[700]!),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      padding: const EdgeInsets.all(6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            height: 16,
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: badgeText.isEmpty
-                  ? const SizedBox.shrink()
-                  : Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                      decoration: BoxDecoration(color: Colors.amber[700], borderRadius: BorderRadius.circular(3)),
-                      child: Text(badgeText, style: const TextStyle(fontSize: 9, color: Colors.black, fontWeight: FontWeight.bold)),
-                    ),
-            ),
-          ),
-          Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-          if (typeText.isNotEmpty) Text(typeText, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9, color: Colors.lightBlueAccent)),
-          if (ability.isNotEmpty) Text(ability, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9)),
-          if (item.isNotEmpty) Text('@$item', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9, color: Colors.amberAccent)),
-          const SizedBox(height: 3),
-          for (final m in moves)
-            Text(m, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9, color: Colors.grey)),
-        ],
-      ),
-    );
-
-    final semanticsLabel = [
-      if (badgeText.isNotEmpty) badgeText,
-      name,
-      if (types.isNotEmpty) 'Type: ${types.join(', ')}',
-      if (ability.isNotEmpty) 'Ability: $ability',
-      if (item.isNotEmpty) 'Holding $item',
-      if (moves.isNotEmpty) 'Moves: ${moves.join(', ')}',
-    ].join('. ');
-
-    if (onTap == null) {
-      return Semantics(label: semanticsLabel, excludeSemantics: true, child: card);
-    }
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: semanticsLabel,
-      excludeSemantics: true,
-      child: InkWell(onTap: onTap, child: card),
-    );
-  }
-
   Widget _buildTeamPreviewStage() {
-    final int minLeads = math.min(2, _p1TeamList.length);
-    final int picked = _selectedPreviewSlots.length;
-    final bool canConfirm = picked >= minLeads && picked <= _maxPickTeamSize;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2438,8 +2335,63 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           header: true,
           child: const Text('Team Preview (Choose Lineup)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         ),
+        const SizedBox(height: 4),
+        Text(
+          _maxPickTeamSize < _p1TeamList.length
+              ? 'Your team — choose $_maxPickTeamSize of ${_p1TeamList.length}'
+              : 'Your team',
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blueAccent),
+        ),
         const SizedBox(height: 8),
+        ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: _p1TeamList.length,
+          itemBuilder: (context, index) {
+            final slotIndex = index + 1;
+            final selectedPos = _selectedPreviewSlots.indexOf(slotIndex);
+            final selected = selectedPos != -1;
+            final String posText = !selected
+                ? ''
+                : (selectedPos < 2 ? 'Lead ${selectedPos + 1}' : 'Back ${selectedPos - 1}');
+            final cardData = index < _p1CardData.length ? _p1CardData[index] : null;
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _buildPreviewStrip(
+                data: cardData,
+                fallbackName: _p1TeamList[index] is Map
+                    ? (_p1TeamList[index]['details']?.toString().split(',')[0] ?? 'Pokémon $slotIndex')
+                    : 'Pokémon $slotIndex',
+                selected: selected,
+                badgeText: posText,
+                onTap: () {
+                  setState(() {
+                    if (selected) {
+                      _selectedPreviewSlots.removeAt(selectedPos);
+                    } else if (_selectedPreviewSlots.length < _maxPickTeamSize) {
+                      _selectedPreviewSlots.add(slotIndex);
+                    }
+                  });
+                },
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          height: 44,
+          child: ElevatedButton(
+            onPressed: _selectedPreviewSlots.length == _maxPickTeamSize ? _confirmTeamPreviewSelection : null,
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700]),
+            child: Text('Confirm Selection (${_selectedPreviewSlots.length}/$_maxPickTeamSize)'),
+          ),
+        ),
         if (_p2CardData.isNotEmpty) ...[
+          const SizedBox(height: 20),
+          const Divider(),
+          const SizedBox(height: 8),
           Semantics(
             header: true,
             child: const Text(
@@ -2448,70 +2400,24 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          _previewGrid(
-            _p2CardData.length,
-            (index) => _buildPreviewCard(
-              data: _p2CardData[index],
-              fallbackName: 'Pokémon ${index + 1}',
-              selected: false,
-              badgeText: '',
-              onTap: null,
-            ),
-          ),
-          const SizedBox(height: 12),
-          const Divider(),
-          const SizedBox(height: 8),
-        ],
-        Semantics(
-          header: true,
-          child: Text(
-            _maxPickTeamSize < _p1TeamList.length
-                ? 'Your team: pick your 2 leads, then optional back Pokémon (up to $_maxPickTeamSize total). Unpicked slots are random.'
-                : 'Your team: pick your 2 leads, then optional back Pokémon. Unpicked slots are random.',
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.blueAccent),
-          ),
-        ),
-        const SizedBox(height: 8),
-        _previewGrid(_p1TeamList.length, (index) {
-          final slotIndex = index + 1;
-          final selectedPos = _selectedPreviewSlots.indexOf(slotIndex);
-          final selected = selectedPos != -1;
-          final String posText = !selected
-              ? ''
-              : (selectedPos < 2 ? 'Lead ${selectedPos + 1}' : 'Back ${selectedPos - 1}');
-          final cardData = index < _p1CardData.length ? _p1CardData[index] : null;
-          return _buildPreviewCard(
-            data: cardData,
-            fallbackName: _p1TeamList[index] is Map
-                ? (_p1TeamList[index]['details']?.toString().split(',')[0] ?? 'Pokémon $slotIndex')
-                : 'Pokémon $slotIndex',
-            selected: selected,
-            badgeText: posText,
-            onTap: () {
-              setState(() {
-                if (selected) {
-                  _selectedPreviewSlots.removeAt(selectedPos);
-                } else if (_selectedPreviewSlots.length < _maxPickTeamSize) {
-                  _selectedPreviewSlots.add(slotIndex);
-                }
-              });
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _p2CardData.length,
+            itemBuilder: (context, index) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _buildPreviewStrip(
+                  data: _p2CardData[index],
+                  fallbackName: 'Pokémon ${index + 1}',
+                  selected: false,
+                  badgeText: '',
+                  onTap: null,
+                ),
+              );
             },
-          );
-        }),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          height: 44,
-          child: ElevatedButton(
-            onPressed: canConfirm ? _confirmTeamPreviewSelection : null,
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700]),
-            child: Text(
-              picked < _maxPickTeamSize
-                  ? 'Confirm ($picked picked, rest random)'
-                  : 'Confirm Selection ($picked/$_maxPickTeamSize)',
-            ),
           ),
-        ),
+        ],
       ],
     );
   }
