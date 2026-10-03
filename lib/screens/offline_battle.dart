@@ -1565,7 +1565,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           // data we already had, so the UI doesn't go blank while waiting.
           _isWaiting = true;
           _stage = BattleStage.inBattle;
-          _statusMessage = 'Waiting for the computer to send out a replacement...';
+          _statusMessage = 'Waiting for the opponent...';
           _announce('Waiting for opponent.');
         } else {
           // Prefer the authoritative turn number tagged by the engine itself
@@ -1635,7 +1635,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
             // announcement here — the actual triggering event (e.g. the
             // switch/faint line) is already announced via _processProtocolLine,
             // so this would just be a redundant, confusing status blurb.
-            _statusMessage = 'Action required mid-turn (self-switch effect)...';
+            if (data.containsKey('forceSwitch')) {
+              _statusMessage = 'Choose a replacement Pokémon.';
+            }
           }
         }
       });
@@ -2539,6 +2541,8 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         if (_stage == BattleStage.inBattle) ...[
           Card(
             margin: EdgeInsets.zero,
+            color: Colors.transparent,
+            elevation: 0,
             child: Padding(
               padding: const EdgeInsets.all(8.0),
               child: Column(
@@ -2567,7 +2571,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                     return Column(
                       children: [
                         if (slot1NeedsSwitch)
-                          _isLockedContinuationSlot(activeList, 0)
+                          _slotCard(_isLockedContinuationSlot(activeList, 0)
                               ? _buildLockedSlotPanel('Slot 1 (${_activeNames['p1a'] ?? 'Active 1'})', movesSlot1)
                               : _buildSlotActionControl(
                                   slotNumber: 1,
@@ -2590,10 +2594,10 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                                   onTargetChanged: (v) => setState(() => _s1Target = v ?? 1),
                                   onSwitchChanged: (v) => setState(() => _s1SwitchChoice = v ?? 1),
                                   onMegaToggled: (v) => setState(() => _s1Mega = v),
-                                ),
+                                )),
                         if (slot2Exists && (!isForceSwitch || slot2NeedsSwitch)) ...[
-                          const Divider(height: 16),
-                          _isLockedContinuationSlot(activeList, 1)
+                          const SizedBox(height: 8),
+                          _slotCard(_isLockedContinuationSlot(activeList, 1)
                               ? _buildLockedSlotPanel('Slot 2 (${_activeNames['p1b'] ?? 'Active 2'})', movesSlot2)
                               : _buildSlotActionControl(
                                   slotNumber: 2,
@@ -2616,7 +2620,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                                   onTargetChanged: (v) => setState(() => _s2Target = v ?? 1),
                                   onSwitchChanged: (v) => setState(() => _s2SwitchChoice = v ?? 1),
                                   onMegaToggled: (v) => setState(() => _s2Mega = v),
-                                ),
+                                )),
                         ],
                       ],
                     );
@@ -2664,6 +2668,20 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     if (moves.length != 1) return false;
     final m = moves[0];
     return m is Map && !m.containsKey('pp') && !m.containsKey('target');
+  }
+
+  Widget _slotCard(Widget child) {
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      child: Card(
+        margin: const EdgeInsets.only(top: 6),
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: SizedBox(width: double.infinity, child: child),
+        ),
+      ),
+    );
   }
 
   Widget _buildLockedSlotPanel(String slotTitle, List<dynamic> moves) {
@@ -2796,6 +2814,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
               padding: const EdgeInsets.only(top: 6),
               child: Semantics(
                 label: 'Selected target: ${_targetLabel(selectedTarget)}',
+                excludeSemantics: true,
                 child: Text(
                   'Target: ${_targetLabel(selectedTarget)}',
                   style: const TextStyle(fontSize: 11, color: Colors.amberAccent),
@@ -2833,8 +2852,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       final selected = moveNum == selectedMove;
       return Semantics(
         button: true,
-        label: disabled ? '$moveName, disabled' : (selected ? '$moveName, selected' : moveName),
-        child: ElevatedButton(
+                child: ElevatedButton(
           onPressed: disabled
               ? null
               : () {
@@ -2863,6 +2881,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           ),
           child: Text(
             disabled ? '$moveName ✕' : moveName,
+            semanticsLabel: disabled ? '$moveName, disabled' : (selected ? '$moveName, selected' : moveName),
             style: TextStyle(fontSize: 11, color: disabled ? Colors.grey : null),
             overflow: TextOverflow.ellipsis,
           ),
@@ -3017,8 +3036,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                   final selected = currentTarget == val;
                   return Semantics(
                     button: true,
-                    label: selected ? '${opt['label']}, currently selected' : opt['label'] as String,
-                    child: ElevatedButton(
+                                        child: ElevatedButton(
                       onPressed: () {
                         onTargetChanged(val);
                         Navigator.of(context).pop(); // auto-dismiss on selection
@@ -3026,7 +3044,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: selected ? Colors.green[700] : Colors.grey[800],
                       ),
-                      child: Text(opt['label'] as String, textAlign: TextAlign.center, style: const TextStyle(fontSize: 12)),
+                      child: Text(opt['label'] as String, textAlign: TextAlign.center, style: const TextStyle(fontSize: 12), semanticsLabel: selected ? '${opt['label']}, currently selected' : opt['label'] as String),
                     ),
                   );
                 }).toList(),
