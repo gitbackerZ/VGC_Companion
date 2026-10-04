@@ -1525,6 +1525,19 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         if (parts.length > 3) _activeHp[slot] = parts[3];
         _announce(_humanizeLogLine(line));
         break;
+      case '-heal':
+      case '-sethp':
+        final healSlot = parts[2].split(':').first.trim();
+        if (parts.length > 3) _activeHp[healSlot] = parts[3].split(' ')[0];
+        _announce(_humanizeLogLine(line));
+        break;
+      case 'detailschange':
+        final formSlot = parts[2].split(':').first.trim();
+        if (parts.length > 3) {
+          _activeNames[formSlot] = parts[3].split(',')[0].trim();
+        }
+        _announce(_humanizeLogLine(line));
+        break;
       case 'faint':
         final slotParts = parts[2].split(':');
         final slot = slotParts.first.trim();
@@ -2830,6 +2843,105 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     return out;
   }
 
+  Widget _switchTile(dynamic s, bool selected, VoidCallback onTap) {
+    final cs = Theme.of(context).colorScheme;
+    final bg = selected ? cs.inverseSurface : cs.surface;
+    final fg = selected ? cs.onInverseSurface : cs.onSurface;
+    final name = s['name'].toString();
+    final cond = s['condition'].toString();
+    double? frac;
+    String hpText = cond;
+    final hm = RegExp(r'^(\d+)/(\d+)').firstMatch(cond);
+    if (hm != null) {
+      frac = int.parse(hm.group(1)!) / int.parse(hm.group(2)!);
+      hpText = '${hm.group(1)}/${hm.group(2)} HP';
+    }
+    final parts = cond.split(' ');
+    final status = parts.length > 1 ? parts.last.toUpperCase() : '';
+    final label = [name, hpText, if (status.isNotEmpty) status, if (selected) 'selected'].join(', ');
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: label,
+        excludeSemantics: true,
+        child: Material(
+          color: bg,
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: const BorderSide(color: Colors.grey, width: 3),
+          ),
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: fg)),
+                      ),
+                      if (status.isNotEmpty) ...[
+                        Text(status, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: fg)),
+                        const SizedBox(width: 8),
+                      ],
+                      Text(hpText, style: TextStyle(fontSize: 12, color: fg)),
+                    ],
+                  ),
+                  if (frac != null) ...[
+                    const SizedBox(height: 6),
+                    LinearProgressIndicator(
+                      value: frac.clamp(0.0, 1.0),
+                      minHeight: 8,
+                      color: fg,
+                      backgroundColor: fg.withOpacity(0.25),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _grayButton(String text, VoidCallback onTap, {String? semLabel}) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Semantics(
+        button: true,
+        label: semLabel ?? text,
+        excludeSemantics: true,
+        child: Material(
+          color: cs.surface,
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: const BorderSide(color: Colors.grey, width: 3),
+          ),
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Center(
+                child: Text(text, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: cs.onSurface)),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildLockedSlotPanel(String slotTitle, List<dynamic> moves) {
     final moveName = moves.isNotEmpty && moves[0] is Map ? (moves[0]['move']?.toString() ?? 'its move') : 'its move';
     final bool reallyLocked = moves.length == 1 && moves[0] is Map && !(moves[0] as Map).containsKey('pp');
@@ -2909,26 +3021,13 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         const SizedBox(height: 6),
 
         if (isSwitch) ...[
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: switches.map((s) {
-              final slot = s['slot'] as int;
-              final selected = slot == selectedSwitch;
-              return ElevatedButton(
-                onPressed: () => onSwitchChanged(slot),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: selected ? Colors.blue[700] : Colors.grey[800],
-                ),
-                child: Text('${s['name']} (${s['condition']})', style: const TextStyle(fontSize: 11)),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 6),
-          TextButton(
-            onPressed: () => onToggleSwitch(false),
-            child: const Text('Use a Move Instead', style: TextStyle(fontSize: 11)),
-          ),
+          const Text('Choose a Pokémon to switch in',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          for (final s in switches)
+            _switchTile(s, (s['slot'] as int) == selectedSwitch, () => onSwitchChanged(s['slot'] as int)),
+          const SizedBox(height: 4),
+          _grayButton('Use a move instead', () => onToggleSwitch(false)),
         ] else if (!canSwitchOverride && moves.isEmpty) ...[
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 8),
@@ -3024,8 +3123,6 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       final type = (info['type'] ?? '').toString();
       final category = (info['category'] ?? '').toString();
       final pp = (m is Map && m['pp'] != null) ? '${m['pp']}' : '';
-      final key = '$slotNumber:$moveId';
-      final expanded = _expandedMoves.contains(key);
       final bg = selected ? cs.inverseSurface : cs.surface;
       final fg = selected ? cs.onInverseSurface : cs.onSurface;
 
@@ -3034,7 +3131,6 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       final power = (bpv is num && bpv > 0) ? '$bpv' : '-';
       final accText = accv is num ? '$accv%' : '-';
       final desc = (info['desc'] ?? '').toString();
-      final details = 'Power $power. Accuracy $accText. $desc';
 
       void selectMove() {
         onMoveChanged(moveNum);
@@ -3053,15 +3149,75 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         }
       }
 
-      void toggleExpand() {
-        setState(() {
-          if (expanded) {
-            _expandedMoves.remove(key);
-          } else {
-            _expandedMoves.add(key);
-          }
-        });
-        if (!expanded) _announce('$moveName. $details');
+      void showDetails() {
+        final maxpp = (m is Map && m['maxpp'] != null) ? '${m['maxpp']}' : '';
+        final ppText = pp.isEmpty ? '-' : (maxpp.isEmpty ? pp : '$pp / $maxpp');
+        showDialog(
+          context: context,
+          builder: (dctx) {
+            final dcs = Theme.of(dctx).colorScheme;
+            Widget infoRow(String k, String v) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Text.rich(
+                    TextSpan(children: [
+                      TextSpan(text: '$k: ', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      TextSpan(text: v),
+                    ]),
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                );
+            return AlertDialog(
+              title: Row(
+                children: [
+                  Expanded(child: Text(moveName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
+                  if (type.isNotEmpty) typeChip(type),
+                  if (category.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    Text(category == 'Physical' ? '💥' : (category == 'Special' ? '🌀' : '±'),
+                        style: const TextStyle(fontSize: 18)),
+                  ],
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    infoRow('Category', category.isEmpty ? '-' : category),
+                    infoRow('Power', power),
+                    infoRow('Accuracy', accText),
+                    infoRow('PP', ppText),
+                    if (desc.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(desc, style: const TextStyle(fontSize: 14)),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                OutlinedButton(
+                  style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.grey, width: 3)),
+                  onPressed: () => Navigator.of(dctx).pop(),
+                  child: const Text('Close'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: dcs.inverseSurface,
+                    foregroundColor: dcs.onInverseSurface,
+                    side: const BorderSide(color: Colors.grey, width: 3),
+                  ),
+                  onPressed: disabled
+                      ? null
+                      : () {
+                          Navigator.of(dctx).pop();
+                          selectMove();
+                        },
+                  child: const Text('Select move'),
+                ),
+              ],
+            );
+          },
+        );
       }
 
       final label = [
@@ -3125,26 +3281,18 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                     ),
                     Semantics(
                       button: true,
-                      label: expanded ? 'Hide details for $moveName' : 'Show details for $moveName',
+                      label: 'Details for $moveName',
                       excludeSemantics: true,
                       child: InkWell(
-                        onTap: toggleExpand,
+                        onTap: showDetails,
                         child: Padding(
                           padding: const EdgeInsets.all(6),
-                          child: Icon(expanded ? Icons.expand_less : Icons.expand_more, size: 20, color: fg),
+                          child: Icon(Icons.info_outline, size: 20, color: fg),
                         ),
                       ),
                     ),
                   ],
                 ),
-                if (expanded)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(6, 0, 6, 8),
-                    child: Text(
-                      'Power $power   Acc $accText\n$desc',
-                      style: TextStyle(fontSize: 11, color: fg),
-                    ),
-                  ),
               ],
             ),
           ),
@@ -3279,7 +3427,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.grey[900],
+      backgroundColor: Theme.of(context).colorScheme.surface,
       builder: (context) {
         return Padding(
           padding: const EdgeInsets.all(16),
@@ -3307,7 +3455,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                         Navigator.of(context).pop(); // auto-dismiss on selection
                       },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: selected ? Colors.green[700] : Colors.grey[800],
+                        backgroundColor: selected ? Theme.of(context).colorScheme.inverseSurface : Theme.of(context).colorScheme.surface,
+                        foregroundColor: selected ? Theme.of(context).colorScheme.onInverseSurface : Theme.of(context).colorScheme.onSurface,
+                        side: const BorderSide(color: Colors.grey, width: 3),
                       ),
                       child: Text(opt['label'] as String, textAlign: TextAlign.center, style: const TextStyle(fontSize: 12), semanticsLabel: selected ? '${opt['label']}, currently selected' : opt['label'] as String),
                     ),
@@ -3328,7 +3478,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   }) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.grey[900],
+      backgroundColor: Theme.of(context).colorScheme.surface,
       isScrollControlled: true,
       builder: (context) {
         return Padding(
@@ -3387,7 +3537,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
   }) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.grey[900],
+      backgroundColor: Theme.of(context).colorScheme.surface,
       isScrollControlled: true,
       builder: (context) {
         return Padding(
