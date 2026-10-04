@@ -2384,8 +2384,8 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     required VoidCallback? onTap,
   }) {
     final cs = Theme.of(context).colorScheme;
-    final bg = selected ? cs.surface : cs.inverseSurface;
-    final fg = selected ? cs.onSurface : cs.onInverseSurface;
+    final bg = selected ? cs.inverseSurface : cs.surface;
+    final fg = selected ? cs.onInverseSurface : cs.onSurface;
 
     final name = (data?['name'] as String?) ?? fallbackName;
     final types = (data?['types'] as List<dynamic>?)?.map((t) => t.toString()).toList() ?? [];
@@ -2411,7 +2411,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
       decoration: BoxDecoration(
         color: bg,
-        border: Border.all(color: selected ? cs.primary : cs.inverseSurface, width: selected ? 3 : 1),
+        border: Border.all(color: Colors.grey, width: 3),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Column(
@@ -2990,12 +2990,13 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     required ValueChanged<int?> onSwitchChanged,
   }) {
     final cs = Theme.of(context).colorScheme;
+    const gray = Colors.grey;
 
     Widget typeChip(String t) {
       final bg = _typeColors[t] ?? Colors.grey;
       final fgc = bg.computeLuminance() > 0.5 ? Colors.black : Colors.white;
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(3),
@@ -3006,11 +3007,9 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       );
     }
 
-    Widget categoryIcon(String c, Color color) {
-      final IconData icon = c == 'Physical'
-          ? Icons.flash_on
-          : (c == 'Special' ? Icons.blur_circular : Icons.shield_outlined);
-      return Icon(icon, size: 18, color: color);
+    Widget categoryMark(String c, Color color) {
+      final String e = c == 'Physical' ? '💥' : (c == 'Special' ? '🌀' : '±');
+      return Text(e, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color));
     }
 
     Widget buildMoveCell(int idx) {
@@ -3024,11 +3023,11 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       final info = moveId.isEmpty ? <String, dynamic>{} : _moveInfo(moveId);
       final type = (info['type'] ?? '').toString();
       final category = (info['category'] ?? '').toString();
-      final pp = (m is Map && m['pp'] != null) ? '${m['pp']}/${m['maxpp']}' : '';
+      final pp = (m is Map && m['pp'] != null) ? '${m['pp']}' : '';
       final key = '$slotNumber:$moveId';
       final expanded = _expandedMoves.contains(key);
-      final bg = selected ? cs.surface : cs.inverseSurface;
-      final fg = selected ? cs.onSurface : cs.onInverseSurface;
+      final bg = selected ? cs.inverseSurface : cs.surface;
+      final fg = selected ? cs.onInverseSurface : cs.onSurface;
 
       final bpv = info['bp'];
       final accv = info['acc'];
@@ -3069,25 +3068,26 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         moveName,
         if (type.isNotEmpty) type,
         if (category.isNotEmpty) category.toLowerCase(),
-        if (pp.isNotEmpty) '$pp PP',
+        if (pp.isNotEmpty) '$pp PP left',
         if (disabled) 'disabled' else if (selected) 'selected',
       ].join(', ');
 
       return Opacity(
         opacity: disabled ? 0.5 : 1.0,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 3),
+          padding: const EdgeInsets.all(2),
           child: Material(
             color: bg,
             clipBehavior: Clip.antiAlias,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),
-              side: BorderSide(color: selected ? cs.primary : cs.inverseSurface, width: selected ? 3 : 1),
+              side: const BorderSide(color: gray, width: 3),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
                       child: Semantics(
@@ -3097,23 +3097,26 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                         child: InkWell(
                           onTap: disabled ? null : selectMove,
                           child: Padding(
-                            padding: const EdgeInsets.fromLTRB(10, 10, 4, 10),
-                            child: Row(
+                            padding: const EdgeInsets.fromLTRB(6, 6, 2, 6),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Expanded(
-                                  child: Text(
-                                    disabled ? '$moveName ✕' : moveName,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: fg),
-                                  ),
+                                Text(
+                                  disabled ? '$moveName ✕' : moveName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: fg),
                                 ),
-                                if (type.isNotEmpty) ...[const SizedBox(width: 6), typeChip(type)],
-                                if (category.isNotEmpty) ...[const SizedBox(width: 6), categoryIcon(category, fg)],
-                                if (pp.isNotEmpty) ...[
-                                  const SizedBox(width: 6),
-                                  Text(pp, style: TextStyle(fontSize: 11, color: fg)),
-                                ],
+                                const SizedBox(height: 3),
+                                Wrap(
+                                  spacing: 4,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    if (type.isNotEmpty) typeChip(type),
+                                    if (category.isNotEmpty) categoryMark(category, fg),
+                                    if (pp.isNotEmpty) Text(pp, style: TextStyle(fontSize: 11, color: fg)),
+                                  ],
+                                ),
                               ],
                             ),
                           ),
@@ -3124,19 +3127,22 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                       button: true,
                       label: expanded ? 'Hide details for $moveName' : 'Show details for $moveName',
                       excludeSemantics: true,
-                      child: IconButton(
-                        icon: Icon(expanded ? Icons.expand_less : Icons.expand_more, color: fg),
-                        onPressed: toggleExpand,
+                      child: InkWell(
+                        onTap: toggleExpand,
+                        child: Padding(
+                          padding: const EdgeInsets.all(6),
+                          child: Icon(expanded ? Icons.expand_less : Icons.expand_more, size: 20, color: fg),
+                        ),
                       ),
                     ),
                   ],
                 ),
                 if (expanded)
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                    padding: const EdgeInsets.fromLTRB(6, 0, 6, 8),
                     child: Text(
-                      'Power $power    Accuracy $accText\n$desc',
-                      style: TextStyle(fontSize: 12, color: fg),
+                      'Power $power   Acc $accText\n$desc',
+                      style: TextStyle(fontSize: 11, color: fg),
                     ),
                   ),
               ],
@@ -3146,87 +3152,77 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
       );
     }
 
-    Widget megaCell() {
-      if (!canMega) return const SizedBox.shrink();
-      final bg = isMega ? cs.surface : cs.inverseSurface;
-      final fg = isMega ? cs.onSurface : cs.onInverseSurface;
-      return Semantics(
-        button: true,
-        checked: isMega,
-        excludeSemantics: true,
-        label: isMega ? 'Mega Evolve, enabled' : 'Mega Evolve, disabled. Double tap to toggle.',
-        child: Material(
-          color: bg,
-          clipBehavior: Clip.antiAlias,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: BorderSide(color: isMega ? cs.primary : cs.inverseSurface, width: isMega ? 3 : 1),
-          ),
-          child: InkWell(
-            onTap: () => onMegaToggled(!isMega),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(isMega ? Icons.check_box : Icons.check_box_outline_blank, size: 18, color: fg),
-                  const SizedBox(width: 6),
-                  Text('MEGA', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: fg)),
-                ],
+    Widget emojiButton(String emoji, String semLabel, bool on, bool toggle, VoidCallback onTap) {
+      final bg = on ? cs.inverseSurface : cs.surface;
+      final fg = on ? cs.onInverseSurface : cs.onSurface;
+      return Padding(
+        padding: const EdgeInsets.all(2),
+        child: Semantics(
+          button: true,
+          checked: toggle ? on : null,
+          excludeSemantics: true,
+          label: semLabel,
+          child: Material(
+            color: bg,
+            clipBehavior: Clip.antiAlias,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+              side: const BorderSide(color: gray, width: 3),
+            ),
+            child: InkWell(
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Center(child: Text(emoji, style: TextStyle(fontSize: 22, color: fg))),
               ),
             ),
           ),
         ),
+      );
+    }
+
+    Widget megaCell() {
+      if (!canMega) return const SizedBox.shrink();
+      return emojiButton(
+        'Ⓜ️',
+        isMega ? 'Mega Evolve, enabled' : 'Mega Evolve, disabled. Double tap to toggle.',
+        isMega,
+        true,
+        () => onMegaToggled(!isMega),
       );
     }
 
     Widget switchCell() {
       if (!canSwitch) return const SizedBox.shrink();
-      return Semantics(
-        button: true,
-        excludeSemantics: true,
-        label: 'Switch Out instead of using a move',
-        child: Material(
-          color: cs.inverseSurface,
-          clipBehavior: Clip.antiAlias,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: BorderSide(color: cs.inverseSurface, width: 1),
-          ),
-          child: InkWell(
-            onTap: () => _showSwitchOverlay(
-              slotNumber: slotNumber,
-              switches: switches,
-              onSwitchChanged: onSwitchChanged,
-              onToggleSwitch: onToggleSwitch,
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-              child: Center(
-                child: Text('SWITCH',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: cs.onInverseSurface)),
-              ),
-            ),
-          ),
+      return emojiButton(
+        '🔄',
+        'Switch Out instead of using a move',
+        false,
+        false,
+        () => _showSwitchOverlay(
+          slotNumber: slotNumber,
+          switches: switches,
+          onSwitchChanged: onSwitchChanged,
+          onToggleSwitch: onToggleSwitch,
         ),
+      );
+    }
+
+    Widget moveRow(int a, int b, Widget side) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: buildMoveCell(a)),
+          Expanded(child: buildMoveCell(b)),
+          SizedBox(width: 56, child: side),
+        ],
       );
     }
 
     return Column(
       children: [
-        for (int i = 0; i < moves.length; i++) buildMoveCell(i),
-        if (canMega || canSwitch)
-          Padding(
-            padding: const EdgeInsets.only(top: 3),
-            child: Row(
-              children: [
-                if (canMega) Expanded(child: megaCell()),
-                if (canMega && canSwitch) const SizedBox(width: 6),
-                if (canSwitch) Expanded(child: switchCell()),
-              ],
-            ),
-          ),
+        moveRow(0, 1, megaCell()),
+        if (moves.length > 2 || canSwitch) moveRow(2, 3, switchCell()),
       ],
     );
   }
@@ -3362,7 +3358,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                         onSwitchChanged(s['slot'] as int);
                         Navigator.of(context).pop(); // auto-dismiss on selection
                       },
-                      style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.inverseSurface, foregroundColor: Theme.of(context).colorScheme.onInverseSurface),
+                      style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.surface, foregroundColor: Theme.of(context).colorScheme.onSurface, side: const BorderSide(color: Colors.grey, width: 3)),
                       child: Text('${s['name']} (${s['condition']})', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12)),
                     ),
                   );
@@ -3419,7 +3415,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                         onSwitchChanged(s['slot'] as int);
                         Navigator.of(context).pop(); // auto-dismiss on selection
                       },
-                      style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.inverseSurface, foregroundColor: Theme.of(context).colorScheme.onInverseSurface),
+                      style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.surface, foregroundColor: Theme.of(context).colorScheme.onSurface, side: const BorderSide(color: Colors.grey, width: 3)),
                       child: Text('${s['name']} (${s['condition']})', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12)),
                     ),
                   );
