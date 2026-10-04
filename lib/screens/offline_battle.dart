@@ -403,6 +403,27 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
           }
         };
 
+        globalThis.getMemberInfo = function(species, moveIds, abilityId, itemId) {
+          try {
+            var b = globalThis.battle;
+            var d = (b && b.dex) ? b.dex : globalThis.Dex;
+            var sp = d.species.get(species);
+            var out = { types: sp.types || [], h: sp.heightm, w: sp.weightkg, bs: sp.baseStats || {}, moves: [], ability: '', item: '' };
+            var ids = moveIds || [];
+            for (var i = 0; i < ids.length; i++) {
+              var mv = d.moves.get(ids[i]);
+              out.moves.push(mv && mv.exists ? mv.name : ids[i]);
+            }
+            var ab = d.abilities.get(abilityId);
+            out.ability = ab && ab.exists ? ab.name : (abilityId || '');
+            var it = d.items.get(itemId);
+            out.item = it && it.exists ? it.name : (itemId || '');
+            return JSON.stringify(out);
+          } catch (err) {
+            return "{}";
+          }
+        };
+
         globalThis.getLogs = function() {
           const logs = JSON.stringify(globalThis.logBuffer || []);
           globalThis.logBuffer = [];
@@ -2942,6 +2963,190 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     );
   }
 
+  Map<String, dynamic> _memberInfo(String species, List<dynamic> moves, String ability, String item) {
+    if (_jsRuntime == null) return {};
+    final r = _jsRuntime!.evaluate(
+        'globalThis.getMemberInfo(${jsonEncode(species)}, ${jsonEncode(moves)}, ${jsonEncode(ability)}, ${jsonEncode(item)});');
+    if (r.isError) return {};
+    try {
+      final d = jsonDecode(r.stringResult);
+      if (d is Map) return Map<String, dynamic>.from(d);
+    } catch (_) {}
+    return {};
+  }
+
+  void _showMemberDialog(int slot, {VoidCallback? onChoose}) {
+    final list = _currentRequest?['side']?['pokemon'] as List<dynamic>? ?? [];
+    if (slot < 1 || slot > list.length) return;
+    final p = list[slot - 1];
+    if (p is! Map) return;
+    final species = (p['details']?.toString() ?? '').split(',')[0].trim();
+    final cond = p['condition']?.toString() ?? '';
+    final stats = p['stats'] is Map ? Map<String, dynamic>.from(p['stats']) : <String, dynamic>{};
+    final info = _memberInfo(
+      species,
+      (p['moves'] as List<dynamic>?) ?? [],
+      p['ability']?.toString() ?? '',
+      p['item']?.toString() ?? '',
+    );
+    final types = (info['types'] as List<dynamic>?)?.map((t) => t.toString()).toList() ?? [];
+    final bs = info['bs'] is Map ? Map<String, dynamic>.from(info['bs']) : <String, dynamic>{};
+    final moveNames = (info['moves'] as List<dynamic>?)?.map((m) => m.toString()).toList() ?? [];
+    final ability = (info['ability'] ?? p['ability'] ?? '').toString();
+    final item = (info['item'] ?? p['item'] ?? '').toString();
+    final hm = RegExp(r'^(\d+)/(\d+)').firstMatch(cond);
+    final condParts = cond.split(' ');
+    final status = condParts.length > 1 ? condParts.last.toUpperCase() : 'None';
+    final hpLine = hm != null
+        ? 'HP ${hm.group(1)}/${hm.group(2)}  (base ${bs['hp'] ?? '-'})'
+        : 'HP $cond';
+    String stat(String k, String label) => '$label ${stats[k] ?? '-'}  (base ${bs[k] ?? '-'})';
+    final height = info['h'] != null ? '${info['h']} m' : '-';
+    final weight = info['w'] != null ? '${info['w']} kg' : '-';
+
+    showDialog(
+      context: context,
+      builder: (dctx) {
+        final dcs = Theme.of(dctx).colorScheme;
+        Widget row(String k, String v) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Text.rich(
+                TextSpan(children: [
+                  TextSpan(text: '$k: ', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  TextSpan(text: v),
+                ]),
+                style: const TextStyle(fontSize: 14),
+              ),
+            );
+        return AlertDialog(
+          title: Semantics(
+            header: true,
+            label: [species, if (types.isNotEmpty) types.join(' and ')].join(', '),
+            excludeSemantics: true,
+            child: Text(
+              types.isEmpty ? species : '$species  (${types.join('/')})',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                row('Ability', ability.isEmpty ? '-' : ability),
+                row('Held item', item.isEmpty ? 'None' : item),
+                row('Status', status),
+                row('Height', height),
+                row('Weight', weight),
+                const SizedBox(height: 6),
+                const Text('Stats', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                Text(hpLine),
+                Text(stat('atk', 'Attack')),
+                Text(stat('def', 'Defense')),
+                Text(stat('spa', 'Sp. Atk')),
+                Text(stat('spd', 'Sp. Def')),
+                Text(stat('spe', 'Speed')),
+                const SizedBox(height: 6),
+                const Text('Moves', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                for (final mv in moveNames) Text(mv),
+              ],
+            ),
+          ),
+          actions: [
+            OutlinedButton(
+              style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.grey, width: 3)),
+              onPressed: () => Navigator.of(dctx).pop(),
+              child: const Text('Close'),
+            ),
+            if (onChoose != null)
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: dcs.inverseSurface,
+                  foregroundColor: dcs.onInverseSurface,
+                  side: const BorderSide(color: Colors.grey, width: 3),
+                ),
+                onPressed: () {
+                  Navigator.of(dctx).pop();
+                  onChoose();
+                },
+                child: const Text('Choose this Pokémon'),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showSwitchSheet({
+    required String title,
+    String? subtitle,
+    required int slotNumber,
+    required List<dynamic> switches,
+    required ValueChanged<int?> onSwitchChanged,
+    ValueChanged<bool>? onToggleSwitch,
+    required String closeLabel,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      isScrollControlled: true,
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Semantics(
+                    header: true,
+                    child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 4),
+                    Text(subtitle, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                  ],
+                  const SizedBox(height: 8),
+                  for (final s in switches)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _switchTile(s, false, () {
+                            onToggleSwitch?.call(true);
+                            onSwitchChanged(s['slot'] as int);
+                            Navigator.of(sheetCtx).pop();
+                          }),
+                        ),
+                        Semantics(
+                          button: true,
+                          label: 'Details for ${s['name']}',
+                          excludeSemantics: true,
+                          child: IconButton(
+                            icon: const Icon(Icons.info_outline),
+                            onPressed: () => _showMemberDialog(
+                              s['slot'] as int,
+                              onChoose: () {
+                                onToggleSwitch?.call(true);
+                                onSwitchChanged(s['slot'] as int);
+                                Navigator.of(sheetCtx).pop();
+                              },
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  const SizedBox(height: 8),
+                  _grayButton(closeLabel, () => Navigator.of(sheetCtx).pop()),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildLockedSlotPanel(String slotTitle, List<dynamic> moves) {
     final moveName = moves.isNotEmpty && moves[0] is Map ? (moves[0]['move']?.toString() ?? 'its move') : 'its move';
     final bool reallyLocked = moves.length == 1 && moves[0] is Map && !(moves[0] as Map).containsKey('pp');
@@ -3021,13 +3226,29 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
         const SizedBox(height: 6),
 
         if (isSwitch) ...[
-          const Text('Choose a Pokémon to switch in',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          for (final s in switches)
-            _switchTile(s, (s['slot'] as int) == selectedSwitch, () => onSwitchChanged(s['slot'] as int)),
-          const SizedBox(height: 4),
-          _grayButton('Use a move instead', () => onToggleSwitch(false)),
+          Builder(builder: (_) {
+            dynamic chosen;
+            for (final s in switches) {
+              if ((s['slot'] as int) == selectedSwitch) chosen = s;
+            }
+            chosen ??= switches.isNotEmpty ? switches.first : null;
+            return Column(
+              children: [
+                if (chosen != null)
+                  _switchTile(chosen, true, () => _showMemberDialog(chosen['slot'] as int)),
+                _grayButton(
+                  'Change Pokémon',
+                  () => _showSwitchOverlay(
+                    slotNumber: slotNumber,
+                    switches: switches,
+                    onSwitchChanged: onSwitchChanged,
+                    onToggleSwitch: onToggleSwitch,
+                  ),
+                ),
+                _grayButton('Use a move instead', () => onToggleSwitch(false)),
+              ],
+            );
+          }),
         ] else if (!canSwitchOverride && moves.isEmpty) ...[
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 8),
@@ -3167,7 +3388,11 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                   ),
                 );
             return AlertDialog(
-              title: Row(
+              title: Semantics(
+                header: true,
+                label: [moveName, if (type.isNotEmpty) type, if (category.isNotEmpty) category.toLowerCase()].join(', '),
+                excludeSemantics: true,
+                child: Row(
                 children: [
                   Expanded(child: Text(moveName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
                   if (type.isNotEmpty) typeChip(type),
@@ -3177,7 +3402,7 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
                         style: const TextStyle(fontSize: 18)),
                   ],
                 ],
-              ),
+              )),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -3476,114 +3701,29 @@ class _OfflineBattleScreenState extends State<OfflineBattleScreen> {
     required List<dynamic> switches,
     required ValueChanged<int?> onSwitchChanged,
   }) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      isScrollControlled: true,
-      builder: (context) {
-        return Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Forced Switch — Slot $slotNumber', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              const SizedBox(height: 4),
-              const Text('Your Pokémon fainted or was forced out. Choose a replacement.',
-                  style: TextStyle(fontSize: 11, color: Colors.grey)),
-              const SizedBox(height: 12),
-              GridView.count(
-                crossAxisCount: 2,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-                childAspectRatio: 2.4,
-                children: switches.map((s) {
-                  return Semantics(
-                    button: true,
-                    label: '${s['name']}, ${s['condition']}',
-                    child: ElevatedButton(
-                      onPressed: () {
-                        onSwitchChanged(s['slot'] as int);
-                        Navigator.of(context).pop(); // auto-dismiss on selection
-                      },
-                      style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.surface, foregroundColor: Theme.of(context).colorScheme.onSurface, side: const BorderSide(color: Colors.grey, width: 3)),
-                      child: Text('${s['name']} (${s['condition']})', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12)),
-                    ),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.arrow_back),
-                  label: const Text('Return (no selection)'),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+    _showSwitchSheet(
+      title: 'Forced Switch — Slot $slotNumber',
+      subtitle: 'Your Pokémon fainted or was forced out. Choose a replacement.',
+      slotNumber: slotNumber,
+      switches: switches,
+      onSwitchChanged: onSwitchChanged,
+      closeLabel: 'Return (no selection)',
     );
   }
+
   void _showSwitchOverlay({
     required int slotNumber,
     required List<dynamic> switches,
     required ValueChanged<int?> onSwitchChanged,
     required ValueChanged<bool> onToggleSwitch,
   }) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      isScrollControlled: true,
-      builder: (context) {
-        return Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Switch Out — Slot $slotNumber', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              const SizedBox(height: 12),
-              GridView.count(
-                crossAxisCount: 2,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-                childAspectRatio: 2.4,
-                children: switches.map((s) {
-                  return Semantics(
-                    button: true,
-                    label: '${s['name']}, ${s['condition']}',
-                    child: ElevatedButton(
-                      onPressed: () {
-                        onToggleSwitch(true);
-                        onSwitchChanged(s['slot'] as int);
-                        Navigator.of(context).pop(); // auto-dismiss on selection
-                      },
-                      style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.surface, foregroundColor: Theme.of(context).colorScheme.onSurface, side: const BorderSide(color: Colors.grey, width: 3)),
-                      child: Text('${s['name']} (${s['condition']})', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12)),
-                    ),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.arrow_back),
-                  label: const Text('Cancel'),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+    _showSwitchSheet(
+      title: 'Switch Out — Slot $slotNumber',
+      slotNumber: slotNumber,
+      switches: switches,
+      onSwitchChanged: onSwitchChanged,
+      onToggleSwitch: onToggleSwitch,
+      closeLabel: 'Cancel',
     );
   }
 
